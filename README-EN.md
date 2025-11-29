@@ -42,10 +42,23 @@ ImageMgr is a feature-rich image management plugin for Obsidian that helps you e
 
 ## 📦 Installation
 
-1. Download `main.js`, `manifest.json`, `styles.css`
-2. Create `.obsidian/plugins/imagemgr/` directory in your vault
-3. Copy the downloaded files to that directory
-4. Restart Obsidian and enable ImageMgr in **Settings → Community Plugins**
+### Option 1: BRAT (Recommended)
+
+1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin
+2. Open BRAT settings, click **Add Beta plugin**
+3. Enter repository: `Coeicy/Obsidian-ImageMgr`
+4. Click **Add Plugin** and wait for installation
+5. Enable ImageMgr in **Settings → Community Plugins**
+
+> BRAT supports auto-updates, no manual downloads needed
+
+### Option 2: Manual Installation
+
+1. Go to [Releases](https://github.com/Coeicy/Obsidian-ImageMgr/releases) and download the latest version
+2. Download `main.js`, `manifest.json`, `styles.css`
+3. Create `.obsidian/plugins/imagemgr/` directory in your vault
+4. Copy the downloaded files to that directory
+5. Restart Obsidian and enable ImageMgr in **Settings → Community Plugins**
 
 ## 🚀 Quick Start
 
