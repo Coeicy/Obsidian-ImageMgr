@@ -1,0 +1,1972 @@
+/*
+
+This CSS file will be included with your plugin, and
+available in the app when your plugin is enabled.
+
+If your plugin does not need CSS, delete this file.
+
+*/
+
+/* 图片管理视图样式 */
+.image-manager-header {
+	padding: 16px 20px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: linear-gradient(to right, var(--background-secondary), var(--background-primary));
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.image-manager-header h2 {
+	margin: 0;
+	font-size: 1.3em;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.image-manager-header::before {
+	content: '🖼️';
+	font-size: 1.5em;
+}
+
+.image-manager-toolbar {
+	padding: 12px;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(95px, 1fr));
+	gap: 10px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: linear-gradient(to bottom, var(--background-secondary), var(--background-primary));
+	align-items: stretch;
+}
+
+.toolbar-btn {
+	width: 100%;
+	min-width: 0;
+	padding: 10px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+	background: linear-gradient(to bottom, var(--interactive-normal), var(--background-secondary));
+	color: var(--text-normal);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	font-size: 0.9em;
+	font-weight: 500;
+	transition: all 0.2s ease;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+	white-space: nowrap;
+	box-sizing: border-box;
+}
+
+.toolbar-btn:hover {
+	background: linear-gradient(to bottom, var(--interactive-hover), var(--background-modifier-hover));
+	border-color: var(--interactive-accent);
+	transform: translateY(-1px);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.toolbar-btn:active {
+	transform: translateY(0);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.toolbar-btn .icon {
+	font-size: 1.2em;
+	line-height: 1;
+}
+
+.toolbar-btn .btn-text {
+	font-size: 0.9em;
+}
+
+.toolbar-btn .indicator {
+	color: #52C41A;
+	font-size: 0.8em;
+	margin-right: 6px;
+	opacity: 0.9;
+}
+
+/* 超小屏幕：保持文字显示，让按钮更紧凑 */
+@media (max-width: 480px) {
+	.image-manager-toolbar {
+		grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+	}
+	
+	.toolbar-btn {
+		padding: 10px 12px;
+	}
+}
+
+.image-manager-list {
+	padding: 10px;
+	overflow-y: auto;
+	height: calc(100% - 120px);
+}
+
+.image-manager-stats {
+	padding: 12px 16px;
+	font-size: 0.95em;
+	color: var(--text-muted);
+	margin-bottom: 12px;
+	background: var(--background-secondary);
+	border-radius: 6px;
+	border-left: 3px solid var(--interactive-accent);
+	font-weight: 500;
+}
+
+/* 图片画廊布局 */
+.image-gallery {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: flex-start; /* 改为 flex-start，让卡片高度自适应内容，不统一高度 */
+}
+
+.image-gallery-item {
+	display: flex;
+	flex-direction: column;
+	border-radius: 6px;
+	cursor: pointer;
+	background: transparent;
+	transition: all 0.2s ease;
+	position: relative;
+	overflow: visible;
+	height: auto; /* 确保高度自适应 */
+	min-height: 0; /* 移除最小高度限制 */
+}
+
+.image-gallery-item .image-info {
+	cursor: default;
+}
+
+
+.image-gallery-item.selected .image-preview {
+	box-shadow: 0 0 0 3px var(--interactive-accent) !important;
+	outline: 2px solid var(--interactive-accent) !important;
+	outline-offset: 2px;
+}
+
+/* 选中状态下悬停也保持主题强调色 */
+.image-gallery-item.selected:hover .image-preview {
+	box-shadow: 0 0 0 3px var(--interactive-accent) !important;
+	outline: 2px solid var(--interactive-accent) !important;
+	outline-offset: 2px;
+}
+
+.image-preview {
+	background-color: var(--background-secondary);
+	border-radius: 6px;
+	overflow: hidden;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.image-info {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+.image-name {
+	font-weight: 600;
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 0.95em;
+	margin-bottom: 4px;
+}
+
+.image-size,
+.image-dimensions {
+	font-size: 0.85em;
+	color: var(--text-muted);
+}
+
+/* 重命名模态框样式 */
+.rename-modal-hint {
+	padding: 8px;
+	margin-bottom: 12px;
+	font-size: 0.9em;
+	color: var(--text-muted);
+	background-color: var(--background-secondary);
+	border-radius: 4px;
+}
+
+/* 搜索模态框样式 */
+.search-modal-hint {
+	padding: 8px;
+	margin-bottom: 12px;
+	font-size: 0.9em;
+	color: var(--text-muted);
+	background-color: var(--background-secondary);
+	border-radius: 4px;
+}
+
+/* 图片信息模态框样式 */
+.image-info-item {
+	margin-bottom: 20px;
+	padding: 12px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.image-info-item h3 {
+	margin-top: 0;
+	margin-bottom: 8px;
+	color: var(--text-normal);
+}
+
+.image-info-item ul {
+	margin: 0;
+	padding-left: 20px;
+}
+
+.image-info-item li {
+	margin: 4px 0;
+	color: var(--text-muted);
+}
+
+/* 统计信息模态框样式 */
+.stats-section {
+	margin-bottom: 24px;
+	padding: 16px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	overflow: hidden;
+	word-break: break-word;
+}
+
+.stats-section h3 {
+	margin-top: 0;
+	margin-bottom: 12px;
+	color: var(--text-normal);
+	font-size: 1.1em;
+	font-weight: 600;
+	padding-bottom: 8px;
+	border-bottom: 2px solid var(--interactive-accent);
+}
+
+.stats-list {
+	margin: 0;
+	padding-left: 0;
+	list-style: none;
+}
+
+.stats-list li {
+	padding: 8px 12px;
+	margin: 4px 0;
+	border-radius: 4px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-weight: 500;
+	border-left: 3px solid var(--interactive-accent);
+	word-break: break-word;
+	overflow-wrap: break-word;
+	white-space: normal;
+}
+
+.stats-buttons {
+	margin-top: 20px;
+	display: flex;
+	justify-content: flex-end;
+}
+
+.stats-buttons button {
+	padding: 8px 20px;
+	border-radius: 6px;
+	font-weight: 500;
+}
+
+/* 图片详情模态框样式 */
+.image-detail-modal {
+	max-width: 95vw !important;
+	width: 95vw !important;
+	min-width: 320px !important; /* 最小宽度适应小屏幕 */
+}
+
+@media (min-width: 1400px) {
+	.image-detail-modal {
+		max-width: 90vw !important;
+		width: 90vw !important;
+		min-width: 1200px !important;
+	}
+}
+
+/* 回收站模态框样式 */
+
+.image-detail-modal .modal-content {
+	max-height: 90vh !important;
+	height: 90vh !important; /* 高度按照视口高度来 */
+	max-width: 100% !important;
+	overflow-y: hidden; /* 隐藏内容区域滚动，由子元素处理 */
+	width: 100% !important;
+	display: flex;
+	flex-direction: column;
+}
+
+.image-detail-container {
+	display: flex;
+	gap: 12px; /* 缩短间距（从20px减少到12px） */
+	align-items: stretch; /* 改为stretch，确保两个区域高度对齐 */
+	height: 100%; /* 高度按照弹窗高度来 */
+	min-height: 600px;
+	padding: 0;
+	width: 100%;
+	flex-wrap: nowrap; /* 防止自动换行 */
+}
+
+.image-detail-preview {
+	flex: 1 1 66.67%; /* 预览区域占2/3宽度 */
+	min-width: 0; /* 允许缩小到0 */
+	max-width: 66.67%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-start;
+	overflow: visible; /* 移除滚动条，由外层容器处理 */
+	position: relative;
+	gap: 8px; /* 缩短间距（从12px减少到8px） */
+	padding: 0 8px 8px 8px; /* 缩短内边距（从16px减少到8px） */
+	background: transparent;
+	border-radius: 0;
+	height: 100%; /* 高度按照弹窗高度来 */
+	align-self: stretch; /* 确保与信息区域高度对齐 */
+}
+
+/* 图片区域 - 第一个板块 */
+.image-preview-container {
+	width: 100%;
+	max-width: 100%;
+	padding: 16px;
+	background: var(--background-primary);
+	border-radius: 8px;
+	border: 2px solid var(--background-modifier-border);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	min-height: 200px;
+	flex: 1 1 auto; /* 自动填充剩余空间 */
+	max-height: none; /* 移除固定最大高度限制，由父容器控制 */
+	overflow: auto; /* 允许滚动，特别是对于长条形图片 */
+	box-sizing: border-box;
+	scroll-behavior: smooth; /* 平滑滚动 */
+}
+
+/* 优化长条形图片的滚动条样式 */
+.image-preview-container::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.image-preview-container::-webkit-scrollbar-track {
+	background: var(--background-secondary);
+	border-radius: 4px;
+}
+
+.image-preview-container::-webkit-scrollbar-thumb {
+	background: var(--background-modifier-border);
+	border-radius: 4px;
+}
+
+.image-preview-container::-webkit-scrollbar-thumb:hover {
+	background: var(--interactive-accent);
+}
+
+/* 操作按钮区域 - 第二个板块 */
+.image-controls-container {
+	width: 100%;
+	max-width: 100%;
+	padding: 12px; /* 缩短内边距（从16px减少到12px） */
+	background: transparent; /* 移除背景色 */
+	border-radius: 0; /* 移除圆角 */
+	border: none; /* 移除边框 */
+	box-shadow: none; /* 移除阴影 */
+	box-sizing: border-box;
+	flex-shrink: 0; /* 按钮区域不缩小 */
+}
+
+/* 更改历史区域 - 第三个板块 */
+.image-history-container {
+	width: 100%;
+	max-width: 100%;
+	padding: 0; /* 移除内边距 */
+	background: transparent; /* 移除背景色，使用父容器的背景 */
+	border-radius: 0; /* 移除圆角 */
+	border: none; /* 移除边框 */
+	box-shadow: none; /* 移除阴影 */
+	box-sizing: border-box;
+	flex-shrink: 0; /* 历史区域不缩小 */
+	/* 模块间距由 basicInfoContent 的 gap 统一管理 */
+}
+
+.detail-image {
+	max-width: 100%;
+	max-height: calc(100vh - 400px); /* 自适应，留出按钮和历史记录的空间 */
+	width: auto;
+	height: auto;
+	border-radius: 8px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+	user-select: none; /* 防止拖拽时选中图片 */
+	-webkit-user-drag: none; /* 防止浏览器默认拖拽行为 */
+	object-fit: contain;
+	cursor: zoom-in;
+	flex-shrink: 0;
+}
+
+.detail-image:hover {
+	cursor: grab;
+}
+
+.detail-image:active {
+	cursor: grabbing;
+}
+
+.image-controls {
+	margin-bottom: 0;
+	padding: 0;
+	background: transparent;
+	border: none;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: 100%;
+}
+
+.control-row {
+	display: flex;
+	gap: 8px;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.control-btn {
+	padding: 10px 16px;
+	border-radius: 6px;
+	border: none; /* 移除边框 */
+	background: var(--interactive-normal);
+	color: var(--text-normal);
+	cursor: pointer;
+	font-size: 18px;
+	font-weight: bold;
+	transition: all 0.15s ease;
+	min-width: 44px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 1;
+}
+
+.control-btn:hover {
+	background: var(--interactive-hover);
+	/* 移除悬停时的边框颜色变化 */
+}
+
+.control-btn:active {
+	background: var(--interactive-active);
+}
+
+.reset-btn {
+	color: var(--text-error);
+	font-size: 22px;
+	font-weight: 900;
+}
+
+.reset-btn:hover {
+	background: var(--background-modifier-error);
+	/* 移除悬停时的边框颜色变化 */
+}
+
+.scroll-mode-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+}
+
+.scroll-mode-icon {
+	font-size: 16px;
+	line-height: 1;
+}
+
+.scroll-mode-label {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.scroll-mode-hint {
+	font-size: 8px;
+	font-weight: 400;
+	color: var(--text-muted);
+	text-transform: none;
+	letter-spacing: 0;
+	margin-top: 2px;
+	opacity: 1;
+	transition: opacity 0.2s ease;
+}
+
+.scroll-mode-hint.hidden {
+	opacity: 0;
+	height: 0;
+	margin: 0;
+	overflow: hidden;
+}
+
+.scroll-mode-btn.active,
+.fit-window-btn.active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.scroll-mode-btn.active:hover,
+.fit-window-btn.active:hover {
+	background: var(--interactive-accent-hover);
+}
+
+.delete-btn {
+	color: var(--text-error);
+}
+
+.delete-btn:hover {
+	background: var(--background-modifier-error);
+	border-color: var(--text-error);
+}
+
+.image-detail-info {
+	flex: 1 1 33.33%; /* 信息区域占1/3宽度 */
+	min-width: 280px; /* 减少最小宽度，适应小屏幕 */
+	max-width: 33.33%;
+	display: flex;
+	flex-direction: column;
+	gap: 8px; /* 缩短间距（从12px减少到8px） */
+	height: 100%; /* 高度按照弹窗高度来 */
+	overflow-y: auto; /* 统一处理滚动 */
+	align-self: stretch; /* 确保与预览区域高度对齐 */
+	padding: 0 8px 8px 8px; /* 缩短内边距（从16px减少到8px） */
+}
+
+/* 标签页样式 */
+.info-tab-container {
+	display: flex;
+	gap: 8px;
+	border-bottom: 2px solid var(--background-modifier-border);
+	margin-bottom: 16px;
+	flex-shrink: 0; /* 标签页不缩小 */
+}
+
+.info-tab {
+	padding: 10px 16px;
+	border: none;
+	background: transparent;
+	cursor: pointer;
+	font-size: 0.95em;
+	color: var(--text-muted);
+	border-bottom: 2px solid transparent;
+	margin-bottom: -2px;
+	transition: all 0.2s ease;
+}
+
+.info-tab:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+	border-radius: 4px 4px 0 0;
+}
+
+.info-tab.active {
+	color: var(--text-accent);
+	border-bottom-color: var(--text-accent);
+	font-weight: 600;
+}
+
+.info-tab-content {
+	flex: 1;
+	overflow-y: auto;
+	min-height: 0; /* 允许缩小 */
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.tab-content {
+	display: none;
+	flex: 1;
+	overflow-y: auto;
+	min-height: 0;
+}
+
+.tab-content.active {
+	display: block;
+}
+
+.info-group {
+	padding: 12px; /* 缩短内边距（从20px减少到12px） */
+	border-radius: 12px;
+	background: var(--background-primary);
+	border: 2px solid var(--background-modifier-border);
+	/* 移除阴影 */
+	transition: border-color 0.2s ease;
+	width: 100%;
+	max-width: 100%;
+	box-sizing: border-box;
+}
+
+.info-group:hover {
+	/* 移除悬停时的阴影 */
+	border-color: var(--background-modifier-border-hover);
+}
+
+.info-group h3 {
+	margin-top: 0;
+	margin-bottom: 10px; /* 缩短下边距（从16px减少到10px） */
+	color: var(--text-normal);
+	font-size: 1.2em; /* 统一字体大小，与文件信息标题一致 */
+	font-weight: 700;
+	padding-bottom: 0; /* 去除下内边距 */
+	/* 移除紫色下划线 */
+	/* border-bottom: 2px solid var(--interactive-accent); */
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.info-list {
+	margin: 0;
+	padding-left: 0;
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 6px; /* 缩短间距（从8px减少到6px） */
+}
+
+.info-list li {
+	padding: 8px 12px; /* 缩短内边距（从12px 16px减少到8px 12px） */
+	margin: 0;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	font-weight: 500;
+	border: 1px solid var(--background-modifier-border);
+	transition: all 0.2s ease;
+	position: relative;
+	overflow: visible;
+	line-height: 1.5;
+	display: flex;
+	align-items: flex-start; /* 改为flex-start，支持多行输入框 */
+	gap: 8px;
+	min-height: auto;
+	width: 100%;
+	box-sizing: border-box;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.info-list li:hover {
+	border-color: var(--background-modifier-border-hover);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.editable-item {
+	display: flex;
+	align-items: flex-start; /* flex-start，支持多行输入框 */
+	gap: 8px;
+	flex-wrap: wrap; /* 允许换行，按钮换行时显示在最后 */
+	min-width: 0; /* 允许缩小 */
+	width: 100%;
+	box-sizing: border-box;
+}
+
+/* 文件名输入框和按钮容器 */
+.fileNameInputButtonContainer {
+	display: flex;
+	align-items: center;
+	flex: 1 1 auto; /* 自适应宽度 */
+	min-width: 0;
+	gap: 4px;
+	flex-wrap: nowrap !important; /* 不允许换行，按钮始终在右侧 */
+	box-sizing: border-box;
+}
+
+/* 确保文件名输入框在容器内正确显示 */
+.fileNameInputButtonContainer .editable-input-textarea {
+	flex: 1 1 auto !important;
+	min-width: 100px !important; /* 最小宽度 */
+	max-width: 100% !important;
+	box-sizing: border-box !important;
+}
+
+/* 文件名左侧容器样式（保留兼容性） */
+.fileNameLeft {
+	display: flex;
+	align-items: flex-start;
+	flex: 1 1 auto;
+	min-width: 0;
+	gap: 8px;
+	flex-wrap: nowrap;
+}
+
+/* 文件名按钮容器（根据输入框高度动态调整排列方式） */
+.fileNameButtons {
+	display: flex;
+	flex-direction: row; /* 默认水平排列 */
+	gap: 6px;
+	flex-shrink: 0;
+	align-items: center;
+	align-self: center; /* 垂直居中对齐 */
+	margin-top: 0;
+}
+
+/* 窄屏幕下文件名容器的优化 */
+@media (max-width: 600px) {
+	.editable-item {
+		flex-direction: column; /* 超窄屏幕下垂直排列 */
+		align-items: stretch; /* 拉伸到全宽 */
+	}
+	
+	.fileNameInputButtonContainer {
+		width: 100% !important;
+		flex: 1 1 100% !important;
+	}
+	
+	.fileNameLeft {
+		width: 100% !important;
+	}
+	
+	.fileNameButtons {
+		width: 100% !important;
+		flex-basis: 100% !important;
+		justify-content: flex-start !important; /* 小屏幕下按钮靠左 */
+	}
+	
+	.path-action-btn {
+		width: auto !important; /* 恢复默认宽度 */
+		justify-content: center !important;
+	}
+	
+	/* 智能重命名按钮保持固定宽度，不随屏幕变化 */
+	.path-rename-btn {
+		width: 30px !important;
+		min-width: 30px !important;
+		max-width: 30px !important;
+	}
+}
+
+.path-input-container {
+	display: flex;
+	align-items: flex-start; /* 改为flex-start，按钮换行后对齐到顶部 */
+	gap: 8px;
+	flex-wrap: wrap; /* 允许换行适应屏幕宽度 */
+	min-width: 0; /* 允许缩小 */
+	width: 100%;
+	box-sizing: border-box;
+}
+
+/* 位置标签和输入框容器样式（不换行） */
+/* 统一标签与输入框间距 */
+.path-label-input-container {
+	display: flex !important;
+	align-items: center !important; /* 垂直居中对齐 */
+	gap: 0 !important; /* 标签与输入框之间无间距 */
+	flex: 1 1 auto !important;
+	min-width: 0 !important;
+	flex-wrap: nowrap !important; /* 不换行，保持在同一行 */
+}
+
+/* 路径标签样式 */
+.path-label-input-container .info-label {
+	padding-top: 0; /* 移除上边距，使用居中对齐 */
+}
+
+/* 窄屏幕下路径容器的优化 */
+@media (max-width: 600px) {
+	.path-input-container {
+		flex-direction: column; /* 超窄屏幕下垂直排列 */
+		align-items: stretch; /* 拉伸到全宽 */
+	}
+	
+	/* 位置标签和输入框容器保持不换行 */
+	.path-label-input-container {
+		flex-wrap: nowrap !important;
+	}
+	
+	.path-input-wrapper {
+		width: 100% !important;
+		min-width: 0 !important;
+		max-width: 100% !important;
+	}
+	
+	.path-action-btn {
+		width: 100%; /* 保存按钮全宽 */
+		justify-content: center !important;
+	}
+}
+
+/* 路径按钮样式 */
+.path-action-btn,
+.path-rename-btn {
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	vertical-align: middle !important;
+	line-height: 1 !important;
+	margin: 0 !important;
+	padding: 4px 8px !important; /* 减少内边距 */
+	min-height: 30px !important; /* 最小高度（缩小） */
+	min-width: 30px !important; /* 最小宽度（缩小） */
+	flex-shrink: 0 !important; /* 按钮不缩小 */
+	flex-grow: 0 !important; /* 按钮不增长 */
+	font-size: 1.1em !important; /* 图标大小（缩小） */
+}
+
+/* 智能重命名按钮特定样式（固定宽度） */
+.path-rename-btn {
+	padding: 4px 8px !important; /* 减少内边距 */
+	min-height: 30px !important; /* 最小高度（缩小） */
+	width: 30px !important; /* 固定宽度，不随屏幕变化 */
+	min-width: 30px !important; /* 最小宽度（缩小） */
+	max-width: 30px !important; /* 最大宽度限制 */
+	font-size: 1em !important; /* 图标大小（进一步缩小） */
+	flex-shrink: 0 !important; /* 按钮不缩小 */
+	flex-grow: 0 !important; /* 按钮不增长 */
+}
+
+.path-input-wrapper {
+	position: relative;
+	flex: 1 1 auto; /* 允许缩小和增长 */
+	min-width: 120px; /* 最小宽度，确保可用 */
+	max-width: 100%;
+}
+
+.path-suggestions {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	z-index: 10000;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+.path-suggestion-item {
+	padding: 12px 16px;
+	cursor: pointer;
+	color: var(--text-normal);
+	font-size: 0.95em;
+	border-bottom: 1px solid var(--background-modifier-border);
+	transition: all 0.15s ease;
+	display: flex;
+	align-items: center;
+}
+
+.path-suggestion-item:last-child {
+	border-bottom: none;
+}
+
+.path-suggestion-item:hover,
+.path-suggestion-item.selected {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.path-suggestion-line {
+	padding: 6px 10px;
+	cursor: pointer;
+	color: var(--text-normal);
+	font-size: 0.9em;
+	border-bottom: 1px solid var(--background-modifier-border);
+	transition: background-color 0.15s ease;
+	font-family: var(--font-monospace);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.path-suggestion-line:last-child {
+	border-bottom: none;
+}
+
+.path-suggestion-line:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.path-create-dir {
+	border: 2px dashed var(--interactive-accent);
+	background: var(--background-modifier-border) !important;
+}
+
+.path-create-dir:hover {
+	background: var(--interactive-accent) !important;
+	border-color: var(--interactive-accent);
+}
+
+.path-input-hint {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	margin-top: 4px;
+	padding: 6px 10px;
+	background: var(--background-modifier-border);
+	border-radius: 4px;
+	line-height: 1.4;
+}
+
+.info-label {
+	font-weight: bold;
+	font-size: 0.9em; /* 统一字体大小 */
+	white-space: nowrap;
+	flex-shrink: 0; /* 标签不缩小 */
+	display: inline-block; /* 确保显示 */
+	padding-right: 0; /* 冒号后面不添加边距 */
+	margin-right: 0; /* 冒号后面不添加边距 */
+}
+
+/* 信息值样式（格式、大小、时间、哈希值等） */
+.info-value {
+	user-select: text !important; /* 允许选中 */
+	cursor: text !important; /* 显示文本光标 */
+	display: inline-block !important; /* 确保显示 */
+	padding: 4px 8px !important; /* 内边距 */
+	background-color: var(--background-primary) !important; /* 背景色 - 与输入框区分 */
+	border: 1px solid var(--background-modifier-border) !important; /* 添加边框 */
+	border-radius: 4px !important; /* 圆角 */
+	font-family: monospace !important; /* 等宽字体 */
+	color: var(--text-normal);
+}
+
+/* 引用路径的 info-value 需要自适应宽度 */
+.reference-item .info-value {
+	min-width: 0 !important; /* 允许缩小到0，确保自适应 */
+	flex: 1 1 auto !important; /* 自适应宽度 */
+	max-width: 100% !important; /* 最大宽度限制 */
+	word-break: break-all !important; /* 允许换行 */
+}
+
+.editable-input {
+	flex: 1 1 auto; /* 允许缩小和增长 */
+	padding: 6px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 1em;
+	font-weight: 500;
+	outline: none;
+	transition: all 0.2s ease;
+	min-width: 120px; /* 最小宽度，确保可用 */
+	max-width: 100%;
+	word-break: keep-all; /* 防止单词换行 */
+	white-space: nowrap; /* 文本不换行 */
+	overflow: hidden; /* 隐藏溢出 */
+	text-overflow: ellipsis; /* 溢出显示省略号 */
+}
+
+/* 文件名输入框（textarea）特殊样式 */
+.editable-input-textarea {
+	white-space: pre-wrap !important; /* 允许换行 */
+	word-wrap: break-word !important; /* 单词换行 */
+	word-break: break-word !important; /* 允许在任意字符处换行 */
+	overflow: hidden !important; /* 隐藏滚动条 */
+	text-overflow: clip !important; /* 不使用省略号 */
+	resize: none !important; /* 禁用手动调整大小 */
+	min-height: 32px !important; /* 最小高度（约等于单行输入框） */
+	max-height: 200px !important; /* 最大高度 */
+	line-height: 1.5;
+	vertical-align: top;
+	max-width: 100% !important; /* 确保不超过容器宽度 */
+	box-sizing: border-box !important;
+	min-width: 100px !important; /* 最小宽度 */
+	flex: 1 1 auto !important; /* 允许flex布局，自适应宽度 */
+	padding: 4px 8px !important; /* 减少内边距 */
+}
+
+/* 文件名输入框内容过长时的红色边框样式 */
+.editable-input-textarea.long-content {
+	border-color: #ff4444 !important; /* 红色边框 */
+	border-width: 2px !important;
+	box-shadow: 0 0 0 2px rgba(255, 68, 68, 0.2) !important; /* 红色阴影 */
+}
+
+.editable-input-textarea.long-content:focus {
+	border-color: #ff4444 !important; /* 聚焦时保持红色 */
+	box-shadow: 0 0 0 2px rgba(255, 68, 68, 0.3) !important; /* 聚焦时加深阴影 */
+}
+
+
+.editable-input:focus {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+	/* 保持单行，但允许输入框根据需要扩展 */
+	min-width: 200px; /* 聚焦时增加最小宽度 */
+}
+
+.format-size-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.format-value,
+.size-value {
+	color: var(--text-normal);
+	font-weight: 500;
+	margin-right: 8px;
+}
+
+.save-btn {
+	background: var(--interactive-accent) !important;
+	color: var(--text-on-accent) !important;
+	font-weight: 700 !important;
+}
+
+.save-btn:hover {
+	background: var(--interactive-accent-hover) !important;
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.close-btn {
+	background: var(--background-modifier-error) !important;
+	color: var(--text-on-accent) !important;
+	font-weight: 700 !important;
+	font-size: 20px !important;
+}
+
+.close-btn:hover {
+	background: var(--text-error) !important;
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* 链接区域样式 */
+.link-container {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+/* 链接行 - 标签和输入框在同一行 */
+.link-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 6px;
+}
+
+.link-row:last-child {
+	margin-bottom: 0;
+}
+
+/* 链接标签 */
+.link-label {
+	font-size: 13px;
+	color: var(--text-muted);
+	font-weight: 500;
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+
+/* 链接输入框 */
+.link-input {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 8px 12px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.link-input:hover {
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.link-input:focus {
+	outline: none;
+	border-color: var(--interactive-accent);
+	background: var(--background-primary);
+	box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+.image-detail-buttons {
+	margin-top: 20px;
+	display: flex;
+	gap: 12px;
+	justify-content: flex-end;
+}
+
+/* 响应式布局 - 大屏幕优化 */
+@media (min-width: 1600px) {
+	.image-detail-container {
+		gap: 12px; /* 缩短间距（从24px减少到12px） */
+		height: 100%; /* 高度按照弹窗高度来 */
+	}
+	
+	.image-detail-preview {
+		flex: 1 1 66.67%; /* 预览区域占2/3宽度 */
+		max-width: 66.67%;
+		height: 100%; /* 高度按照弹窗高度来 */
+	}
+	
+	.image-detail-info {
+		flex: 1 1 33.33%; /* 信息区域占1/3宽度 */
+		min-width: 350px;
+		max-width: 33.33%;
+		height: 100%; /* 高度按照弹窗高度来 */
+	}
+}
+
+/* 响应式布局 - 中等屏幕 */
+@media (max-width: 1400px) and (min-width: 1200px) {
+	.image-detail-container {
+		gap: 12px; /* 缩短间距（从18px减少到12px） */
+		height: 100%; /* 高度按照弹窗高度来 */
+	}
+	
+	.image-detail-preview {
+		flex: 1 1 66.67%; /* 预览区域占2/3宽度 */
+		max-width: 66.67%;
+		height: 100%; /* 高度按照弹窗高度来 */
+	}
+	
+	.image-detail-info {
+		flex: 1 1 33.33%; /* 信息区域占1/3宽度 */
+		min-width: 300px;
+		max-width: 33.33%;
+		height: 100%; /* 高度按照弹窗高度来 */
+	}
+}
+
+/* 响应式布局 - 平板和小屏幕 */
+@media (max-width: 1200px) and (min-width: 800px) {
+	.image-detail-modal {
+		max-width: 95vw !important;
+		width: 95vw !important;
+	}
+	
+	.image-detail-container {
+		gap: 12px; /* 缩短间距（从16px减少到12px） */
+		height: 100%; /* 高度按照弹窗高度来 */
+	}
+	
+	.image-detail-preview {
+		flex: 1 1 66.67%; /* 预览区域占2/3宽度 */
+		max-width: 66.67%;
+		height: 100%; /* 高度按照弹窗高度来 */
+	}
+	
+	.image-detail-info {
+		flex: 1 1 33.33%; /* 信息区域占1/3宽度 */
+		min-width: 280px;
+		max-width: 33.33%;
+		height: 100%; /* 高度按照弹窗高度来 */
+	}
+}
+
+/* 响应式布局 - 中等小屏幕（平板竖屏） */
+@media (max-width: 1000px) {
+	.image-detail-modal {
+		max-width: 98vw !important;
+		width: 98vw !important;
+		min-width: 320px !important;
+	}
+	
+	.image-detail-container {
+		flex-direction: column;
+		min-height: auto;
+		gap: 12px; /* 缩短间距（从16px减少到12px） */
+	}
+	
+	.image-detail-preview {
+		flex: none;
+		width: 100%;
+		max-width: 100%;
+		max-height: none;
+		min-height: 300px;
+		overflow: visible;
+	}
+	
+	.image-detail-info {
+		flex: none;
+		width: 100%;
+		max-width: 100%;
+		min-width: 0;
+	}
+	
+	.image-preview-container {
+		max-height: 50vh;
+	}
+	
+	.detail-image {
+		max-height: 350px;
+	}
+	
+	/* 小屏幕下优化组件间距 */
+	.image-preview-container,
+	.image-controls-container,
+	.image-history-container {
+		margin-bottom: 12px;
+	}
+}
+
+/* 响应式布局 - 小屏幕（手机横屏） */
+@media (max-width: 800px) {
+	.image-detail-modal {
+		max-width: 100vw !important;
+		width: 100vw !important;
+	}
+	
+	.image-detail-container {
+		gap: 12px; /* 缩短间距（从12px保持不变） */
+		padding: 0;
+	}
+	
+	.image-detail-preview {
+		padding: 12px;
+		gap: 12px;
+	}
+	
+	.image-detail-info {
+		padding: 12px;
+		gap: 12px;
+	}
+	
+	.image-preview-container,
+	.image-controls-container,
+	.image-history-container {
+		padding: 12px;
+		margin-bottom: 10px;
+	}
+	
+	.control-row {
+		flex-wrap: wrap;
+		gap: 8px;
+		justify-content: center;
+	}
+	
+	.control-btn {
+		flex: 1 1 auto;
+		min-width: 44px;
+		max-width: calc(25% - 6px);
+	}
+}
+
+/* 响应式布局 - 超小屏幕（手机竖屏） */
+@media (max-width: 600px) {
+	.image-detail-modal {
+		max-width: 100vw !important;
+		width: 100vw !important;
+		min-width: 100% !important;
+	}
+	
+	.image-detail-container {
+		padding: 8px;
+		gap: 10px;
+	}
+	
+	.image-detail-preview {
+		padding: 10px;
+		gap: 10px;
+		overflow: visible;
+	}
+	
+	.image-detail-info {
+		padding: 10px;
+		gap: 10px;
+	}
+	
+	.image-preview-container {
+		padding: 12px;
+		max-height: 40vh;
+		min-height: 150px;
+	}
+	
+	.image-controls-container,
+	.image-history-container {
+		padding: 12px;
+	}
+	
+	.detail-image {
+		max-height: 300px;
+	}
+	
+	.control-row {
+		flex-wrap: wrap;
+		gap: 6px;
+		justify-content: center;
+	}
+	
+	.control-btn {
+		min-width: 40px;
+		max-width: calc(20% - 5px);
+		padding: 8px 10px;
+		font-size: 16px;
+		flex: 1 1 auto;
+	}
+	
+	/* 信息组优化 */
+	.info-group {
+		padding: 16px;
+	}
+	
+	.info-list li {
+		padding: 10px 12px;
+		font-size: 0.95em;
+	}
+}
+
+.image-detail-buttons button {
+	padding: 8px 20px;
+	border-radius: 6px;
+	font-weight: 500;
+}
+
+/* 历史记录样式 */
+.image-history-container .info-group {
+	width: 100%;
+	margin: 0;
+	/* 使用标准的 info-group 样式，不需要特殊覆盖 */
+}
+
+.image-history-container .info-group h3 {
+	font-size: 1.2em; /* 统一字体大小，与其他标题一致 */
+	margin-bottom: 10px; /* 与其他 info-group h3 一致 */
+}
+
+.history-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	max-height: none; /* 不限制高度，依次展示 */
+	overflow-y: visible; /* 不需要滚动条 */
+	width: 100%;
+	gap: 6px; /* 卡片之间的间距（缩小） */
+	display: flex;
+	flex-direction: column;
+}
+
+.history-item {
+	padding: 12px; /* 与引用卡片一致 */
+	margin-bottom: 0; /* 间距由 history-list 的 gap 统一管理 */
+	border-radius: 12px; /* 与引用卡片一致 */
+	background: var(--background-secondary); /* 灰色背景，与引用卡片一致 */
+	border: 2px solid var(--background-modifier-border); /* 2px 边框，与引用卡片一致 */
+	/* 移除紫色横线 border-left */
+	display: flex;
+	flex-direction: column;
+	gap: 6px; /* 行之间的间距（卡片内部） */
+	font-size: 0.85em;
+	transition: border-color 0.2s ease;
+	position: relative;
+}
+
+.history-text-box {
+	width: 100%;
+	padding: 12px;
+	font-size: 0.9em;
+	color: var(--text-normal);
+	line-height: 1.6;
+	white-space: pre-wrap;
+	word-break: break-word;
+	user-select: text;
+	cursor: text;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	font-family: var(--font-text);
+	min-height: 60px;
+	box-sizing: border-box;
+}
+
+.history-item:hover {
+	border-color: var(--background-modifier-border-hover);
+}
+
+.history-item.empty {
+	border-left: none; /* 移除紫色横线 */
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font-style: italic;
+	text-align: center;
+	padding: 16px;
+	font-size: 0.9em;
+}
+
+.history-time {
+	color: var(--text-muted);
+	font-size: 0.85em;
+	font-family: monospace;
+	opacity: 0.7;
+	margin-top: auto;
+	text-align: right;
+	align-self: flex-end;
+}
+
+.history-item.view-more {
+	text-align: center;
+	cursor: pointer;
+	font-weight: bold;
+	color: var(--text-accent);
+}
+
+.history-item.view-more:hover {
+	border-color: var(--background-modifier-border-hover);
+}
+
+.history-desc {
+	color: var(--text-normal);
+	font-weight: 500;
+	font-size: 0.9em;
+	white-space: pre-wrap; /* 允许换行，保留空白字符 */
+	word-break: break-word; /* 长单词自动换行 */
+	line-height: 1.6; /* 增加行高，提高可读性 */
+	user-select: text; /* 确保文本可选择 */
+	cursor: text; /* 鼠标悬停时显示文本光标 */
+}
+
+/* 引用列表样式 - 美化版 */
+.reference-list-container {
+	padding: 0;
+	margin-top: 8px;
+}
+
+.reference-empty {
+	padding: 16px;
+	text-align: center;
+	color: var(--text-muted);
+	font-style: italic;
+	font-size: 0.9em;
+	background: var(--background-secondary);
+	border-radius: 8px;
+	border: 1px dashed var(--background-modifier-border);
+}
+
+.reference-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	max-height: none; /* 移除固定高度限制，由外层统一滚动 */
+	overflow-y: visible; /* 移除独立滚动，由外层统一处理 */
+	width: 100%;
+	gap: 16px; /* 增加卡片间距，更清晰的分离 */
+	display: flex;
+	flex-direction: column;
+}
+
+/* 自定义滚动条 */
+.reference-list::-webkit-scrollbar {
+	width: 6px;
+}
+
+.reference-list::-webkit-scrollbar-track {
+	background: var(--background-secondary);
+	border-radius: 3px;
+}
+
+.reference-list::-webkit-scrollbar-thumb {
+	background: var(--background-modifier-border);
+	border-radius: 3px;
+}
+
+.reference-list::-webkit-scrollbar-thumb:hover {
+	background: var(--interactive-accent);
+}
+
+.reference-item {
+	padding: 16px; /* 增加内边距，更舒适的视觉空间 */
+	margin-bottom: 0; /* 卡片间距由 reference-list 的 gap 统一管理 */
+	border-radius: 10px; /* 更现代的圆角 */
+	background: var(--background-primary); /* 使用主背景色，更清晰 */
+	border: 1px solid var(--background-modifier-border); /* 更细的边框，更精致 */
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); /* 微妙的阴影，增加深度 */
+	display: flex;
+	flex-direction: column;
+	gap: 12px; /* 增加行间距，更清晰的视觉层次 */
+	transition: all 0.2s ease; /* 平滑的过渡效果 */
+	position: relative;
+}
+
+.reference-item:hover {
+	border-color: var(--interactive-accent); /* 悬停时使用主题色 */
+	box-shadow: 0 2px 8px rgba(var(--interactive-accent-rgb), 0.15); /* 悬停时增强阴影 */
+	transform: translateY(-1px); /* 轻微上移，增加交互感 */
+}
+
+.reference-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 8px;
+}
+
+.reference-file {
+	font-size: 0.95em;
+	font-weight: 600;
+	color: var(--text-accent);
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1;
+}
+
+.reference-file::before {
+	content: '📄';
+	font-size: 1.2em;
+}
+
+.reference-time {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	font-family: monospace;
+	opacity: 0.7;
+	margin-top: auto;
+	text-align: right;
+	align-self: flex-end;
+}
+
+
+.reference-content {
+	flex: 1;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 10px; /* 增加间距 */
+	margin-bottom: 0;
+}
+
+.reference-content label {
+	flex-shrink: 0;
+	font-size: 0.9em;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.reference-display-input {
+	flex: 1;
+	font-size: 0.9em;
+	color: var(--text-normal);
+	padding: 6px 10px; /* 稍微调整内边距 */
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	transition: all 0.2s ease;
+	box-sizing: border-box;
+}
+
+.reference-display-input:focus {
+	outline: none;
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 3px rgba(var(--interactive-accent-rgb), 0.12); /* 增强焦点效果 */
+	background: var(--background-primary);
+}
+
+.reference-display-input::placeholder {
+	color: var(--text-muted);
+}
+
+.reference-buttons {
+	display: flex;
+	gap: 8px;
+	margin-top: 4px;
+}
+
+
+/* 自定义确认对话框样式 - 修复关闭按钮和居中问题 */
+.confirm-modal {
+	padding: 0 !important;
+	margin-bottom: 0 !important;
+	background: transparent !important;
+	border: none !important;
+	box-shadow: none !important;
+}
+
+/* 确保模态框居中显示 */
+.confirm-modal .modal-container,
+.confirm-modal-container {
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	position: fixed !important;
+	top: 0 !important;
+	left: 0 !important;
+	right: 0 !important;
+	bottom: 0 !important;
+	background: rgba(0, 0, 0, 0.5) !important;
+	z-index: 100 !important;
+}
+
+/* 阻止背景模糊效果 */
+.confirm-modal * {
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+/* 直接使用更具体的选择器覆盖Obsidian默认样式 */
+.confirm-modal .modal-content {
+	max-width: 380px !important;
+	width: 380px !important;
+	min-width: 320px !important;
+	padding: 24px !important;
+	box-sizing: border-box !important;
+	border-radius: 16px !important;
+	background: var(--background-primary) !important;
+	border: 2px solid var(--background-modifier-border) !important;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25) !important;
+	margin: 0 !important;
+	/* 确保内容可滚动并有足够的z-index */
+	position: relative !important;
+	z-index: 101 !important;
+	overflow: visible !important;
+	animation: modalFadeIn 0.25s ease-out !important;
+}
+
+@keyframes modalFadeIn {
+	from {
+		opacity: 0;
+		transform: translateY(-20px) scale(0.95);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
+
+/* 确保对话框居中并可见 */
+.confirm-modal .modal {
+	background: transparent !important;
+	border: none !important;
+	box-shadow: none !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	width: fit-content !important;
+	max-width: none !important;
+	min-width: 0 !important;
+	position: relative !important;
+	z-index: 101 !important;
+}
+
+/* 隐藏 Obsidian 默认的背景层 */
+.confirm-modal .modal-backdrop,
+.confirm-modal .modal-background,
+.confirm-modal::before,
+.confirm-modal::after {
+	display: none !important;
+}
+
+/* 确保对话框主体没有额外的底部空间 */
+.confirm-modal .modal-body {
+	margin-bottom: 0 !important;
+	padding-bottom: 0 !important;
+	background: transparent !important;
+	border: none !important;
+}
+
+.confirm-modal-title {
+	margin: 0 0 16px 0 !important;
+	font-size: 1.35em !important;
+	font-weight: 700 !important;
+	color: var(--text-normal) !important;
+	display: flex !important;
+	align-items: center !important;
+	gap: 10px !important;
+	line-height: 1.4 !important;
+}
+
+.confirm-modal-title::before {
+	content: '⚠️' !important;
+	font-size: 1.4em !important;
+}
+
+.confirm-modal-message {
+	margin: 0 0 20px 0 !important;
+	font-size: 0.95em !important;
+	line-height: 1.7 !important;
+	color: var(--text-muted) !important;
+	white-space: pre-line !important;
+	padding: 12px !important;
+	background: var(--background-modifier-border) !important;
+	border-radius: 8px !important;
+	border-left: 3px solid var(--interactive-accent) !important;
+}
+
+.confirm-modal-buttons {
+	display: flex !important;
+	gap: 12px !important;
+	justify-content: space-between !important;
+	margin-top: 16px !important;
+	margin-bottom: 0 !important;
+	padding-bottom: 0 !important;
+	width: 100% !important;
+	flex-wrap: nowrap !important;
+	/* 确保按钮区域与对话框主体融为一体 */
+	background: transparent !important;
+}
+
+.confirm-modal-buttons button {
+	padding: 10px 16px !important;
+	border-radius: 10px !important;
+	font-weight: 600 !important;
+	min-width: 80px !important;
+	flex: 1 !important;
+	text-align: center !important;
+	transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+	font-size: 0.95em !important;
+	cursor: pointer !important;
+	border: none !important;
+	position: relative !important;
+	overflow: hidden !important;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15) !important;
+}
+
+.confirm-modal-buttons button::before {
+	content: '' !important;
+	position: absolute !important;
+	top: 0 !important;
+	left: -100% !important;
+	width: 100% !important;
+	height: 100% !important;
+	background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent) !important;
+	transition: left 0.5s ease !important;
+}
+
+.confirm-modal-buttons button:hover::before {
+	left: 100% !important;
+}
+
+.confirm-modal-buttons .save-btn {
+	background: var(--interactive-accent) !important;
+	color: var(--text-on-accent) !important;
+	font-weight: 600 !important;
+}
+
+.confirm-modal-buttons .save-btn:hover {
+	background: var(--interactive-accent-hover) !important;
+}
+
+.confirm-modal-buttons .discard-btn,
+.confirm-modal-buttons .cancel-btn {
+	background: var(--background-secondary) !important;
+	color: var(--text-normal) !important;
+	border: 1px solid var(--background-modifier-border) !important;
+	font-weight: 600 !important;
+}
+
+.confirm-modal-buttons .discard-btn:hover,
+.confirm-modal-buttons .cancel-btn:hover {
+	background: var(--background-modifier-hover) !important;
+	border-color: var(--background-modifier-border-hover) !important;
+}
+
+/* 关闭按钮美化 - 确保在右上角可见 */
+.confirm-modal .modal-close-button {
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	position: absolute !important;
+	top: 12px !important;
+	right: 12px !important;
+	width: 28px !important;
+	height: 28px !important;
+	border-radius: 50% !important;
+	background: transparent !important;
+	color: var(--text-muted) !important;
+	border: none !important;
+	cursor: pointer !important;
+	z-index: 102 !important;
+	transition: all 0.2s ease !important;
+	padding: 0 !important;
+	margin: 0 !important;
+	/* 确保按钮内容显示 */
+	font-size: 16px !important;
+	line-height: 1 !important;
+	opacity: 1 !important;
+}
+
+.confirm-modal .modal-close-button:hover {
+	background: var(--background-modifier-hover) !important;
+	color: var(--text-normal) !important;
+	transform: scale(1.1) !important;
+}
+
+.confirm-modal .modal-close-button:active {
+	transform: scale(0.95) !important;
+}
+
+/* 确保标题区域不会被关闭按钮遮挡 */
+.confirm-modal-title {
+	padding-right: 40px !important; /* 为关闭按钮留出空间 */
+}
+
+/* 多重排序样式 - Notion风格简洁版本 */
+.sort-hint {
+	margin: 10px 0;
+	color: var(--text-muted);
+	font-size: 0.85em;
+}
+
+.sort-rules-container {
+	margin-bottom: 16px;
+	gap: 8px;
+	display: flex;
+	flex-direction: column;
+}
+
+/* 简洁的排序规则项 */
+.sort-rule-item-compact {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 16px;
+	background: linear-gradient(135deg, var(--background-primary) 0%, var(--background-secondary) 100%);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	transition: all 0.2s ease;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.sort-rule-item-compact:hover {
+	background: linear-gradient(135deg, var(--background-secondary) 0%, var(--background-modifier-hover) 100%);
+	border-color: var(--interactive-accent);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+	transform: translateY(-1px);
+}
+
+/* 左侧内容 */
+.rule-left {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex: 1;
+	min-width: 0;
+}
+
+.rule-number {
+	width: 36px;
+	height: 36px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 18px;
+	flex-shrink: 0;
+	background: linear-gradient(135deg, var(--interactive-accent), var(--interactive-accent-hover));
+	border-radius: 8px;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.rule-dropdowns {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+}
+
+.rule-dropdown {
+	flex: 1;
+	padding: 8px 12px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 0.9em;
+	font-weight: 500;
+	min-width: 120px;
+	max-width: 180px;
+	transition: all 0.2s ease;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.rule-order-dropdown {
+	flex: 0;
+	max-width: 85px;
+}
+
+.rule-dropdown:focus {
+	outline: none;
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 3px rgba(var(--interactive-accent-rgb), 0.1);
+}
+
+.rule-dropdown:hover {
+	border-color: var(--interactive-accent);
+}
+
+
+/* 操作按钮区域 */
+.rule-actions {
+	display: flex;
+	gap: 4px;
+}
+
+.action-btn {
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: linear-gradient(135deg, var(--background-primary), var(--background-secondary));
+	color: var(--text-normal);
+	cursor: pointer;
+	font-size: 14px;
+	font-weight: 700;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s ease;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.action-btn:hover {
+	background: linear-gradient(135deg, var(--background-modifier-hover), var(--interactive-accent-hover));
+	border-color: var(--interactive-accent);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+	transform: translateY(-1px);
+}
+
+.action-btn.delete-action {
+	color: var(--text-error);
+}
+
+.action-btn.delete-action:hover {
+	background: linear-gradient(135deg, var(--background-modifier-error), rgba(var(--text-error-rgb), 0.1));
+	border-color: var(--text-error);
+	box-shadow: 0 2px 6px rgba(var(--text-error-rgb), 0.2);
+}
+
+/* 添加规则按钮 */
+.add-rule-btn {
+	width: 100%;
+	padding: 12px 16px;
+	border-radius: 8px;
+	border: 2px dashed var(--interactive-accent);
+	background: transparent;
+	color: var(--interactive-accent);
+	cursor: pointer;
+	font-size: 0.95em;
+	font-weight: 600;
+	margin-bottom: 16px;
+	transition: all 0.2s ease;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.add-rule-btn:hover {
+	background: linear-gradient(135deg, var(--background-modifier-hover), var(--interactive-accent-hover));
+	border-color: var(--interactive-accent-hover);
+	border-style: solid;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+	transform: translateY(-1px);
+}
