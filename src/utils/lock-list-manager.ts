@@ -6,6 +6,12 @@
  * - 监控文件系统变化，实时更新锁定列表
  * - 处理文件删除、移动等操作对锁定列表的影响
  * - 提供锁定列表的查询和更新接口
+ * 
+ * 锁定机制：
+ * - 使用三要素精确匹配：MD5 + 文件名 + 路径
+ * - 只有三要素都匹配才判定为锁定状态
+ * - 防止重复文件被误锁定
+ * - 路径作为主键存储（路径是唯一的）
  */
 
 import { TFile, TAbstractFile } from 'obsidian';
@@ -65,7 +71,7 @@ export class LockListManager {
 
 	/**
 	 * 从设置中加载锁定列表
-	 * 使用哈希值+文件名组合作为主键，自动去重
+	 * 使用路径作为主键（路径是唯一的）
 	 */
 	private loadLockListFromSettings() {
 		this.lockListCache.clear();
@@ -74,30 +80,26 @@ export class LockListManager {
 		const ignoredHashes = (this.plugin.settings.ignoredHashes || '').split('\n').filter(f => f.trim());
 		const hashMetadata = this.plugin.settings.ignoredHashMetadata || {};
 
-		// 用于检测重复的集合（哈希值+文件名组合）
-		const seenKeys = new Set<string>();
-
-		// 构建锁定列表缓存（自动去重）
+		// 构建锁定列表缓存
 		ignoredFiles.forEach((fileName, index) => {
 			const hash = index < ignoredHashes.length ? ignoredHashes[index] : undefined;
 			const metadata = hash ? hashMetadata[hash] : undefined;
-			const lowerFileName = fileName.toLowerCase();
+			const filePath = metadata?.filePath || '未知位置';
 			
-			// 使用哈希值+文件名组合作为主键，确保唯一性
-			const key = hash ? `hash:${hash}:${lowerFileName}` : `name:${lowerFileName}`;
+			// 使用路径作为主键（路径是唯一的）
+			const key = `path:${filePath}`;
 			
-			// 检查组合键是否重复
-			if (seenKeys.has(key)) {
-				return; // 跳过重复
+			// 跳过重复路径
+			if (this.lockListCache.has(key)) {
+				return;
 			}
-			seenKeys.add(key);
+			
 			this.lockListCache.set(key, {
 				fileName,
-				filePath: metadata?.filePath || '未知位置',
+				filePath,
 				md5: hash,
 				addedTime: metadata?.addedTime || Date.now(),
-				// 从设置加载的文件默认为存在（因为只有存在的文件才会被保存）
-				// updateFileStatus 会验证并更新实际状态
+				// 从设置加载的文件默认为存在
 				exists: true,
 				lastModified: undefined
 			});
@@ -107,9 +109,16 @@ export class LockListManager {
 	/**
 	 * 更新锁定列表中文件的状态
 	 * 只更新 exists 标志，不删除任何文件
+	 * 注意：路径为 "未知位置" 的文件保持 exists: true，避免被过滤掉
 	 */
 	private async updateFileStatus() {
 		for (const [key, lockedFile] of this.lockListCache.entries()) {
+			// 路径为 "未知位置" 的文件，保持 exists: true，不验证
+			if (lockedFile.filePath === '未知位置') {
+				lockedFile.exists = true;
+				continue;
+			}
+			
 			try {
 				// 尝试从 vault 中获取文件
 				const file = this.plugin.app.vault.getAbstractFileByPath(lockedFile.filePath);
@@ -119,25 +128,30 @@ export class LockListManager {
 					lockedFile.exists = true;
 					lockedFile.lastModified = file.stat.mtime;
 				} else {
-					// 文件不存在，标记为不存在但保留记录
-					lockedFile.exists = false;
+					// 文件不存在，但仍保留记录（保持 exists: true 避免被过滤）
+					// 用户可能移动了文件，保留锁定记录以便手动管理
+					lockedFile.exists = true;
 				}
 			} catch (error) {
 				console.error(`[LockListManager] 更新文件状态失败: ${lockedFile.filePath}`, error);
-				lockedFile.exists = false;
+				// 出错时也保持 exists: true，避免数据丢失
+				lockedFile.exists = true;
 			}
 		}
 	}
 
 	/**
 	 * 验证锁定列表中的文件是否仍然存在
-	 * 删除不存在的文件，但在日志中记录
-	 * 仅在文件系统事件时调用
+	 * 仅更新状态，不自动删除任何锁定记录
+	 * 用户需要手动在设置中管理锁定列表
 	 */
 	private async validateLockedFiles() {
-		const filesToRemove: string[] = [];
-
 		for (const [key, lockedFile] of this.lockListCache.entries()) {
+			// 路径为 "未知位置" 的文件，跳过验证
+			if (lockedFile.filePath === '未知位置') {
+				continue;
+			}
+			
 			try {
 				// 尝试从 vault 中获取文件
 				const file = this.plugin.app.vault.getAbstractFileByPath(lockedFile.filePath);
@@ -147,20 +161,15 @@ export class LockListManager {
 					lockedFile.exists = true;
 					lockedFile.lastModified = file.stat.mtime;
 				} else {
-					// 文件不存在，标记为删除
-					filesToRemove.push(key);
+					// 文件不存在，标记状态但不删除记录
 					lockedFile.exists = false;
 				}
 			} catch (error) {
 				console.error(`[LockListManager] 验证文件失败: ${lockedFile.filePath}`, error);
-				filesToRemove.push(key);
+				lockedFile.exists = false;
 			}
 		}
-
-		// 移除不存在的文件
-		if (filesToRemove.length > 0) {
-			await this.removeLockedFiles(filesToRemove);
-		}
+		// 不再自动删除锁定记录，保留所有记录供用户管理
 	}
 
 	/**
@@ -216,7 +225,7 @@ export class LockListManager {
 					OperationType.UNLOCK,
 					`文件已删除，已从锁定列表移除: ${removedFiles.join(', ')}`,
 					{
-						filePath: filePath,
+						imagePath: filePath,
 						details: {
 							removedFiles: removedFiles,
 							reason: 'file_deleted'
@@ -271,26 +280,25 @@ export class LockListManager {
 
 	/**
 	 * 将锁定列表保存到设置
-	 * 只保存存在的文件，已删除的文件会从锁定列表中移除
+	 * 保存所有锁定文件，不论文件是否存在
+	 * @param skipCallback - 是否跳过回调（用于设置页内部操作）
 	 */
-	private async saveLockListToSettings() {
+	private async saveLockListToSettings(skipCallback: boolean = false) {
 		const ignoredFiles: string[] = [];
 		const ignoredHashes: string[] = [];
 		const hashMetadata: Record<string, any> = {};
 
 		for (const lockedFile of this.lockListCache.values()) {
-			// 只保存存在的文件
-			if (lockedFile.exists) {
-				ignoredFiles.push(lockedFile.fileName);
+			// 保存所有锁定文件，不论 exists 状态
+			ignoredFiles.push(lockedFile.fileName);
 
-				if (lockedFile.md5) {
-					ignoredHashes.push(lockedFile.md5);
-					hashMetadata[lockedFile.md5] = {
-						fileName: lockedFile.fileName,
-						filePath: lockedFile.filePath,
-						addedTime: lockedFile.addedTime
-					};
-				}
+			if (lockedFile.md5) {
+				ignoredHashes.push(lockedFile.md5);
+				hashMetadata[lockedFile.md5] = {
+					fileName: lockedFile.fileName,
+					filePath: lockedFile.filePath,
+					addedTime: lockedFile.addedTime
+				};
 			}
 		}
 
@@ -302,8 +310,8 @@ export class LockListManager {
 		// 保存到存储
 		await this.plugin.saveSettings();
 		
-		// 触发回调，通知设置标签页刷新
-		if (this.onLockListChanged) {
+		// 触发回调，通知设置标签页刷新（除非跳过）
+		if (!skipCallback && this.onLockListChanged) {
 			this.onLockListChanged();
 		}
 	}
@@ -347,32 +355,42 @@ export class LockListManager {
 	}
 
 	/**
-	 * 检查文件是否被锁定（通过文件名和哈希值）
-	 * 这是主要的检查方法，支持哈希值优先检查
+	 * 检查文件是否被锁定
+	 * 三要素必须同时匹配：MD5 + 文件名 + 位置
+	 * 这样可以精确识别每一个文件，即使是重复文件也能区分
 	 * @param fileName - 文件名
 	 * @param md5 - MD5 哈希值（可选）
+	 * @param filePath - 文件路径（可选）
 	 * @returns 是否被锁定
 	 */
-	isFileLockedByNameOrHash(fileName: string, md5?: string): boolean {
-		// 首先检查哈希值锁定（优先级更高）
-		if (md5) {
-			for (const lockedFile of this.lockListCache.values()) {
-				// 只检查存在的文件（与保存逻辑一致）
-				if (lockedFile.exists && lockedFile.md5 && lockedFile.md5.toLowerCase() === md5.toLowerCase()) {
-					return true;
+	isFileLockedByNameOrHash(fileName: string, md5?: string, filePath?: string): boolean {
+		const lowerFileName = fileName.toLowerCase();
+		
+		for (const lockedFile of this.lockListCache.values()) {
+			if (!lockedFile.exists) continue;
+			
+			// 1. MD5 必须匹配（如果双方都有 MD5）
+			if (md5 && lockedFile.md5) {
+				if (md5.toLowerCase() !== lockedFile.md5.toLowerCase()) {
+					continue; // MD5 不匹配，跳过
 				}
 			}
-		}
-		
-		// 然后检查文件名锁定（精确匹配）
-		const lowerFileName = fileName.toLowerCase();
-		for (const lockedFile of this.lockListCache.values()) {
-			// 只检查存在的文件（与保存逻辑一致）
-			if (!lockedFile.exists) continue;
+			
+			// 2. 文件名必须匹配
 			const lowerLockedName = lockedFile.fileName.toLowerCase();
-			if (lowerFileName === lowerLockedName) {
-				return true;
+			if (lowerFileName !== lowerLockedName) {
+				continue; // 文件名不匹配，跳过
 			}
+			
+			// 3. 位置必须匹配（如果提供了路径）
+			if (filePath && lockedFile.filePath) {
+				if (filePath !== lockedFile.filePath) {
+					continue; // 位置不匹配，跳过
+				}
+			}
+			
+			// 三要素都匹配，返回锁定
+			return true;
 		}
 		
 		return false;
@@ -380,8 +398,7 @@ export class LockListManager {
 
 	/**
 	 * 添加锁定文件
-	 * 重复检测规则：MD5 哈希值作为主键，文件名作为辅键
-	 * 只有当哈希值和文件名都相同时才判定为重复，不会重复添加
+	 * 三要素唯一性：MD5 + 文件名 + 路径
 	 * @param fileName - 文件名
 	 * @param filePath - 文件路径
 	 * @param md5 - MD5 哈希值（可选）
@@ -390,19 +407,20 @@ export class LockListManager {
 	async addLockedFile(fileName: string, filePath: string, md5?: string): Promise<boolean> {
 		const lowerFileName = fileName.toLowerCase();
 		
-		// 检查是否已存在完全相同的锁定（哈希值和文件名都相同）
+		// 检查是否已存在完全相同的锁定（三要素都相同）
 		for (const lockedFile of this.lockListCache.values()) {
 			const sameHash = md5 && lockedFile.md5 && lockedFile.md5.toLowerCase() === md5.toLowerCase();
 			const sameName = lockedFile.fileName.toLowerCase() === lowerFileName;
+			const samePath = lockedFile.filePath === filePath;
 			
-			// 只有哈希值和文件名都相同才判定为重复
-			if (sameHash && sameName) {
+			// 三要素都相同才判定为重复
+			if (sameHash && sameName && samePath) {
 				return false; // 完全相同，不重复添加
 			}
 		}
 		
-		// 使用哈希值+文件名组合作为主键，确保唯一性
-		const key = md5 ? `hash:${md5}:${lowerFileName}` : `name:${lowerFileName}`;
+		// 使用路径作为主键（路径是唯一的）
+		const key = `path:${filePath}`;
 
 		this.lockListCache.set(key, {
 			fileName,
@@ -420,43 +438,46 @@ export class LockListManager {
 
 	/**
 	 * 移除锁定文件
-	 * 支持通过哈希值或文件名查找并删除
+	 * 三要素匹配：MD5 + 文件名 + 位置
 	 * @param fileName - 文件名
 	 * @param md5 - MD5 哈希值（可选）
+	 * @param filePath - 文件路径（可选）
+	 * @param skipCallback - 是否跳过回调（用于设置页内部操作）
 	 */
-	async removeLockedFile(fileName: string, md5?: string) {
+	async removeLockedFile(fileName: string, md5?: string, filePath?: string, skipCallback: boolean = false) {
 		const lowerFileName = fileName.toLowerCase();
+		const keysToRemove: string[] = [];
 		
-		// 尝试精确匹配的 key（哈希值+文件名组合）
-		const combinedKey = md5 ? `hash:${md5}:${lowerFileName}` : `name:${lowerFileName}`;
-		
-		let removed = false;
-		
-		// 优先通过组合键删除
-		if (this.lockListCache.has(combinedKey)) {
-			this.lockListCache.delete(combinedKey);
-			removed = true;
-		}
-		
-		// 如果精确匹配失败，尝试模糊匹配（兼容旧数据）
-		if (!removed) {
-			const keysToRemove: string[] = [];
-			for (const [k, lockedFile] of this.lockListCache.entries()) {
-				const sameHash = md5 && lockedFile.md5 && lockedFile.md5.toLowerCase() === md5.toLowerCase();
-				const sameName = lockedFile.fileName.toLowerCase() === lowerFileName;
-				
-				// 哈希值和文件名都匹配才删除
-				if (sameHash && sameName) {
-					keysToRemove.push(k);
+		for (const [key, lockedFile] of this.lockListCache.entries()) {
+			// 1. MD5 必须匹配（如果双方都有）
+			if (md5 && lockedFile.md5) {
+				if (md5.toLowerCase() !== lockedFile.md5.toLowerCase()) {
+					continue;
 				}
 			}
-			for (const k of keysToRemove) {
-				this.lockListCache.delete(k);
+			
+			// 2. 文件名必须匹配
+			if (lockedFile.fileName.toLowerCase() !== lowerFileName) {
+				continue;
 			}
+			
+			// 3. 位置必须匹配（如果提供了路径）
+			if (filePath && lockedFile.filePath) {
+				if (filePath !== lockedFile.filePath) {
+					continue;
+				}
+			}
+			
+			// 三要素都匹配，标记删除
+			keysToRemove.push(key);
+		}
+		
+		for (const key of keysToRemove) {
+			this.lockListCache.delete(key);
 		}
 
 		// 保存到设置
-		await this.saveLockListToSettings();
+		await this.saveLockListToSettings(skipCallback);
 	}
 
 	/**

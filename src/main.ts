@@ -8,6 +8,7 @@ import { PluginData } from './types';
 import { ReferenceManager, parseWikiLink, parseHtmlImageSize } from './utils/reference-manager';
 import { TrashManager } from './utils/trash-manager';
 import { LockListManager } from './utils/lock-list-manager';
+import { HistoryManager } from './utils/history-manager';
 
 /**
  * ImageManagement 插件主类
@@ -256,17 +257,21 @@ export default class ImageManagementPlugin extends Plugin {
 			} else if (hasSettingsProps && hasDataProps) {
 				// 混合对象，提取设置部分
 				savedSettings = {};
-				// 提取所有设置属性
+				// 提取所有设置属性（包括锁定列表相关属性）
 				const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
 					'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
 					'autoGenerateNames', 'keepModalOpen', 'showReferenceTime', 'pathNamingDepth',
 					'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
-					'ignoredFiles', 'ignoredHashes', 'defaultWheelMode', 'showImageName', 'showImageSize', 
+					'defaultWheelMode', 'showImageName', 'showImageSize', 
 					'showImageDimensions', 'showLockIcon', 'imageNameWrap', 'adaptiveImageSize',
 					'enableLazyLoading', 'lazyLoadDelay', 'maxCacheSize', 'cardBorderRadius',
 					'cardSpacing', 'fixedImageHeight', 'enableHoverEffect', 'showImageIndex',
 					'confirmBeforeDelete', 'moveToSystemTrash', 'enablePluginTrash', 'trashRestorePath',
-					'logLevel', 'enableConsoleLog', 'enableDebugLog'];
+					'logLevel', 'enableConsoleLog', 'enableDebugLog', 'keyboardShortcuts',
+					'ignoredFiles', 'ignoredHashes', 'ignoredHashMetadata', 'showIgnoredFilePath',
+					'pureGallery', 'uniformCardHeight', 'searchCaseSensitive', 'liveSearchDelay',
+					'searchInPath', 'maxBatchOperations', 'batchConfirmThreshold', 'showBatchProgress',
+					'showStatistics', 'statisticsPosition'];
 				
 				for (const key of settingsKeys) {
 					if (key in loadedData) {
@@ -342,19 +347,24 @@ export default class ImageManagementPlugin extends Plugin {
 			!('logs' in currentData) && !('histories' in currentData) && !('imageGroups' in currentData);
 		
 		// 从 data 中排除设置相关的属性，避免覆盖设置
+		// 注意：ignoredFiles, ignoredHashes, ignoredHashMetadata 是锁定列表数据，需要通过 saveSettings 保存
 		let dataWithoutSettings: any = {};
 		if (data && typeof data === 'object') {
-			// 排除所有设置属性
+			// 排除所有设置属性（不包括锁定列表，因为它们通过 saveSettings 单独管理）
 			const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
 				'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
 				'autoGenerateNames', 'keepModalOpen', 'showReferenceTime', 'pathNamingDepth',
 				'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
-				'ignoredFiles', 'ignoredHashes', 'ignoredHashMetadata', 'defaultWheelMode', 'showImageName', 'showImageSize', 
+				'defaultWheelMode', 'showImageName', 'showImageSize', 
 				'showImageDimensions', 'showLockIcon', 'imageNameWrap', 'adaptiveImageSize',
 				'enableLazyLoading', 'lazyLoadDelay', 'maxCacheSize', 'cardBorderRadius',
 				'cardSpacing', 'fixedImageHeight', 'enableHoverEffect', 'showImageIndex',
 				'confirmBeforeDelete', 'moveToSystemTrash', 'enablePluginTrash', 'trashRestorePath',
-				'logLevel', 'enableConsoleLog', 'enableDebugLog'];
+				'logLevel', 'enableConsoleLog', 'enableDebugLog', 'keyboardShortcuts',
+				'ignoredFiles', 'ignoredHashes', 'ignoredHashMetadata', 'showIgnoredFilePath',
+				'pureGallery', 'uniformCardHeight', 'searchCaseSensitive', 'liveSearchDelay',
+				'searchInPath', 'maxBatchOperations', 'batchConfirmThreshold', 'showBatchProgress',
+				'showStatistics', 'statisticsPosition'];
 			
 			for (const key in data) {
 				if (!settingsKeys.includes(key)) {

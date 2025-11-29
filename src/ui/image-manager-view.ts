@@ -69,8 +69,8 @@ export class ImageManagerView extends ItemView {
 	private tempImagesPerRow: number | null = null;
 	/** 拖拽框选管理器 */
 	private dragSelectManager: DragSelectManager | null = null;
-	/** 追踪最后操作的类型：'search' | 'sort' | 'filter' | 'group' | null */
-	private lastOperationType: 'search' | 'sort' | 'filter' | 'group' | null = null;
+	/** 操作历史栈：记录搜索、排序、筛选、分组的操作顺序，用于倒序清除 */
+	private operationHistory: Array<'search' | 'sort' | 'filter' | 'group'> = [];
 	/** 清除按钮元素引用 */
 	private clearBtnElement: HTMLElement | null = null;
 
@@ -201,7 +201,7 @@ export class ImageManagerView extends ItemView {
 			// 应用锁定分组（如果启用）
 			if (view.plugin.data.groupMeta?.['_lock_group']?.type === 'lock') {
 				view.images.forEach(img => {
-					const isLocked = view.isIgnoredFile(img.name, img.md5);
+					const isLocked = view.isIgnoredFile(img.name, img.md5, img.path);
 					img.group = isLocked ? '已锁定' : '未锁定';
 				});
 			}
@@ -564,7 +564,7 @@ export class ImageManagerView extends ItemView {
 			
 			// 按锁定状态筛选
 			if (this.filterOptions.lockFilter && this.filterOptions.lockFilter !== 'all') {
-				const isIgnored = this.isIgnoredFile(image.name, image.md5);
+				const isIgnored = this.isIgnoredFile(image.name, image.md5, image.path);
 				if (this.filterOptions.lockFilter === 'locked' && !isIgnored) {
 					return false;
 				}
@@ -664,8 +664,8 @@ export class ImageManagerView extends ItemView {
 						comparison = areaA - areaB;
 						break;
 					case 'locked':
-						const aIgnored = this.isIgnoredFile(a.name, a.md5);
-			const bIgnored = this.isIgnoredFile(b.name, b.md5);
+						const aIgnored = this.isIgnoredFile(a.name, a.md5, a.path);
+			const bIgnored = this.isIgnoredFile(b.name, b.md5, b.path);
 						// 锁定的排在前面（true > false）
 						comparison = (aIgnored ? 1 : 0) - (bIgnored ? 1 : 0);
 						break;
@@ -693,7 +693,7 @@ export class ImageManagerView extends ItemView {
 			this.searchQuery, 
 			(query) => {
 				this.searchQuery = query;
-				this.lastOperationType = 'search';
+				this.addToOperationHistory('search');
 				this.applySortAndFilter();
 				this.updateButtonIndicator(document.getElementById('search-btn') as HTMLElement, 'search');
 				
@@ -714,7 +714,7 @@ export class ImageManagerView extends ItemView {
 			this.sortOptions, 
 			(options) => {
 				this.sortOptions = options;
-				this.lastOperationType = 'sort';
+				this.addToOperationHistory('sort');
 				this.applySortAndFilter();
 				this.updateButtonIndicator(document.getElementById('sort-btn') as HTMLElement, 'sort');
 				
@@ -734,7 +734,7 @@ export class ImageManagerView extends ItemView {
 	openFilter() {
 		const modal = new FilterModal(this.app, this.filterOptions, (options) => {
 			this.filterOptions = options;
-			this.lastOperationType = 'filter';
+			this.addToOperationHistory('filter');
 			this.applySortAndFilter();
 			this.updateButtonIndicator(document.getElementById('filter-btn') as HTMLElement, 'filter');
 			
@@ -982,10 +982,10 @@ export class ImageManagerView extends ItemView {
 		}
 	}
 
-    private isIgnoredFile(filename: string, md5?: string): boolean {
-        // 使用 LockListManager 进行检查
+    private isIgnoredFile(filename: string, md5?: string, filePath?: string): boolean {
+        // 使用 LockListManager 进行检查（三要素匹配：文件名、哈希值、路径）
         if (this.plugin.lockListManager) {
-            return this.plugin.lockListManager.isFileLockedByNameOrHash(filename, md5);
+            return this.plugin.lockListManager.isFileLockedByNameOrHash(filename, md5, filePath);
         }
         // 降级到直接检查 settings（兼容性）
         return isFileIgnored(filename, md5, this.plugin.settings.ignoredFiles, this.plugin.settings.ignoredHashes);
@@ -1084,6 +1084,8 @@ export class ImageManagerView extends ItemView {
 			const itemEl = document.createElement('div');
 			itemEl.className = 'image-gallery-item';
 			itemEl.style.width = itemWidth;
+			// 存储图片路径，用于选择功能
+			itemEl.setAttribute('data-image-path', image.path);
 			// 启用拖拽
 			itemEl.draggable = true;
 			itemEl.addEventListener('dragstart', (e) => {
@@ -1105,7 +1107,7 @@ export class ImageManagerView extends ItemView {
 			});
 			
 			// 检查是否为锁定文件（不再显示红色边框）
-			const isIgnored = this.isIgnoredFile(image.name, image.md5);
+			const isIgnored = this.isIgnoredFile(image.name, image.md5, image.path);
 			
 			// 图片预览 - 使用延迟加载
 			const previewEl = itemEl.createDiv('image-preview');
@@ -1252,13 +1254,11 @@ export class ImageManagerView extends ItemView {
 				infoEl.style.background = STYLES.VARS.BACKGROUND_SECONDARY;
 				infoEl.style.borderRadius = `0 0 ${UI_SIZE.BORDER_RADIUS.MD} ${UI_SIZE.BORDER_RADIUS.MD}`;
 				infoEl.style.borderTop = `1px solid ${STYLES.VARS.BACKGROUND_MODIFIER_BORDER}`;
-				infoEl.style.display = 'flex';
+				infoEl.style.display = 'inline-flex'; // 改为 inline-flex，宽度和高度都自适应内容
 				infoEl.style.flexDirection = 'column';
 				infoEl.style.gap = '2px'; // 进一步减小间距，减少空白
-				infoEl.style.minHeight = '0'; // 不设置最小高度，完全根据内容自适应
-				infoEl.style.height = 'auto'; // 确保高度自适应内容
+				infoEl.style.width = '100%'; // 宽度占满
 				infoEl.style.boxSizing = 'border-box'; // 确保padding包含在高度内
-				infoEl.style.flexShrink = '0'; // 防止被压缩
 			} else {
 				infoEl.style.display = 'none'; // 没有内容时完全隐藏，不留占位
 			}
@@ -1435,7 +1435,7 @@ export class ImageManagerView extends ItemView {
 				const image = this.images.find(img => img.path === imagePath);
 				if (image && nameEl.textContent === image.name) {
 					// 找到对应的卡片，更新锁定状态
-					const isIgnored = this.isIgnoredFile(image.name, image.md5);
+					const isIgnored = this.isIgnoredFile(image.name, image.md5, image.path);
 					const metaRow = item.querySelector('.meta-row');
 					
 					if (metaRow) {
@@ -1747,7 +1747,7 @@ export class ImageManagerView extends ItemView {
 
             await this.plugin.saveData(this.plugin.data);
             this.applyGroupsToImages();
-            this.lastOperationType = 'group';
+            this.addToOperationHistory('group');
             this.renderImageList();
             if (notice) new Notice(notice);
             // 更新分组按钮绿点
@@ -1755,7 +1755,7 @@ export class ImageManagerView extends ItemView {
             if (groupBtn) this.updateButtonIndicator(groupBtn, 'group');
             // 更新清除按钮状态
             this.updateClearButtonState();
-        }, currentGroupMode);
+        }, currentGroupMode || undefined);
         modal.open();
     }
 
@@ -1789,10 +1789,10 @@ export class ImageManagerView extends ItemView {
                     return;
                 }
                 
-                // 使用 LockListManager 检查锁定状态（支持哈希值和文件名）
+                // 使用 LockListManager 检查锁定状态（支持哈希值、文件名和路径）
                 const isLocked = this.plugin.lockListManager 
-                    ? this.plugin.lockListManager.isFileLockedByNameOrHash(img.name, img.md5)
-                    : this.isIgnoredFile(img.name, img.md5);
+                    ? this.plugin.lockListManager.isFileLockedByNameOrHash(img.name, img.md5, img.path)
+                    : this.isIgnoredFile(img.name, img.md5, img.path);
                 img.group = isLocked ? '已锁定' : '未锁定';
             });
         }
@@ -2027,12 +2027,12 @@ export class ImageManagerView extends ItemView {
 				});
 
 				// 显示插入指示器
-				if (closestItem && type !== 'lock') {
+				if (closestItem !== null && type !== 'lock') {
 					// 锁定分组不需要排序，只显示背景高亮
 					if (dragOverItem !== closestItem) {
 						removeInsertIndicator();
 						const indicator = createInsertIndicator();
-						const rect = closestItem!.getBoundingClientRect();
+						const rect = (closestItem as HTMLElement).getBoundingClientRect();
 						const galleryRect = galleryEl.getBoundingClientRect();
 						
 						// 判断插入位置（上方或下方）
@@ -2271,7 +2271,7 @@ export class ImageManagerView extends ItemView {
 			return;
 		}
 
-		const isLocked = this.isIgnoredFile(image.name, image.md5);
+		const isLocked = this.isIgnoredFile(image.name, image.md5, image.path);
 		const shouldLock = groupName === '已锁定';
 
 		// 如果状态相同，无需操作
@@ -2319,10 +2319,10 @@ export class ImageManagerView extends ItemView {
 				);
 			}
 			
-			new Notice(`已锁定: ${image.name}`);
+			new Notice(`🔒 已锁定: ${image.name}`);
 		} else {
 			// 解锁：通过 LockListManager 移除
-			await this.plugin.lockListManager.removeLockedFile(image.name, image.md5);
+			await this.plugin.lockListManager.removeLockedFile(image.name, image.md5, image.path);
 			
 			// 记录日志
 			if (this.plugin.logger) {
@@ -2342,7 +2342,7 @@ export class ImageManagerView extends ItemView {
 				);
 			}
 			
-			new Notice(`已解锁: ${image.name}`);
+			new Notice(`🔓 已解锁: ${image.name}`);
 		}
 	}
 
@@ -2466,7 +2466,19 @@ export class ImageManagerView extends ItemView {
 		// 获取所有选中的图片（包括分组中的）
 		const selectedImages: ImageInfo[] = [];
 		const selectedItems = this.containerEl.querySelectorAll('.image-gallery-item.selected');
+		
 		selectedItems.forEach((itemEl) => {
+			// 优先使用 data-image-path 属性（更可靠）
+			const imagePath = itemEl.getAttribute('data-image-path');
+			if (imagePath) {
+				const image = this.filteredImages.find(img => img.path === imagePath);
+				if (image) {
+					selectedImages.push(image);
+					return;
+				}
+			}
+			
+			// 降级：使用 .image-name 元素的文本内容
 			const imageName = itemEl.querySelector('.image-name')?.textContent;
 			if (imageName) {
 				const image = this.filteredImages.find(img => img.name === imageName);
@@ -2475,7 +2487,6 @@ export class ImageManagerView extends ItemView {
 				}
 			}
 		});
-		
 		return selectedImages;
 	}
 
@@ -2522,10 +2533,10 @@ export class ImageManagerView extends ItemView {
 		}
 
 		// 过滤掉忽略的文件
-        const filteredImages = filterIgnoredFiles(this.images, this.plugin.settings.ignoredFiles, this.plugin.settings.ignoredHashes);
+        const filteredImages = this.images.filter(img => !this.isIgnoredFile(img.name, img.md5, img.path));
 
 		if (filteredImages.length === 0) {
-			new Notice('所有图片都被锁定');
+			new Notice('🔒 所有图片都已锁定');
 			return;
 		}
 
@@ -2897,7 +2908,7 @@ export class ImageManagerView extends ItemView {
 	// 为单张图片应用智能重命名（基于引用笔记的路径）
 	async applyPathNamingForImage(image: ImageInfo, suppressLogging: boolean = false): Promise<{updatedRefs: number, logEntry?: {oldPath: string, newPath: string, oldName: string, newName: string, updatedRefs: number}} | null> {
 		// 检查是否为锁定文件
-		if (this.isIgnoredFile(image.name, image.md5)) {
+		if (this.isIgnoredFile(image.name, image.md5, image.path)) {
 			if (!suppressLogging) {
 				await this.plugin.logger.debug(OperationType.RENAME, `图片 ${image.name} 已被锁定，跳过重命名`);
 			}
@@ -3132,7 +3143,7 @@ export class ImageManagerView extends ItemView {
 						updatedCount++;
 					}
 				} catch (error) {
-					await this.plugin.logger.error(OperationType.UPDATE_REFERENCES, `更新文件失败: ${file.path}`, {
+					await this.plugin.logger.error(OperationType.UPDATE_REFERENCE, `更新文件失败: ${file.path}`, {
 						error: error as Error
 					});
 				}
@@ -3140,7 +3151,7 @@ export class ImageManagerView extends ItemView {
 			
 			return { updatedCount, referencedFiles };
 		} catch (error) {
-			await this.plugin.logger.error(OperationType.UPDATE_REFERENCES, '更新引用失败', {
+			await this.plugin.logger.error(OperationType.UPDATE_REFERENCE, '更新引用失败', {
 				error: error as Error
 			});
 			return { updatedCount: 0, referencedFiles: [] };
@@ -3208,11 +3219,11 @@ export class ImageManagerView extends ItemView {
 		const md5 = image.md5;
 		
 		// 检查当前锁定状态
-		const isLocked = this.isIgnoredFile(image.name, image.md5);
+		const isLocked = this.isIgnoredFile(image.name, image.md5, image.path);
 		
 		if (isLocked) {
 			// 已锁定，执行解锁
-			await this.plugin.lockListManager.removeLockedFile(image.name, image.md5);
+			await this.plugin.lockListManager.removeLockedFile(image.name, image.md5, image.path);
 			
 			// 记录日志
 			if (this.plugin.logger) {
@@ -3232,7 +3243,7 @@ export class ImageManagerView extends ItemView {
 				);
 			}
 			
-			new Notice(`已解锁: ${filename}`);
+			new Notice(`🔓 已解锁: ${filename}`);
 		} else {
 			// 未锁定，执行锁定
 			await this.plugin.lockListManager.addLockedFile(image.name, image.path, image.md5);
@@ -3255,7 +3266,7 @@ export class ImageManagerView extends ItemView {
 				);
 			}
 			
-			new Notice(`已锁定: ${filename}`);
+			new Notice(`🔒 已锁定: ${filename}`);
 		}
 		
 		// 更新单个图片卡片
@@ -3280,19 +3291,21 @@ export class ImageManagerView extends ItemView {
 			// 检查是否在输入框中
 			const inInputElement = isInputElement(e.target);
 			
-			// 对于Delete键：如果有选中的图片，允许执行删除，即使焦点在输入框
+			// 对于Delete键和Ctrl+L：如果有选中的图片，允许执行，即使焦点在输入框
 			// 对于其他键：如果焦点在输入框中，只允许 Escape
 			if (inInputElement) {
 				const deleteKey = shortcuts['manager-delete'] || SHORTCUT_DEFINITIONS['manager-delete'].defaultKey;
+				const toggleLockKey = shortcuts['manager-toggle-lock'] || SHORTCUT_DEFINITIONS['manager-toggle-lock'].defaultKey;
 				const isDeleteKey = matchesShortcut(e, deleteKey);
+				const isToggleLockKey = matchesShortcut(e, toggleLockKey);
 				
-				if (isDeleteKey) {
-					// Delete键：检查是否有选中的图片
+				if (isDeleteKey || isToggleLockKey) {
+					// Delete键或Ctrl+L：检查是否有选中的图片
 					const selectedItems = this.containerEl.querySelectorAll('.image-gallery-item.selected');
 					if (selectedItems.length > 0) {
-						// 继续处理Delete键
+						// 继续处理
 					} else {
-						return; // 没有选中的图片，让输入框正常处理Delete
+						return; // 没有选中的图片，让输入框正常处理
 					}
 				} else if (e.key !== 'Escape') {
 					return;
@@ -3393,13 +3406,11 @@ export class ImageManagerView extends ItemView {
 			const toggleLockKey = shortcuts['manager-toggle-lock'] || SHORTCUT_DEFINITIONS['manager-toggle-lock'].defaultKey;
 			if (matchesShortcut(e, toggleLockKey)) {
 				e.preventDefault();
-				console.log('[ImageManagerView] 触发切换锁定快捷键');
 				const selectedImages = this.getSelectedImages();
-				console.log('[ImageManagerView] 选中的图片数:', selectedImages.length);
 				if (selectedImages.length > 0) {
-					this.toggleSelectedImagesLock(selectedImages);
+					await this.toggleSelectedImagesLock(selectedImages);
 				} else {
-					new Notice('请先选中要锁定的图片');
+					new Notice('请先选中要锁定/解锁的图片');
 				}
 				return;
 			}
@@ -3529,11 +3540,11 @@ export class ImageManagerView extends ItemView {
 		const selectedImageNames = new Set(selectedImages.map(img => img.name));
 
 		for (const image of selectedImages) {
-			const isLocked = this.isIgnoredFile(image.name, image.md5);
+			const isLocked = this.isIgnoredFile(image.name, image.md5, image.path);
 			
 			if (isLocked) {
 				// 解锁
-				await this.plugin.lockListManager.removeLockedFile(image.name, image.md5);
+				await this.plugin.lockListManager.removeLockedFile(image.name, image.md5, image.path);
 				unlockedCount++;
 				
 				// 记录日志
@@ -3601,11 +3612,11 @@ export class ImageManagerView extends ItemView {
 
 		// 显示提示
 		if (lockedCount > 0 && unlockedCount === 0) {
-			new Notice(`已锁定 ${lockedCount} 张图片`);
+			new Notice(`🔒 已锁定 ${lockedCount} 张图片`);
 		} else if (unlockedCount > 0 && lockedCount === 0) {
-			new Notice(`已解锁 ${unlockedCount} 张图片`);
+			new Notice(`🔓 已解锁 ${unlockedCount} 张图片`);
 		} else if (lockedCount > 0 && unlockedCount > 0) {
-			new Notice(`已锁定 ${lockedCount} 张，已解锁 ${unlockedCount} 张`);
+			new Notice(`🔒 已锁定 ${lockedCount} 张，🔓 已解锁 ${unlockedCount} 张`);
 		}
 	}
 
@@ -3749,7 +3760,8 @@ export class ImageManagerView extends ItemView {
 	 * 打开重命名模态框
 	 */
 	private openRenameModal(images: ImageInfo[]) {
-		const modal = new RenameModal(this.app, images, async (renamedImages) => {
+		const modal = new RenameModal(this.app, async (pattern: string) => {
+			// 批量重命名后刷新图片列表
 			await this.scanImages();
 		});
 		modal.open();
@@ -3791,94 +3803,57 @@ export class ImageManagerView extends ItemView {
 				this.updateClearSelectionButton();
 			}
 		);
-	}
-
-	/**
-	 * 获取选中的图片
-	 */
-	private getSelectedImages(): ImageInfo[] {
-		const selectedImages: ImageInfo[] = [];
 		
-		// 方法1：通过 .selected 类获取
-		const selectedItems = this.containerEl.querySelectorAll('.image-gallery-item.selected');
-		if (selectedItems.length > 0) {
-			selectedItems.forEach(itemEl => {
-				const nameEl = itemEl.querySelector('.image-name');
-				if (nameEl && nameEl.textContent) {
-					const image = this.images.find(img => img.name === nameEl.textContent);
-					if (image) {
-						selectedImages.push(image);
-					}
-				}
-			});
-		}
-		
-		// 方法2：如果方法1没有找到，通过 checkbox 的选中状态获取
-		if (selectedImages.length === 0) {
-			const checkboxes = this.containerEl.querySelectorAll('.image-select-checkbox:checked');
-			checkboxes.forEach(checkbox => {
-				const itemEl = (checkbox as HTMLElement).closest('.image-gallery-item');
-				if (itemEl) {
-					const nameEl = itemEl.querySelector('.image-name');
-					if (nameEl && nameEl.textContent) {
-						const image = this.images.find(img => img.name === nameEl.textContent);
-						if (image) {
-							selectedImages.push(image);
+		// 点击空白区域取消选中（像文件夹那样）
+		container.addEventListener('click', (e) => {
+			const target = e.target as HTMLElement;
+			// 检查是否点击的是空白区域（不是图片卡片或其子元素）
+			const clickedOnItem = target.closest('.image-gallery-item');
+			const clickedOnGroupHeader = target.closest('.group-header');
+			const clickedOnToolbar = target.closest('.toolbar-btn');
+			
+			if (!clickedOnItem && !clickedOnGroupHeader && !clickedOnToolbar) {
+				// 点击了空白区域，取消所有选中
+				const selectedItems = container.querySelectorAll('.image-gallery-item.selected');
+				if (selectedItems.length > 0) {
+					selectedItems.forEach((itemEl) => {
+						itemEl.classList.remove('selected');
+						const checkbox = itemEl.querySelector('.image-select-checkbox') as HTMLInputElement;
+						if (checkbox) {
+							checkbox.checked = false;
+							checkbox.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+							checkbox.style.borderColor = 'rgba(255, 255, 255, 0.8)';
+							checkbox.style.backgroundImage = 'none';
 						}
-					}
+					});
+					this.updateClearSelectionButton();
 				}
-			});
-		}
-		
-		return selectedImages;
-	}
-
-	/**
-	 * 清除选择
-	 */
-	private clearSelection() {
-		const selectedItems = this.containerEl.querySelectorAll('.image-gallery-item.selected');
-		selectedItems.forEach(itemEl => {
-			itemEl.classList.remove('selected');
-			const checkbox = itemEl.querySelector('.image-select-checkbox') as HTMLInputElement;
-			if (checkbox) {
-				checkbox.checked = false;
-				checkbox.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
-				checkbox.style.borderColor = 'rgba(255, 255, 255, 0.8)';
-				checkbox.style.backgroundImage = 'none';
 			}
 		});
-		
-		// 隐藏清除选择按钮
-		const clearSelectionBtn = document.getElementById('clear-selection-btn');
-		if (clearSelectionBtn) {
-			clearSelectionBtn.style.display = 'none';
-		}
-		
-		new Notice('已清除选择');
 	}
 
 	/**
-	 * 更新清除选择按钮的显示状态
+	 * 添加操作到历史栈
+	 * 如果该操作已存在，先移除再添加到栈顶
 	 */
-	private updateClearSelectionButton() {
-		const selectedItems = this.containerEl.querySelectorAll('.image-gallery-item.selected');
-		const clearSelectionBtn = document.getElementById('clear-selection-btn');
-		
-		if (clearSelectionBtn) {
-			if (selectedItems.length > 0) {
-				clearSelectionBtn.style.display = '';
-			} else {
-				clearSelectionBtn.style.display = 'none';
-			}
-		}
+	private addToOperationHistory(operation: 'search' | 'sort' | 'filter' | 'group') {
+		// 移除已存在的相同操作
+		this.operationHistory = this.operationHistory.filter(op => op !== operation);
+		// 添加到栈顶
+		this.operationHistory.push(operation);
 	}
 
 	/**
-	 * 处理清除按钮点击
-	 * 根据最后操作的类型，依次清除搜索、排序、筛选或分组
+	 * 从历史栈移除操作
 	 */
-	private handleClearButtonClick() {
+	private removeFromOperationHistory(operation: 'search' | 'sort' | 'filter' | 'group') {
+		this.operationHistory = this.operationHistory.filter(op => op !== operation);
+	}
+
+	/**
+	 * 获取栈顶的有效操作（该操作当前仍有条件）
+	 */
+	private getTopValidOperation(): 'search' | 'sort' | 'filter' | 'group' | null {
 		const hasSearch = this.searchQuery.trim() !== '';
 		const hasSort = this.sortOptions.rules.length > 1 || 
 						this.sortOptions.rules[0].sortBy !== this.plugin.settings.defaultSortBy ||
@@ -3892,24 +3867,31 @@ export class ImageManagerView extends ItemView {
 						  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
 						  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
 		const hasGroup = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
-		
-		// 按优先级清除：最后操作的优先清除
-		if (this.lastOperationType === 'search' && hasSearch) {
+
+		// 从栈顶向下遍历，找到第一个有效的操作
+		for (let i = this.operationHistory.length - 1; i >= 0; i--) {
+			const op = this.operationHistory[i];
+			if (op === 'search' && hasSearch) return 'search';
+			if (op === 'sort' && hasSort) return 'sort';
+			if (op === 'filter' && hasFilter) return 'filter';
+			if (op === 'group' && hasGroup) return 'group';
+		}
+		return null;
+	}
+
+	/**
+	 * 处理清除按钮点击
+	 * 按操作顺序倒序清除（后操作的先清除）
+	 */
+	private handleClearButtonClick() {
+		const topOperation = this.getTopValidOperation();
+		if (topOperation === 'search') {
 			this.clearSearch();
-		} else if (this.lastOperationType === 'sort' && hasSort) {
+		} else if (topOperation === 'sort') {
 			this.clearSort();
-		} else if (this.lastOperationType === 'filter' && hasFilter) {
+		} else if (topOperation === 'filter') {
 			this.clearFilter();
-		} else if (this.lastOperationType === 'group' && hasGroup) {
-			this.clearGroup();
-		} else if (hasSearch) {
-			// 默认优先清除搜索
-			this.clearSearch();
-		} else if (hasSort) {
-			this.clearSort();
-		} else if (hasFilter) {
-			this.clearFilter();
-		} else if (hasGroup) {
+		} else if (topOperation === 'group') {
 			this.clearGroup();
 		}
 	}
@@ -3920,48 +3902,21 @@ export class ImageManagerView extends ItemView {
 	private updateClearButtonState() {
 		if (!this.clearBtnElement) return;
 		
-		const hasSearch = this.searchQuery.trim() !== '';
-		const hasSort = this.sortOptions.rules.length > 1 || 
-						this.sortOptions.rules[0].sortBy !== this.plugin.settings.defaultSortBy ||
-						this.sortOptions.rules[0].sortOrder !== this.plugin.settings.defaultSortOrder;
-		const hasFilter = this.filterOptions.filterType !== this.plugin.settings.defaultFilterType ||
-						  this.filterOptions.lockFilter !== undefined ||
-						  this.filterOptions.referenceFilter !== undefined ||
-						  (this.filterOptions.sizeFilter && 
-						   (this.filterOptions.sizeFilter.min !== undefined || 
-							this.filterOptions.sizeFilter.max !== undefined)) ||
-						  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
-						  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
-		const hasGroup = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+		const topOperation = this.getTopValidOperation();
 		
-		// 如果有任何条件，显示按钮
-		if (hasSearch || hasSort || hasFilter || hasGroup) {
+		if (topOperation) {
 			this.clearBtnElement.style.display = '';
 			
-			// 根据最后操作类型显示不同的文本
-			if (this.lastOperationType === 'search' && hasSearch) {
+			if (topOperation === 'search') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除搜索</span>';
 				this.clearBtnElement.title = '清除搜索条件';
-			} else if (this.lastOperationType === 'sort' && hasSort) {
+			} else if (topOperation === 'sort') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除排序</span>';
 				this.clearBtnElement.title = '清除排序条件';
-			} else if (this.lastOperationType === 'filter' && hasFilter) {
+			} else if (topOperation === 'filter') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除筛选</span>';
 				this.clearBtnElement.title = '清除筛选条件';
-			} else if (this.lastOperationType === 'group' && hasGroup) {
-				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除分组</span>';
-				this.clearBtnElement.title = '清除所有分组';
-			} else if (hasSearch) {
-				// 默认优先显示搜索
-				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除搜索</span>';
-				this.clearBtnElement.title = '清除搜索条件';
-			} else if (hasSort) {
-				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除排序</span>';
-				this.clearBtnElement.title = '清除排序条件';
-			} else if (hasFilter) {
-				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除筛选</span>';
-				this.clearBtnElement.title = '清除筛选条件';
-			} else if (hasGroup) {
+			} else if (topOperation === 'group') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除分组</span>';
 				this.clearBtnElement.title = '清除所有分组';
 			}
@@ -3975,7 +3930,7 @@ export class ImageManagerView extends ItemView {
 	 */
 	private clearSearch() {
 		this.searchQuery = '';
-		this.lastOperationType = null;
+		this.removeFromOperationHistory('search');
 		this.applySortAndFilter();
 		this.updateButtonIndicator(document.getElementById('search-btn') as HTMLElement, 'search');
 		
@@ -3992,7 +3947,7 @@ export class ImageManagerView extends ItemView {
 		this.sortOptions = {
 			rules: [{ sortBy: this.plugin.settings.defaultSortBy, sortOrder: this.plugin.settings.defaultSortOrder }]
 		};
-		this.lastOperationType = null;
+		this.removeFromOperationHistory('sort');
 		this.applySortAndFilter();
 		this.updateButtonIndicator(document.getElementById('sort-btn') as HTMLElement, 'sort');
 		
@@ -4009,7 +3964,7 @@ export class ImageManagerView extends ItemView {
 		this.filterOptions = {
 			filterType: this.plugin.settings.defaultFilterType
 		};
-		this.lastOperationType = null;
+		this.removeFromOperationHistory('filter');
 		this.applySortAndFilter();
 		this.updateButtonIndicator(document.getElementById('filter-btn') as HTMLElement, 'filter');
 		
@@ -4035,7 +3990,7 @@ export class ImageManagerView extends ItemView {
 		
 		await this.plugin.saveData(this.plugin.data);
 		
-		this.lastOperationType = null;
+		this.removeFromOperationHistory('group');
 		this.renderImageList();
 		
 		// 更新分组按钮绿点

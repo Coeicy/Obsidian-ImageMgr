@@ -100,12 +100,12 @@ class TrashFolderManager {
 			}
 			
 			// 其他错误，尝试使用 adapter 创建
-			console.log('[TrashFolderManager] 尝试使用 adapter 创建回收站文件夹');
+			// 尝试使用 adapter 创建回收站文件夹
 			try {
 				const exists = await this.vault.adapter.exists(this.trashFolderPath);
 				if (!exists) {
 					await this.vault.adapter.mkdir(this.trashFolderPath);
-					console.log('[TrashFolderManager] 通过 adapter 成功创建回收站文件夹');
+					// 通过 adapter 成功创建回收站文件夹
 					
 					// 再次尝试获取文件夹对象
 					await new Promise(resolve => setTimeout(resolve, 100));

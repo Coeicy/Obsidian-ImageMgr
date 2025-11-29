@@ -1428,7 +1428,7 @@ export class ImageDetailModal extends Modal {
 		// 回收站文件显示删除时间，普通文件显示导入时间
 		if (this.isTrashFile) {
 			// 回收站文件：显示删除时间（mtime 是 deletedAt）
-			importValue.textContent = ImageProcessor.formatDate(this.image.mtime);
+			importValue.textContent = ImageProcessor.formatDate(this.image.mtime || Date.now());
 		} else {
 			// 普通文件：获取文件创建时间（导入时间）
 			const file = this.vault.getAbstractFileByPath(this.image.path) as TFile;
@@ -1493,7 +1493,11 @@ export class ImageDetailModal extends Modal {
 							if (!this.plugin.data.hashCache) {
 								this.plugin.data.hashCache = {};
 							}
-							this.plugin.data.hashCache[this.image.name] = hash;
+							this.plugin.data.hashCache[this.image.name] = {
+								hash: hash,
+								mtime: this.image.mtime || Date.now(),
+								size: this.image.size
+							};
 							await this.plugin.saveData(this.plugin.data);
 						}
 					}
@@ -2126,7 +2130,7 @@ export class ImageDetailModal extends Modal {
 		if (this.importValue) {
 			if (this.isTrashFile) {
 				// 回收站文件：显示删除时间（mtime 是 deletedAt）
-				this.importValue.textContent = ImageProcessor.formatDate(this.image.mtime);
+				this.importValue.textContent = ImageProcessor.formatDate(this.image.mtime || Date.now());
 			} else {
 				// 普通文件：显示导入时间
 				const file = this.vault.getAbstractFileByPath(this.image.path) as TFile;
@@ -2165,7 +2169,11 @@ export class ImageDetailModal extends Modal {
 								if (!this.plugin.data.hashCache) {
 									this.plugin.data.hashCache = {};
 								}
-								this.plugin.data.hashCache[this.image.name] = hash;
+								this.plugin.data.hashCache[this.image.name] = {
+										hash: hash,
+										mtime: this.image.mtime || Date.now(),
+										size: this.image.size
+									};
 								await this.plugin.saveData(this.plugin.data);
 							}
 						}
@@ -4542,9 +4550,9 @@ export class ImageDetailModal extends Modal {
 					// 阻止事件冒泡
 					e.stopPropagation();
 					
-					if (sizeActionBtn.textContent === '✅') {
+					if (sizeActionBtn && sizeActionBtn.textContent === '✅') {
 						// 保存尺寸操作（不影响显示文本）
-						const sizeValue = sizeInput!.value.trim();
+						const sizeValue = sizeInput ? sizeInput.value.trim() : '';
 						
 						// 验证尺寸值
 						if (sizeValue) {
@@ -4552,10 +4560,12 @@ export class ImageDetailModal extends Modal {
 							if (!validation.valid) {
 								// 验证失败，显示错误提示并阻止保存
 								new Notice(validation.message || '尺寸格式无效');
-								sizeActionBtn.textContent = '✅';
-								sizeActionBtn.title = '保存：保存尺寸修改';
-								sizeActionBtn.disabled = false;
-								sizeInput!.disabled = false;
+								if (sizeActionBtn) {
+									sizeActionBtn.textContent = '✅';
+									sizeActionBtn.title = '保存：保存尺寸修改';
+									sizeActionBtn.disabled = false;
+								}
+								if (sizeInput) sizeInput.disabled = false;
 								showSizeButton();
 								return; // 阻止保存
 							}
@@ -4583,10 +4593,12 @@ export class ImageDetailModal extends Modal {
 						beforeSaveSizeFullLine = ref.fullLine; // 保存前的完整行内容
 						
 						// 显示加载状态
-						sizeActionBtn.textContent = '⏳';
-						sizeActionBtn.title = '保存中...';
-						sizeActionBtn.disabled = true;
-						sizeInput!.disabled = true;
+						if (sizeActionBtn) {
+							sizeActionBtn.textContent = '⏳';
+							sizeActionBtn.title = '保存中...';
+							sizeActionBtn.disabled = true;
+						}
+						if (sizeInput) sizeInput.disabled = true;
 						
 						try {
 							const success = await this.saveDisplayText(ref.filePath, ref.lineNumber, ref.matchType, ref.fullLine, keepDisplayText, newWidth, newHeight);
@@ -4663,30 +4675,29 @@ export class ImageDetailModal extends Modal {
 								});
 							}
 							new Notice('保存尺寸失败: ' + (error instanceof Error ? error.message : String(error)));
-							sizeActionBtn.textContent = '✅';
-							sizeActionBtn.title = '保存：保存尺寸修改';
-							sizeActionBtn.disabled = false;
-							sizeInput!.disabled = false;
+							if (sizeActionBtn) {
+								sizeActionBtn.textContent = '✅';
+								sizeActionBtn.title = '保存：保存尺寸修改';
+								sizeActionBtn.disabled = false;
+							}
+							if (sizeInput) sizeInput.disabled = false;
 							showSizeButton();
 						}
-					} else if (sizeActionBtn.textContent === '↪️') {
+					} else if (sizeActionBtn && sizeActionBtn.textContent === '↪️') {
 						// 撤销尺寸操作
 						// 检查是否有有效的撤销数据
 						if (beforeSaveSizeWidth === undefined && beforeSaveSizeHeight === undefined && beforeSaveSizeFullLine === undefined) {
-							if (this.plugin?.logger) {
-								await this.plugin.logger.warn(OperationType.UPDATE_DISPLAY_TEXT, '撤销尺寸操作：没有有效的撤销数据', {
-									imagePath: this.image.path
-								});
-							}
 							new Notice('没有可撤销的更改');
 							return;
 						}
 						
 						// 显示加载状态
-						sizeActionBtn.textContent = '⏳';
-						sizeActionBtn.title = '撤销中...';
-						sizeActionBtn.disabled = true;
-						sizeInput!.disabled = true;
+						if (sizeActionBtn) {
+							sizeActionBtn.textContent = '⏳';
+							sizeActionBtn.title = '撤销中...';
+							sizeActionBtn.disabled = true;
+						}
+						if (sizeInput) sizeInput.disabled = true;
 						
 						try {
 							// 读取文件的当前内容
@@ -4707,16 +4718,9 @@ export class ImageDetailModal extends Modal {
 							const undoSuccess = await this.saveDisplayText(ref.filePath, ref.lineNumber, ref.matchType, currentLine, keepDisplayText, beforeSaveSizeWidth, beforeSaveSizeHeight);
 							
 							if (undoSuccess) {
-								// 撤销成功（与显示文本撤销按钮保持一致）
+								// 撤销成功
 								lastSavedSizeWidth = beforeSaveSizeWidth;
 								lastSavedSizeHeight = beforeSaveSizeHeight;
-								
-								// 清除撤销数据（与显示文本撤销按钮保持一致）
-								// 注意：撤销后，beforeSaveSizeWidth/Height 应该被清除，因为已经撤销了
-								// 但是为了支持多次撤销，我们需要保留 beforeSaveSizeFullLine 用于后续撤销
-								// 实际上，撤销后应该清除 beforeSave，因为已经恢复到 beforeSave 的状态了
-								// 但是，如果用户再次修改并保存，beforeSave 会被重新设置
-								// 所以这里不需要清除 beforeSaveSizeWidth/Height，让 checkSizeChanges 来判断
 								
 								// 更新尺寸输入框
 								if (sizeInput) {
@@ -4727,44 +4731,17 @@ export class ImageDetailModal extends Modal {
 									}
 								}
 								
-								// 更新缓存
-								if (this.plugin && typeof (this.plugin as any).updateDisplayTextCache === 'function') {
-									const undoContent = await this.app.vault.read(file);
-									const undoLines = undoContent.split('\n');
-									const undoLine = undoLines[ref.lineNumber - 1] || '';
-									(this.plugin as any).updateDisplayTextCache(ref.filePath, ref.lineNumber, keepDisplayText || '', undoLine);
-								}
-								
-								// 重新读取文件以更新 ref.fullLine
-								if (file) {
-									try {
-										const content = await this.app.vault.read(file);
-										const lines = content.split('\n');
-										if (ref.lineNumber >= 1 && ref.lineNumber <= lines.length) {
-											ref.fullLine = lines[ref.lineNumber - 1];
-										}
-									} catch (error) {
-										if (this.plugin?.logger) {
-											await this.plugin.logger.error(OperationType.UPDATE_DISPLAY_TEXT, '读取文件失败', {
-												error: error as Error,
-												imagePath: this.image.path,
-												details: { filePath: ref.filePath }
-											});
-										}
-									}
-								}
-								
-								// 隐藏撤销按钮（撤销完成，与显示文本撤销按钮保持一致）
-								sizeActionBtn.disabled = false;
-								sizeInput!.disabled = false;
+								// 隐藏撤销按钮
+								if (sizeActionBtn) sizeActionBtn.disabled = false;
+								if (sizeInput) sizeInput.disabled = false;
 								hideSizeButton();
 								
-								// 触发变化检测（检查是否还有撤销数据，与显示文本撤销按钮保持一致）
+								// 触发变化检测
 								checkSizeChanges();
 							} else {
 								// 撤销失败（没有变化）
-								sizeActionBtn.disabled = false;
-								sizeInput!.disabled = false;
+								if (sizeActionBtn) sizeActionBtn.disabled = false;
+								if (sizeInput) sizeInput.disabled = false;
 								hideSizeButton();
 							}
 						} catch (error) {
@@ -4775,10 +4752,12 @@ export class ImageDetailModal extends Modal {
 								});
 							}
 							new Notice('撤销尺寸失败: ' + (error instanceof Error ? error.message : String(error)));
-							sizeActionBtn.textContent = '↪️';
-							sizeActionBtn.title = '撤销：撤销刚才的尺寸修改';
-							sizeActionBtn.disabled = false;
-							sizeInput!.disabled = false;
+							if (sizeActionBtn) {
+								sizeActionBtn.textContent = '↪️';
+								sizeActionBtn.title = '撤销：撤销刚才的尺寸修改';
+								sizeActionBtn.disabled = false;
+							}
+							if (sizeInput) sizeInput.disabled = false;
 							showSizeButton();
 						}
 					}
@@ -4831,9 +4810,9 @@ export class ImageDetailModal extends Modal {
         if (!this.plugin) {
             return false;
         }
-        // 使用 LockListManager 进行检查
+        // 使用 LockListManager 进行检查（三要素匹配：文件名、哈希值、路径）
         if (this.plugin.lockListManager) {
-            return this.plugin.lockListManager.isFileLockedByNameOrHash(filename, this.image.md5);
+            return this.plugin.lockListManager.isFileLockedByNameOrHash(filename, this.image.md5, this.image.path);
         }
         // 降级到直接检查 settings（兼容性）
         return isFileIgnored(filename, this.image.md5, this.plugin.settings.ignoredFiles, this.plugin.settings.ignoredHashes);
@@ -4843,11 +4822,12 @@ export class ImageDetailModal extends Modal {
     private async removeFromIgnoredList(filename: string) {
         if (!this.plugin) return;
         
-        // 使用 LockListManager 移除锁定
+        // 使用 LockListManager 移除锁定（三要素匹配）
         const md5 = this.image?.md5;
-        await this.plugin.lockListManager.removeLockedFile(filename, md5);
+        const filePath = this.image?.path;
+        await this.plugin.lockListManager.removeLockedFile(filename, md5, filePath);
         
-        new Notice('✅ 已解除文件锁定');
+        new Notice('🔓 已解锁');
     }
 
 	// 切换锁定状态
@@ -4858,8 +4838,8 @@ export class ImageDetailModal extends Modal {
 		const isIgnored = this.isIgnoredFile(filename);
 		
         if (isIgnored) {
-            // 从锁定列表移除（解锁）- 使用 LockListManager
-            await this.plugin.lockListManager.removeLockedFile(filename, this.image.md5);
+            // 从锁定列表移除（解锁）- 使用 LockListManager（三要素匹配）
+            await this.plugin.lockListManager.removeLockedFile(filename, this.image.md5, this.image.path);
 			
 			// 记录日志
 			if (this.plugin.logger) {
@@ -4878,7 +4858,7 @@ export class ImageDetailModal extends Modal {
 				);
 			}
 			
-			new Notice('✅ 已解除文件锁定');
+			new Notice('🔓 已解锁');
         } else {
             // 添加到锁定列表（锁定）- 使用 LockListManager
             await this.plugin.lockListManager.addLockedFile(filename, this.image.path, this.image.md5);
@@ -4900,7 +4880,7 @@ export class ImageDetailModal extends Modal {
 				);
 			}
 			
-			new Notice('🔒 已锁定文件');
+			new Notice('🔒 已锁定');
 		}
 		
 		// 重新加载视图

@@ -41,251 +41,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 清空折叠状态集合，确保所有分组默认折叠
 		this.collapsedSections.clear();
 
-		// 标题和说明
-		containerEl.createEl('h2', { text: '图片管理设置' });
-		const intro = containerEl.createDiv('plugin-intro');
-		intro.style.color = 'var(--text-muted)';
-		intro.style.marginBottom = '20px';
-		intro.style.padding = '12px';
-		intro.style.backgroundColor = 'var(--background-secondary)';
-		intro.style.borderRadius = '6px';
-		intro.style.borderLeft = '3px solid var(--interactive-accent)';
-		intro.innerHTML = '📸 管理 Obsidian 笔记库中的图片文件<br>支持扫描、重命名、旋转、移动等功能';
-
 		// ========== 所有设置（默认全部折叠） ==========
-
-		// 0. 快捷键设置（放在最前面）
-		const shortcutsSection = this.createCollapsibleSection(containerEl, '⌨️ 键盘快捷键', 'shortcuts', false);
-
-		// 说明文字
-		const shortcutsIntro = shortcutsSection.contentEl.createDiv();
-		shortcutsIntro.style.color = 'var(--text-muted)';
-		shortcutsIntro.style.marginBottom = '16px';
-		shortcutsIntro.style.fontSize = '0.9em';
-		shortcutsIntro.innerHTML = `
-			<p>自定义插件的键盘快捷键。点击输入框后直接按下键盘按键即可设置快捷键。</p>
-			<p>支持格式：单个按键（如 <code>r</code>、<code>ArrowLeft</code>）或组合键（如 <code>Ctrl+S</code>、<code>Ctrl+Shift+F</code>）。</p>
-			<p><strong>注意：</strong>修改快捷键后需要重新打开对应的视图才能生效。</p>
-		`;
-
-		// 快捷键列表容器
-		const shortcutsList = shortcutsSection.contentEl.createDiv('shortcuts-list');
-		shortcutsList.style.marginBottom = '16px';
-
-		// 按类别分组显示快捷键
-		const categories: Array<{ name: string; label: string; shortcuts: string[] }> = [
-			{ name: 'navigation', label: '导航', shortcuts: ['image-detail-previous', 'image-detail-next', 'image-detail-first', 'image-detail-last', 'image-detail-close', 'manager-open-detail'] },
-			{ name: 'preview', label: '预览操作', shortcuts: ['image-detail-zoom-in', 'image-detail-zoom-out', 'image-detail-reset', 'image-detail-rotate-right', 'image-detail-rotate-left', 'image-detail-toggle-view-mode', 'image-detail-toggle-wheel-mode'] },
-			{ name: 'edit', label: '编辑操作', shortcuts: ['image-detail-delete', 'image-detail-save', 'manager-delete'] },
-			{ name: 'view', label: '视图操作', shortcuts: ['manager-search', 'manager-sort', 'manager-filter', 'manager-group', 'manager-select-all'] },
-			{ name: 'batch', label: '批量操作', shortcuts: ['manager-batch-rename', 'manager-smart-rename', 'manager-toggle-lock'] }
-		];
-
-		const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-		const shortcuts = this.plugin.settings.keyboardShortcuts || {};
-
-		categories.forEach(category => {
-			const categoryDiv = shortcutsList.createDiv('shortcut-category');
-			categoryDiv.style.marginBottom = '20px';
-			
-			const categoryTitle = categoryDiv.createEl('h4', { text: category.label });
-			categoryTitle.style.marginBottom = '8px';
-			categoryTitle.style.fontSize = '0.95em';
-			categoryTitle.style.fontWeight = '600';
-			categoryTitle.style.color = 'var(--text-normal)';
-
-			category.shortcuts.forEach(shortcutId => {
-				const def = SHORTCUT_DEFINITIONS[shortcutId];
-				if (!def) return;
-
-				// 创建列表行
-				const shortcutRow = categoryDiv.createDiv('shortcut-row');
-				shortcutRow.style.display = 'flex';
-				shortcutRow.style.alignItems = 'center';
-				shortcutRow.style.gap = '12px';
-				shortcutRow.style.padding = '8px 0';
-				shortcutRow.style.borderBottom = '1px solid var(--background-modifier-border)';
-
-				// 名称和描述
-				const infoDiv = shortcutRow.createDiv('shortcut-info');
-				infoDiv.style.flex = '1';
-				infoDiv.style.minWidth = '0';
-				
-				const nameDiv = infoDiv.createDiv('shortcut-name');
-				nameDiv.textContent = def.name;
-				nameDiv.style.fontWeight = '500';
-				nameDiv.style.fontSize = '0.9em';
-				nameDiv.style.marginBottom = '2px';
-
-				const descDiv = infoDiv.createDiv('shortcut-desc');
-				descDiv.textContent = def.description;
-				descDiv.style.fontSize = '0.8em';
-				descDiv.style.color = 'var(--text-muted)';
-
-				// 输入框（合并显示框功能）
-				const currentKey = shortcuts[shortcutId] || def.defaultKey;
-				const formattedKey = formatShortcut(currentKey, isMac);
-
-				const keyInput = shortcutRow.createEl('input', {
-					type: 'text',
-					value: formattedKey,
-					cls: 'shortcut-key-input',
-					placeholder: '点击后按下键盘按键...'
-				});
-				keyInput.style.width = '150px';
-				keyInput.style.padding = '4px 8px';
-				keyInput.style.border = '1px solid var(--background-modifier-border)';
-				keyInput.style.borderRadius = '4px';
-				keyInput.style.backgroundColor = 'var(--background-secondary)';
-				keyInput.style.color = 'var(--text-normal)';
-				keyInput.style.fontFamily = 'monospace';
-				keyInput.style.fontSize = '0.85em';
-				keyInput.style.textAlign = 'center';
-				keyInput.readOnly = true; // 只读，只能通过键盘输入设置
-				
-				// 存储原始快捷键字符串（用于保存）
-				let currentShortcut = currentKey;
-				
-				// 检查是否被修改过（与默认值不同）
-				const isModified = currentKey !== def.defaultKey;
-
-				// 键盘输入状态
-				let isCapturing = false;
-
-				// 重置按钮（只在被修改时显示）
-				const resetBtn = shortcutRow.createEl('button', { text: '重置' });
-				resetBtn.style.padding = '4px 10px';
-				resetBtn.style.fontSize = '0.85em';
-				resetBtn.style.flexShrink = '0';
-				resetBtn.style.display = isModified ? '' : 'none';
-				resetBtn.addEventListener('click', async () => {
-					// 从设置中删除自定义快捷键（恢复为默认值）
-					delete shortcuts[shortcutId];
-					currentShortcut = def.defaultKey;
-					keyInput.value = formatShortcut(def.defaultKey, isMac);
-					this.plugin.settings.keyboardShortcuts = shortcuts;
-					await this.plugin.saveSettings();
-					
-					// 隐藏重置按钮
-					resetBtn.style.display = 'none';
-					
-					new Notice('已重置为默认值');
-				});
-
-				// 将键盘事件转换为快捷键字符串
-				const eventToShortcut = (e: KeyboardEvent): string | null => {
-					// 忽略修饰键单独按下
-					if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
-						return null;
-					}
-
-					const parts: string[] = [];
-					
-					// 添加修饰键（按固定顺序：Ctrl -> Shift -> Alt）
-					// 注意：Mac 上 Cmd 键会触发 metaKey，我们统一转换为 Ctrl
-					if (e.ctrlKey || e.metaKey) {
-						parts.push('Ctrl');
-					}
-					if (e.shiftKey) {
-						parts.push('Shift');
-					}
-					if (e.altKey) {
-						parts.push('Alt');
-					}
-					
-					// 添加主键
-					let mainKey = e.key;
-					
-					// 处理特殊键名
-					if (mainKey.startsWith('Arrow')) {
-						// ArrowLeft -> ArrowLeft, ArrowRight -> ArrowRight 等
-						mainKey = mainKey;
-					} else if (mainKey === ' ') {
-						mainKey = 'Space';
-					} else if (mainKey === '=') {
-						// = 键（通常用于 + 键）
-						mainKey = '=';
-					} else if (mainKey.length === 1) {
-						// 单个字符（字母、数字、符号）转为小写
-						mainKey = mainKey.toLowerCase();
-					} else {
-						// 其他功能键（如 'Enter', 'Escape', 'Home', 'End', 'Delete', 'Backspace' 等）
-						mainKey = mainKey;
-					}
-					
-					// 如果没有主键，返回 null（只有修饰键）
-					if (!mainKey || mainKey === 'Unidentified') {
-						return null;
-					}
-					
-					parts.push(mainKey);
-					
-					return parts.join('+');
-				};
-
-				// 键盘输入捕获
-				keyInput.addEventListener('focus', () => {
-					isCapturing = true;
-					keyInput.style.borderColor = 'var(--interactive-accent)';
-					keyInput.style.backgroundColor = 'var(--background-modifier-hover)';
-					keyInput.placeholder = '按下键盘按键...';
-				});
-
-				keyInput.addEventListener('blur', () => {
-					isCapturing = false;
-					keyInput.style.borderColor = 'var(--background-modifier-border)';
-					keyInput.style.backgroundColor = 'var(--background-secondary)';
-					keyInput.placeholder = '点击后按下键盘按键...';
-				});
-
-				keyInput.addEventListener('keydown', async (e: KeyboardEvent) => {
-					if (!isCapturing) return;
-					
-					e.preventDefault();
-					e.stopPropagation();
-					
-					const shortcut = eventToShortcut(e);
-					if (shortcut) {
-						currentShortcut = shortcut;
-						keyInput.value = formatShortcut(shortcut, isMac);
-						shortcuts[shortcutId] = shortcut;
-						this.plugin.settings.keyboardShortcuts = shortcuts;
-						await this.plugin.saveSettings();
-						
-						// 检查是否被修改，显示/隐藏重置按钮
-						const isNowModified = shortcut !== def.defaultKey;
-						if (isNowModified) {
-							resetBtn.style.display = '';
-						} else {
-							resetBtn.style.display = 'none';
-						}
-						
-						// 延迟失焦，让用户看到结果
-						setTimeout(() => {
-							keyInput.blur();
-						}, 300);
-					}
-				});
-			});
-		});
-
-		// 重置所有快捷键按钮
-		new Setting(shortcutsSection.contentEl)
-			.setName('重置所有快捷键')
-			.setDesc('将所有快捷键恢复为默认值')
-			.addButton(button => button
-				.setButtonText('🔄 重置全部')
-				.setWarning()
-				.onClick(async () => {
-					const confirmed = confirm('确定要重置所有快捷键为默认值吗？');
-					if (confirmed) {
-						this.plugin.settings.keyboardShortcuts = {};
-						await this.plugin.saveSettings();
-						new Notice('✅ 已重置所有快捷键');
-						// 重新显示设置页面
-						this.display();
-					}
-				}));
 
 		// 1. 基础设置
 		const basicSection = this.createCollapsibleSection(containerEl, '📌 基础设置', 'basic', false);
@@ -331,14 +87,19 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// 2. 显示设置
-		const displaySection = this.createCollapsibleSection(containerEl, '🎨 显示设置', 'display', false);
+		// 2. 主页设置（图片管理主页的布局和显示）
+		const homeSection = this.createCollapsibleSection(containerEl, '🏠 主页设置', 'home', false);
 
-		new Setting(displaySection.contentEl)
+		// 布局设置（二级标题）
+		const layoutTitle = homeSection.contentEl.createEl('h4', { text: '📐 布局' });
+		layoutTitle.style.marginBottom = '12px';
+		layoutTitle.style.paddingBottom = '8px';
+		layoutTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+
+		new Setting(homeSection.contentEl)
 			.setName('每行显示数量')
-			.setDesc('图片画廊中每行显示的图片数量（范围：1-10，默认：5）')
+			.setDesc('图片画廊中每行显示的图片数量（范围：1-10）')
 			.addSlider(slider => {
-				// 确保使用正确的值，如果设置中没有值或值无效，使用默认值 5
 				const currentValue = (typeof this.plugin.settings.imagesPerRow === 'number' && 
 					this.plugin.settings.imagesPerRow >= 1 && 
 					this.plugin.settings.imagesPerRow <= 10) 
@@ -350,7 +111,6 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					.setValue(currentValue)
 					.setDynamicTooltip()
 					.onChange(async (value) => {
-						// 确保值在有效范围内
 						const validValue = Math.max(1, Math.min(10, Math.round(value)));
 						this.plugin.settings.imagesPerRow = validValue;
 						await this.plugin.saveSettings();
@@ -361,7 +121,90 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					});
 			});
 
-		new Setting(displaySection.contentEl)
+		new Setting(homeSection.contentEl)
+			.setName('卡片间距')
+			.setDesc('图片卡片之间的间距（像素，范围：4-24）')
+			.addSlider(slider => slider
+				.setLimits(4, 24, 2)
+				.setValue(this.plugin.settings.cardSpacing)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.cardSpacing = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(homeSection.contentEl)
+			.setName('卡片圆角')
+			.setDesc('图片卡片的圆角大小（像素，范围：0-20）')
+			.addSlider(slider => slider
+				.setLimits(0, 20, 1)
+				.setValue(this.plugin.settings.cardBorderRadius)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.cardBorderRadius = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(homeSection.contentEl)
+			.setName('固定图片高度')
+			.setDesc('关闭"自适应大小"时的图片高度（像素，范围：100-400）')
+			.addSlider(slider => slider
+				.setLimits(100, 400, 10)
+				.setValue(this.plugin.settings.fixedImageHeight)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.fixedImageHeight = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(homeSection.contentEl)
+			.setName('统一卡片高度')
+			.setDesc('同一行的图片卡片保持相同高度')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.uniformCardHeight)
+				.onChange(async (value) => {
+					this.plugin.settings.uniformCardHeight = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(homeSection.contentEl)
+			.setName('启用悬停效果')
+			.setDesc('鼠标悬停时显示阴影和缩放动画')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableHoverEffect)
+				.onChange(async (value) => {
+					this.plugin.settings.enableHoverEffect = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		// 默认值设置（二级标题）
+		const defaultsTitle = homeSection.contentEl.createEl('h4', { text: '⚙️ 默认值' });
+		defaultsTitle.style.marginTop = '20px';
+		defaultsTitle.style.marginBottom = '12px';
+		defaultsTitle.style.paddingBottom = '8px';
+		defaultsTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+
+		new Setting(homeSection.contentEl)
 			.setName('默认排序方式')
 			.setDesc('图片列表的默认排序依据')
 			.addDropdown(dropdown => dropdown
@@ -375,7 +218,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(displaySection.contentEl)
+		new Setting(homeSection.contentEl)
 			.setName('默认排序顺序')
 			.setDesc('升序（A-Z，小到大）或降序（Z-A，大到小）')
 			.addDropdown(dropdown => dropdown
@@ -387,9 +230,9 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(displaySection.contentEl)
+		new Setting(homeSection.contentEl)
 			.setName('默认筛选类型')
-			.setDesc('默认显示哪种格式的图片（可随时更改）')
+			.setDesc('默认显示哪种格式的图片')
 			.addDropdown(dropdown => dropdown
 				.addOption('all', '全部')
 				.addOption('png', 'PNG')
@@ -404,20 +247,49 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// 图片卡片显示信息（2级标题）
-		const cardInfoTitle = displaySection.contentEl.createEl('h2', { text: '图片卡片显示信息' });
-		cardInfoTitle.style.marginTop = '24px';
-		cardInfoTitle.style.marginBottom = '12px';
-		cardInfoTitle.style.fontSize = '1.1em';
-		cardInfoTitle.style.fontWeight = '600';
-		cardInfoTitle.style.color = 'var(--text-normal)';
-		cardInfoTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
-		cardInfoTitle.style.paddingBottom = '8px';
+		// 统计信息设置（二级标题）
+		const statsTitle = homeSection.contentEl.createEl('h4', { text: '📊 统计信息' });
+		statsTitle.style.marginTop = '20px';
+		statsTitle.style.marginBottom = '12px';
+		statsTitle.style.paddingBottom = '8px';
+		statsTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
 
-		// 图片卡片显示信息设置项（按指定顺序排列）
-		new Setting(displaySection.contentEl)
+		new Setting(homeSection.contentEl)
+			.setName('显示统计信息')
+			.setDesc('显示图片总数量、总大小等统计数据')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showStatistics)
+				.onChange(async (value) => {
+					this.plugin.settings.showStatistics = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(homeSection.contentEl)
+			.setName('统计信息位置')
+			.setDesc('统计面板显示在页面顶部还是底部')
+			.addDropdown(dropdown => dropdown
+				.addOption('top', '顶部')
+				.addOption('bottom', '底部')
+				.setValue(this.plugin.settings.statisticsPosition)
+				.onChange(async (value) => {
+					this.plugin.settings.statisticsPosition = value as 'top' | 'bottom';
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		// 3. 图片卡片设置
+		const cardSection = this.createCollapsibleSection(containerEl, '🖼️ 图片卡片', 'card', false);
+
+		new Setting(cardSection.contentEl)
 			.setName('纯净画廊')
-			.setDesc('开启后只显示图片，隐藏所有信息（文件名、大小、尺寸、锁定图标、选择框等）。此选项优先于其他显示设置。')
+			.setDesc('开启后只显示图片，隐藏所有信息（文件名、大小、尺寸、锁定图标、选择框等）')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.pureGallery)
 				.onChange(async (value) => {
@@ -429,7 +301,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(displaySection.contentEl)
+		new Setting(cardSection.contentEl)
 			.setName('自适应图片大小')
 			.setDesc('图片按原始宽高比自适应显示（类似 Notion 效果），关闭则固定高度显示')
 			.addToggle(toggle => toggle
@@ -443,7 +315,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(displaySection.contentEl)
+		new Setting(cardSection.contentEl)
 			.setName('显示图片名称')
 			.setDesc('在图片卡片上显示文件名')
 			.addToggle(toggle => toggle
@@ -457,7 +329,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(displaySection.contentEl)
+		new Setting(cardSection.contentEl)
 			.setName('图片名称换行')
 			.setDesc('当图片名称过长时允许换行显示')
 			.addToggle(toggle => toggle
@@ -471,7 +343,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(displaySection.contentEl)
+		new Setting(cardSection.contentEl)
 			.setName('显示锁定图标')
 			.setDesc('显示被锁定文件右上角的🔒图标')
 			.addToggle(toggle => toggle
@@ -485,7 +357,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(displaySection.contentEl)
+		new Setting(cardSection.contentEl)
 			.setName('显示图片大小')
 			.setDesc('在图片卡片上显示文件大小')
 			.addToggle(toggle => toggle
@@ -499,7 +371,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(displaySection.contentEl)
+		new Setting(cardSection.contentEl)
 			.setName('显示图片尺寸')
 			.setDesc('在图片卡片上显示宽度×高度')
 			.addToggle(toggle => toggle
@@ -513,7 +385,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(displaySection.contentEl)
+		new Setting(cardSection.contentEl)
 			.setName('显示图片序号')
 			.setDesc('在图片卡片右上角显示序号（例如：1/100, 2/100...），方便快速定位')
 			.addToggle(toggle => toggle
@@ -635,8 +507,8 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			<p style="margin: 6px 0 0 0; font-size: 0.9em;">⚠️ 注意：只有通过插件删除的文件才会进入回收站。在 Obsidian 文件管理器或文件系统中直接删除的文件无法拦截。</p>
 		`;
 
-		// 4. 引用设置
-		const referenceSection = this.createCollapsibleSection(containerEl, '🔗 引用设置', 'reference', false);
+		// 4. 引用与预览（合并引用设置和预览设置）
+		const referenceSection = this.createCollapsibleSection(containerEl, '🔗 引用与预览', 'reference', false);
 
 		// 图片引用格式说明
 		const referenceFormatIntro = referenceSection.contentEl.createDiv();
@@ -677,7 +549,35 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// ========== 高级设置（默认全部折叠） ==========
+		new Setting(referenceSection.contentEl)
+			.setName('鼠标滚轮模式')
+			.setDesc('在图片详情页中，当鼠标位于图片上时，滚轮的默认行为')
+			.addDropdown(dropdown => dropdown
+				.addOption('zoom', '缩放图片（默认）')
+				.addOption('scroll', '切换图片')
+				.setValue(this.plugin.settings.defaultWheelMode)
+				.onChange(async (value) => {
+					this.plugin.settings.defaultWheelMode = value as 'scroll' | 'zoom';
+					await this.plugin.saveSettings();
+					
+					// 更新所有打开的图片详情页
+					const leaves = this.app.workspace.getLeavesOfType('modal');
+					for (const leaf of leaves) {
+						const view = leaf.view as any;
+						if (view && view.isImageDetailModal) {
+							if (view.isScrollMode !== undefined) {
+								if (value === 'scroll') {
+									view.isScrollMode = true;
+								} else {
+									view.isScrollMode = false;
+								}
+								if (view.updateScrollModeIndicator) {
+									view.updateScrollModeIndicator();
+								}
+							}
+						}
+					}
+				}));
 
 		// 5. 重命名设置
 		const pathNamingSection = this.createCollapsibleSection(containerEl, '🔄 重命名设置', 'path-naming', false);
@@ -742,119 +642,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// 6. 预览设置
-		const previewSection = this.createCollapsibleSection(containerEl, '🖼️ 预览设置', 'preview', false);
-
-		new Setting(previewSection.contentEl)
-			.setName('鼠标滚轮模式')
-			.setDesc('在图片详情页中，当鼠标位于图片上时，滚轮的默认行为。默认：缩放图片（向上滚动放大，向下滚动缩小）')
-			.addDropdown(dropdown => dropdown
-				.addOption('zoom', '缩放图片（默认）')
-				.addOption('scroll', '切换图片')
-				.setValue(this.plugin.settings.defaultWheelMode)
-				.onChange(async (value) => {
-					this.plugin.settings.defaultWheelMode = value as 'scroll' | 'zoom';
-					await this.plugin.saveSettings();
-					
-					// 更新所有打开的图片详情页
-					const leaves = this.app.workspace.getLeavesOfType('modal');
-					for (const leaf of leaves) {
-						const view = leaf.view as any;
-						if (view && view.isImageDetailModal) {
-							if (view.isScrollMode !== undefined) {
-								if (value === 'scroll') {
-									view.isScrollMode = true;
-								} else {
-									view.isScrollMode = false;
-								}
-								if (view.updateScrollModeIndicator) {
-									view.updateScrollModeIndicator();
-								}
-							}
-						}
-					}
-				}));
-
-		// 7. UI主题设置
-		const uiThemeSection = this.createCollapsibleSection(containerEl, '🎭 UI主题设置', 'ui-theme', false);
-
-		new Setting(uiThemeSection.contentEl)
-			.setName('卡片圆角大小')
-			.setDesc('图片卡片的圆角大小（像素，范围：0-20）')
-			.addSlider(slider => slider
-				.setLimits(0, 20, 1)
-				.setValue(this.plugin.settings.cardBorderRadius)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.cardBorderRadius = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(uiThemeSection.contentEl)
-			.setName('卡片间距')
-			.setDesc('图片卡片之间的间距（像素，范围：4-24）')
-			.addSlider(slider => slider
-				.setLimits(4, 24, 2)
-				.setValue(this.plugin.settings.cardSpacing)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.cardSpacing = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(uiThemeSection.contentEl)
-			.setName('固定图片高度')
-			.setDesc('当关闭"自适应图片大小"时，图片预览的固定高度（像素，范围：100-400）')
-			.addSlider(slider => slider
-				.setLimits(100, 400, 10)
-				.setValue(this.plugin.settings.fixedImageHeight)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.fixedImageHeight = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(uiThemeSection.contentEl)
-			.setName('启用悬停效果')
-			.setDesc('鼠标悬停在图片卡片上时显示阴影和缩放效果')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enableHoverEffect)
-				.onChange(async (value) => {
-					this.plugin.settings.enableHoverEffect = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(uiThemeSection.contentEl)
-			.setName('统一卡片高度')
-			.setDesc('开启后，同一行的图片卡片将统一高度（默认关闭，卡片高度自适应内容）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.uniformCardHeight)
-				.onChange(async (value) => {
-					this.plugin.settings.uniformCardHeight = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		// 8. 性能优化
+		// 6. 性能优化
 		const performanceSection = this.createCollapsibleSection(containerEl, '⚡ 性能优化', 'performance', false);
 
 		new Setting(performanceSection.contentEl)
@@ -963,40 +751,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// 11. 统计信息
-		const statisticsSection = this.createCollapsibleSection(containerEl, '📊 统计信息', 'statistics', false);
-
-		new Setting(statisticsSection.contentEl)
-			.setName('显示统计信息')
-			.setDesc('在图片管理页面显示统计信息面板（总数量、总大小等）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showStatistics)
-				.onChange(async (value) => {
-					this.plugin.settings.showStatistics = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(statisticsSection.contentEl)
-			.setName('统计信息位置')
-			.setDesc('统计信息面板显示在页面顶部还是底部')
-			.addDropdown(dropdown => dropdown
-				.addOption('top', '顶部')
-				.addOption('bottom', '底部')
-				.setValue(this.plugin.settings.statisticsPosition)
-				.onChange(async (value) => {
-					this.plugin.settings.statisticsPosition = value as 'top' | 'bottom';
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		// 12. 锁定文件
+		// 10. 锁定文件
 		const ignoredFilesSection = this.createCollapsibleSection(containerEl, '🔒 锁定文件', 'ignored-files', false);
 
 		// 锁定文件说明
@@ -1217,22 +972,23 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			actionCell.style.textAlign = 'center';
 			actionCell.style.userSelect = 'none';
 		
-			const deleteBtn = actionCell.createEl('button');
+			const deleteBtn = actionCell.createEl('span');
 			deleteBtn.textContent = '✕';
-			deleteBtn.style.padding = '2px 4px';
-			deleteBtn.style.fontSize = '1.5em';
 			deleteBtn.style.cursor = 'pointer';
-			deleteBtn.style.border = 'none';
-			deleteBtn.style.background = 'none';
-			deleteBtn.style.color = '#5b9bd5';
-			deleteBtn.style.fontWeight = 'bold';
-			deleteBtn.style.lineHeight = '1.2';
+			deleteBtn.style.color = 'var(--text-muted)';
+			deleteBtn.style.fontSize = '14px';
+			deleteBtn.addEventListener('mouseenter', () => {
+				deleteBtn.style.color = 'var(--text-error)';
+			});
+			deleteBtn.addEventListener('mouseleave', () => {
+				deleteBtn.style.color = 'var(--text-muted)';
+			});
 			deleteBtn.addEventListener('click', async () => {
 				const fileName = item.value;
 				const hash = item.hash;
 			
-				// 使用 LockListManager 移除锁定
-				await this.plugin.lockListManager.removeLockedFile(fileName, hash);
+				// 使用 LockListManager 移除锁定（跳过回调，避免刷新整个页面）
+				await this.plugin.lockListManager.removeLockedFile(fileName, hash, undefined, true);
 				
 				// 只更新表格，不折叠设置页
 				lockKeys.splice(item.index, 1);
@@ -1250,7 +1006,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				prevBtn.disabled = currentPage <= 1;
 				nextBtn.disabled = currentPage >= newTotalPages;
 				
-				new Notice('✅ 已解除文件锁定（已从列表移除）');
+				new Notice('🔓 已解锁');
 			});
 		});
 	};
@@ -1375,7 +1131,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	clearPageBtn.addEventListener('click', async () => {
 		const pageItems = allItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 		if (pageItems.length === 0) {
-			new Notice('本页没有锁定项');
+			new Notice('本页没有已锁定的图片');
 			return;
 		}
 		const confirmed = await ConfirmModal.show(
@@ -1392,7 +1148,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			}));
 			await this.plugin.lockListManager.removeLockedFileBatch(itemsToRemove);
 			
-			new Notice(`✅ 已清除本页 ${pageItems.length} 个锁定`);
+			new Notice(`🔓 已解锁本页 ${pageItems.length} 张图片`);
 			this.display();
 		}
 	});
@@ -1504,7 +1260,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		if (confirmed === 'save') {
 			// 使用 LockListManager 清空所有锁定
 			await this.plugin.lockListManager.clearAllLockedFiles();
-			new Notice('✅ 已清除所有锁定');
+			new Notice('🔓 已解锁所有图片');
 			this.display();
 		}
 	});
@@ -1600,6 +1356,174 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					if (confirmed) {
 						await this.plugin.logger?.clearAllLogs();
 						new Notice('✅ 已清除所有日志');
+					}
+				}));
+
+		// 12. 键盘快捷键（放在最后，高级设置）
+		const shortcutsSection = this.createCollapsibleSection(containerEl, '⌨️ 键盘快捷键', 'shortcuts', false);
+
+		// 说明文字
+		const shortcutsIntro = shortcutsSection.contentEl.createDiv();
+		shortcutsIntro.style.color = 'var(--text-muted)';
+		shortcutsIntro.style.marginBottom = '16px';
+		shortcutsIntro.style.fontSize = '0.9em';
+		shortcutsIntro.innerHTML = `
+			<p>自定义插件的键盘快捷键。点击输入框后直接按下键盘按键即可设置快捷键。</p>
+			<p>支持格式：单个按键（如 <code>r</code>、<code>ArrowLeft</code>）或组合键（如 <code>Ctrl+S</code>、<code>Ctrl+Shift+F</code>）。</p>
+			<p><strong>注意：</strong>修改快捷键后需要重新打开对应的视图才能生效。</p>
+		`;
+
+		// 快捷键列表容器
+		const shortcutsList = shortcutsSection.contentEl.createDiv('shortcuts-list');
+		shortcutsList.style.marginBottom = '16px';
+
+		// 按类别分组显示快捷键
+		const categories: Array<{ name: string; label: string; shortcuts: string[] }> = [
+			{ name: 'navigation', label: '导航', shortcuts: ['image-detail-previous', 'image-detail-next', 'image-detail-first', 'image-detail-last', 'image-detail-close', 'manager-open-detail'] },
+			{ name: 'preview', label: '预览操作', shortcuts: ['image-detail-zoom-in', 'image-detail-zoom-out', 'image-detail-reset', 'image-detail-rotate-right', 'image-detail-rotate-left', 'image-detail-toggle-view-mode', 'image-detail-toggle-wheel-mode'] },
+			{ name: 'edit', label: '编辑操作', shortcuts: ['image-detail-delete', 'image-detail-save', 'manager-delete'] },
+			{ name: 'view', label: '视图操作', shortcuts: ['manager-search', 'manager-sort', 'manager-filter', 'manager-group', 'manager-select-all'] },
+			{ name: 'batch', label: '批量操作', shortcuts: ['manager-batch-rename', 'manager-smart-rename', 'manager-toggle-lock'] }
+		];
+
+		const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+		const shortcuts = this.plugin.settings.keyboardShortcuts || {};
+
+		categories.forEach(category => {
+			const categoryDiv = shortcutsList.createDiv('shortcut-category');
+			categoryDiv.style.marginBottom = '20px';
+			
+			const categoryTitle = categoryDiv.createEl('h4', { text: category.label });
+			categoryTitle.style.marginBottom = '8px';
+			categoryTitle.style.fontSize = '0.95em';
+			categoryTitle.style.fontWeight = '600';
+			categoryTitle.style.color = 'var(--text-normal)';
+
+			category.shortcuts.forEach(shortcutId => {
+				const def = SHORTCUT_DEFINITIONS[shortcutId];
+				if (!def) return;
+
+				const shortcutRow = categoryDiv.createDiv('shortcut-row');
+				shortcutRow.style.display = 'flex';
+				shortcutRow.style.alignItems = 'center';
+				shortcutRow.style.gap = '12px';
+				shortcutRow.style.padding = '8px 0';
+				shortcutRow.style.borderBottom = '1px solid var(--background-modifier-border)';
+
+				const infoDiv = shortcutRow.createDiv('shortcut-info');
+				infoDiv.style.flex = '1';
+				infoDiv.style.minWidth = '0';
+				
+				const nameDiv = infoDiv.createDiv('shortcut-name');
+				nameDiv.textContent = def.name;
+				nameDiv.style.fontWeight = '500';
+				nameDiv.style.fontSize = '0.9em';
+				nameDiv.style.marginBottom = '2px';
+
+				const descDiv = infoDiv.createDiv('shortcut-desc');
+				descDiv.textContent = def.description;
+				descDiv.style.fontSize = '0.8em';
+				descDiv.style.color = 'var(--text-muted)';
+
+				const currentKey = shortcuts[shortcutId] || def.defaultKey;
+				const formattedKey = formatShortcut(currentKey, isMac);
+
+				const keyInput = shortcutRow.createEl('input', {
+					type: 'text',
+					value: formattedKey,
+					cls: 'shortcut-key-input',
+					placeholder: '点击后按下键盘按键...'
+				});
+				keyInput.style.width = '150px';
+				keyInput.style.padding = '4px 8px';
+				keyInput.style.border = '1px solid var(--background-modifier-border)';
+				keyInput.style.borderRadius = '4px';
+				keyInput.style.backgroundColor = 'var(--background-secondary)';
+				keyInput.style.color = 'var(--text-normal)';
+				keyInput.style.fontFamily = 'monospace';
+				keyInput.style.fontSize = '0.85em';
+				keyInput.style.textAlign = 'center';
+				keyInput.readOnly = true;
+				
+				let currentShortcut = currentKey;
+				const isModified = currentKey !== def.defaultKey;
+				let isCapturing = false;
+
+				const resetBtn = shortcutRow.createEl('button', { text: '重置' });
+				resetBtn.style.padding = '4px 10px';
+				resetBtn.style.fontSize = '0.85em';
+				resetBtn.style.flexShrink = '0';
+				resetBtn.style.display = isModified ? '' : 'none';
+				resetBtn.addEventListener('click', async () => {
+					delete shortcuts[shortcutId];
+					currentShortcut = def.defaultKey;
+					keyInput.value = formatShortcut(def.defaultKey, isMac);
+					this.plugin.settings.keyboardShortcuts = shortcuts;
+					await this.plugin.saveSettings();
+					resetBtn.style.display = 'none';
+					new Notice('已重置为默认值');
+				});
+
+				const eventToShortcut = (e: KeyboardEvent): string | null => {
+					if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return null;
+					const parts: string[] = [];
+					if (e.ctrlKey || e.metaKey) parts.push('Ctrl');
+					if (e.shiftKey) parts.push('Shift');
+					if (e.altKey) parts.push('Alt');
+					let mainKey = e.key;
+					if (mainKey === ' ') mainKey = 'Space';
+					else if (mainKey.length === 1) mainKey = mainKey.toLowerCase();
+					if (!mainKey || mainKey === 'Unidentified') return null;
+					parts.push(mainKey);
+					return parts.join('+');
+				};
+
+				keyInput.addEventListener('focus', () => {
+					isCapturing = true;
+					keyInput.style.borderColor = 'var(--interactive-accent)';
+					keyInput.style.backgroundColor = 'var(--background-modifier-hover)';
+					keyInput.placeholder = '按下键盘按键...';
+				});
+
+				keyInput.addEventListener('blur', () => {
+					isCapturing = false;
+					keyInput.style.borderColor = 'var(--background-modifier-border)';
+					keyInput.style.backgroundColor = 'var(--background-secondary)';
+					keyInput.placeholder = '点击后按下键盘按键...';
+				});
+
+				keyInput.addEventListener('keydown', async (e: KeyboardEvent) => {
+					if (!isCapturing) return;
+					e.preventDefault();
+					e.stopPropagation();
+					const shortcut = eventToShortcut(e);
+					if (shortcut) {
+						currentShortcut = shortcut;
+						keyInput.value = formatShortcut(shortcut, isMac);
+						shortcuts[shortcutId] = shortcut;
+						this.plugin.settings.keyboardShortcuts = shortcuts;
+						await this.plugin.saveSettings();
+						resetBtn.style.display = shortcut !== def.defaultKey ? '' : 'none';
+						setTimeout(() => keyInput.blur(), 300);
+					}
+				});
+			});
+		});
+
+		// 重置所有快捷键按钮
+		new Setting(shortcutsSection.contentEl)
+			.setName('重置所有快捷键')
+			.setDesc('将所有快捷键恢复为默认值')
+			.addButton(button => button
+				.setButtonText('🔄 重置全部')
+				.setWarning()
+				.onClick(async () => {
+					const confirmed = confirm('确定要重置所有快捷键为默认值吗？');
+					if (confirmed) {
+						this.plugin.settings.keyboardShortcuts = {};
+						await this.plugin.saveSettings();
+						new Notice('✅ 已重置所有快捷键');
+						this.display();
 					}
 				}));
 

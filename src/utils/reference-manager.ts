@@ -333,10 +333,7 @@ export class ReferenceManager {
 			// 调试日志（仅在DEBUG模式下记录）
 			if (this.plugin?.logger && this.plugin.settings.enableDebugLog) {
 				await this.plugin.logger.debug(OperationType.UPDATE_REFERENCE, '更新引用链接', {
-					oldPath,
-					newPath,
-					oldName,
-					newName
+					details: { oldPath, newPath, oldName, newName }
 				});
 			}
 
@@ -413,7 +410,7 @@ export class ReferenceManager {
 							// 调试日志（仅在DEBUG模式下记录）
 							if (this.plugin?.logger && this.plugin.settings.enableDebugLog) {
 								await this.plugin.logger.debug(OperationType.UPDATE_REFERENCE, `检查文件 ${file.path} 第 ${i + 1} 行`, {
-									line
+									details: { line }
 								});
 							}
 
@@ -499,8 +496,7 @@ export class ReferenceManager {
 								// 调试日志（仅在DEBUG模式下记录）
 								if (this.plugin?.logger && this.plugin.settings.enableDebugLog) {
 									await this.plugin.logger.debug(OperationType.UPDATE_REFERENCE, `更新文件 ${file.path} 第 ${i + 1} 行`, {
-										oldLine: line,
-										newLine
+										details: { oldLine: line, newLine }
 									});
 								}
 								lines[i] = newLine;
@@ -527,7 +523,7 @@ export class ReferenceManager {
 				// 调试日志（仅在DEBUG模式下记录）
 				if (this.plugin?.logger && this.plugin.settings.enableDebugLog) {
 					await this.plugin.logger.debug(OperationType.UPDATE_REFERENCE, '更新了以下文件', {
-						updatedFiles: debugInfo
+						details: { updatedFiles: debugInfo }
 					});
 				}
 				new Notice(`已更新 ${updatedCount} 个笔记中的图片引用`);
@@ -908,8 +904,7 @@ export class ReferenceManager {
 			if (this.plugin?.logger) {
 				await this.plugin.logger.error(OperationType.PLUGIN_ERROR, '处理文件重命名失败', {
 					error: error as Error,
-					oldPath,
-					newPath
+					details: { oldPath, newPath }
 				});
 			}
 			new Notice('处理文件重命名失败，请检查日志');
