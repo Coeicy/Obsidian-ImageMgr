@@ -133,9 +133,9 @@ export class ImageDetailModal extends Modal {
 		this.plugin = plugin;
 		this.isTrashFile = isTrashFile;
 		
-		// 初始化管理器
+		// 初始化管理器 - 使用 plugin 中已有的实例，避免重复注册事件监听器
 		if (plugin) {
-			this.referenceManager = new ReferenceManager(app, plugin);
+			this.referenceManager = plugin.referenceManager;
 			this.historyManager = new HistoryManager(plugin);
 		}
 	}
@@ -1152,10 +1152,9 @@ export class ImageDetailModal extends Modal {
 						this.image.path = undoToPath;
 						this.image.name = undoToName;
 						
-						// 更新引用链接（使用从beforeSavePath提取的文件名）
-						if (this.referenceManager) {
-							await this.referenceManager.updateReferencesInNotes(undoFromPath, undoToPath, undoFromName, undoToName);
-						}
+						// 注意：不需要在这里调用 updateReferencesInNotes
+						// 因为 vault.rename() 会触发 'rename' 事件
+						// ReferenceManager 的事件监听器会自动处理引用更新
 						
 						// 记录撤销历史
 						if (this.historyManager) {
@@ -2373,9 +2372,26 @@ export class ImageDetailModal extends Modal {
 		
 		// 更新输入框
 		if (this.fileNameInput) {
-			this.fileNameInput.value = newFileName.replace(fileExtension, '');
+			const newBaseName = newFileName.replace(fileExtension, '');
+			this.fileNameInput.value = newBaseName;
 			if (this.adjustTextareaHeightFunc) {
 				this.adjustTextareaHeightFunc();
+			}
+			
+			// 触发 input 事件，让保存按钮显示
+			this.fileNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+			
+			// 如果文件名有变化，显示保存按钮
+			if (this.fileNameActionBtn && newBaseName !== this.lastSavedFileName) {
+				this.fileNameActionBtn.textContent = '✅';
+				this.fileNameActionBtn.title = '保存：保存文件名修改';
+				this.fileNameActionBtn.style.display = 'flex';
+				this.fileNameActionBtn.style.width = '30px';
+				this.fileNameActionBtn.style.height = '30px';
+				this.fileNameActionBtn.style.padding = '4px 8px';
+				this.fileNameActionBtn.style.margin = '0';
+				this.fileNameActionBtn.style.border = '1px solid var(--background-modifier-border)';
+				this.fileNameActionBtn.style.opacity = '1';
 			}
 		}
 		
@@ -2633,12 +2649,9 @@ export class ImageDetailModal extends Modal {
 				this.originalFileName = newFileName;
 				this.originalPath = finalPath;
 				
-					// 更新笔记中的引用链接（使用保存的旧值）
-				// 注意：不在这里记录日志，因为 vault.rename() 会触发 'rename' 事件
-				// detectImageRename 会统一处理日志记录，包含更完整的信息（行号等）
-				if (changes.length > 0 && this.referenceManager) {
-					await this.referenceManager.updateReferencesInNotes(oldPath, finalPath, oldName, newFileName);
-				}
+					// 注意：不需要在这里调用 updateReferencesInNotes
+				// 因为 vault.rename() 会触发 'rename' 事件
+				// ReferenceManager 的事件监听器会自动处理引用更新
 			}
 			
 			// 显示成功信息（只显示实际有变更的）

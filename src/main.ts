@@ -217,6 +217,11 @@ export default class ImageManagementPlugin extends Plugin {
 	onunload() {
 		// 清理视图
 		this.app.workspace.detachLeavesOfType(IMAGE_MANAGER_VIEW_TYPE);
+		
+		// 清理 ReferenceManager 的事件监听器
+		if (this.referenceManager) {
+			this.referenceManager.cleanup();
+		}
 	}
 
 	async activateView() {
