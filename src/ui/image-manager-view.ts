@@ -1256,13 +1256,20 @@ export class ImageManagerView extends ItemView {
 
 			// 图片信息区域（放在图片下方，两行布局）- 纯净画廊模式下隐藏
 			const infoEl = itemEl.createDiv('image-info');
+			// 检查分组是否需要显示标签（锁定分组、引用分组、类型分组不显示）
+			const isSystemGroup = image.group && (
+				image.group === '已锁定' || image.group === '未锁定' ||  // 锁定分组
+				image.group === '未被引用' || image.group.startsWith('被引用') ||  // 引用分组
+				['PNG', 'JPG', 'JPEG', 'GIF', 'WEBP', 'SVG', 'BMP', '未知类型'].includes(image.group.toUpperCase())  // 类型分组
+			);
+			const shouldShowGroupTag = image.group && !isSystemGroup;
 			// 检查是否有任何内容需要显示
 			const hasContent = !this.plugin.settings.pureGallery && (
 				this.plugin.settings.showImageName ||
 				this.plugin.settings.showImageSize ||
 				this.plugin.settings.showImageDimensions ||
 				(isIgnored && this.plugin.settings.showLockIcon) ||
-				image.group
+				shouldShowGroupTag
 			);
 			
 			if (hasContent) {
@@ -1310,7 +1317,7 @@ export class ImageManagerView extends ItemView {
 			}
 			
 			// 第二行：锁定图标 文件大小 尺寸 分组
-			if (!this.plugin.settings.pureGallery && (this.plugin.settings.showImageSize || this.plugin.settings.showImageDimensions || (isIgnored && this.plugin.settings.showLockIcon) || image.group)) {
+			if (!this.plugin.settings.pureGallery && (this.plugin.settings.showImageSize || this.plugin.settings.showImageDimensions || (isIgnored && this.plugin.settings.showLockIcon) || shouldShowGroupTag)) {
 				const metaRow = infoEl.createDiv('meta-row');
 				metaRow.style.display = 'flex';
 				metaRow.style.alignItems = 'center';
@@ -1352,23 +1359,20 @@ export class ImageManagerView extends ItemView {
 				}
 				
 				// 分组标签（如果有）
-				// 锁定分组使用图标显示，其他分组显示文字
-				if (image.group) {
-					// 锁定分组不显示标签（已通过🔒图标区分）
-					if (image.group !== '已锁定' && image.group !== '未锁定') {
-						const groupTag = metaRow.createSpan('image-group-tag');
-						groupTag.textContent = image.group;
-						groupTag.style.backgroundColor = 'var(--background-modifier-border)';
-						groupTag.style.color = 'var(--text-muted)';
-						groupTag.style.padding = '0 4px';
-						groupTag.style.borderRadius = '3px';
-						groupTag.style.fontSize = '0.9em';
-						groupTag.style.maxWidth = '80px';
-						groupTag.style.overflow = 'hidden';
-						groupTag.style.textOverflow = 'ellipsis';
-						groupTag.style.whiteSpace = 'nowrap';
-						groupTag.title = `分组: ${image.group}`;
-					}
+				// 锁定分组使用图标显示，引用分组不显示标签（已通过分组标题区分）
+				if (shouldShowGroupTag) {
+					const groupTag = metaRow.createSpan('image-group-tag');
+					groupTag.textContent = image.group!;
+					groupTag.style.backgroundColor = 'var(--background-modifier-border)';
+					groupTag.style.color = 'var(--text-muted)';
+					groupTag.style.padding = '0 4px';
+					groupTag.style.borderRadius = '3px';
+					groupTag.style.fontSize = '0.9em';
+					groupTag.style.maxWidth = '80px';
+					groupTag.style.overflow = 'hidden';
+					groupTag.style.textOverflow = 'ellipsis';
+					groupTag.style.whiteSpace = 'nowrap';
+					groupTag.title = `分组: ${image.group}`;
 				}
 
 				// 文件大小
@@ -1549,21 +1553,28 @@ export class ImageManagerView extends ItemView {
 								metaRow.appendChild(lockIcon);
 								
 								// 分组标签（如果有）
+								// 锁定分组、引用分组、类型分组不显示标签
 								if (image.group) {
-									const groupTag = document.createElement('span');
-									groupTag.className = 'image-group-tag';
-									groupTag.textContent = image.group;
-									groupTag.style.backgroundColor = 'var(--background-modifier-border)';
-									groupTag.style.color = 'var(--text-muted)';
-									groupTag.style.padding = '0 4px';
-									groupTag.style.borderRadius = '3px';
-									groupTag.style.fontSize = '0.9em';
-									groupTag.style.maxWidth = '80px';
-									groupTag.style.overflow = 'hidden';
-									groupTag.style.textOverflow = 'ellipsis';
-									groupTag.style.whiteSpace = 'nowrap';
-									groupTag.title = `分组: ${image.group}`;
-									metaRow.appendChild(groupTag);
+									const isSystemGroup = 
+										image.group === '已锁定' || image.group === '未锁定' ||  // 锁定分组
+										image.group === '未被引用' || image.group.startsWith('被引用') ||  // 引用分组
+										['PNG', 'JPG', 'JPEG', 'GIF', 'WEBP', 'SVG', 'BMP', '未知类型'].includes(image.group.toUpperCase());  // 类型分组
+									if (!isSystemGroup) {
+										const groupTag = document.createElement('span');
+										groupTag.className = 'image-group-tag';
+										groupTag.textContent = image.group;
+										groupTag.style.backgroundColor = 'var(--background-modifier-border)';
+										groupTag.style.color = 'var(--text-muted)';
+										groupTag.style.padding = '0 4px';
+										groupTag.style.borderRadius = '3px';
+										groupTag.style.fontSize = '0.9em';
+										groupTag.style.maxWidth = '80px';
+										groupTag.style.overflow = 'hidden';
+										groupTag.style.textOverflow = 'ellipsis';
+										groupTag.style.whiteSpace = 'nowrap';
+										groupTag.title = `分组: ${image.group}`;
+										metaRow.appendChild(groupTag);
+									}
 								}
 
 								// 添加其他内容（文件大小、尺寸等）
