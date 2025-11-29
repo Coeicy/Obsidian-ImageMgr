@@ -119,8 +119,7 @@ export class HistoryManager {
 		} catch (error) {
 			await this.plugin.logger.error(OperationType.PLUGIN_ERROR, '迁移历史失败', {
 				error: error as Error,
-				oldPath,
-				newPath
+				details: { oldPath, newPath }
 			});
 			await this.plugin.errorHandler?.handle(
 				error as Error,

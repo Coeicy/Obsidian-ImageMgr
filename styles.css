@@ -1,11 +1,13 @@
-/*
-
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
-
-If your plugin does not need CSS, delete this file.
-
-*/
+/**
+ * ImageMgr 插件样式表
+ * 
+ * 包含：
+ * - 图片管理视图样式
+ * - 工具栏按钮样式
+ * - 图片画廊布局
+ * - 模态框样式
+ * - 回收站样式
+ */
 
 /* 图片管理视图样式 */
 .image-manager-header {
@@ -133,12 +135,14 @@ If your plugin does not need CSS, delete this file.
 	transition: all 0.2s ease;
 	position: relative;
 	overflow: visible;
-	height: auto; /* 确保高度自适应 */
-	min-height: 0; /* 移除最小高度限制 */
+	height: fit-content; /* 高度适应内容 */
+	align-self: flex-start; /* 不拉伸到行高度 */
 }
 
 .image-gallery-item .image-info {
 	cursor: default;
+	flex-shrink: 0; /* 不压缩 */
+	flex-grow: 0; /* 不拉伸 */
 }
 
 
