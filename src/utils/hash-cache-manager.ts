@@ -1,5 +1,5 @@
 import ImageManagementPlugin from '../main';
-import { TFile, Vault } from 'obsidian';
+import { TFile, Vault, debounce } from 'obsidian';
 
 /**
  * 哈希值缓存管理器
@@ -7,9 +7,13 @@ import { TFile, Vault } from 'obsidian';
  */
 export class HashCacheManager {
 	private cache: Map<string, { hash: string; mtime: number; size: number }> = new Map();
+	private isDirty: boolean = false;
+	private saveDebounced: () => void;
 
 	constructor(private plugin: ImageManagementPlugin) {
 		this.loadCache();
+		// 防抖保存，避免频繁写入文件
+		this.saveDebounced = debounce(() => this.saveCache(), 2000, true);
 	}
 
 	/**
@@ -19,18 +23,33 @@ export class HashCacheManager {
 		const data = this.plugin.data || {};
 		const cachedData = data.imageHashCache;
 		
-		if (cachedData) {
+		if (cachedData && typeof cachedData === 'object') {
 			this.cache = new Map(Object.entries(cachedData));
 		}
 	}
 
 	/**
-	 * 保存缓存到插件数据
+	 * 保存缓存到插件数据（内部方法）
 	 */
 	private async saveCache() {
-		const data = this.plugin.data || {};
-		data.imageHashCache = Object.fromEntries(this.cache);
-		await this.plugin.saveData(data);
+		if (!this.isDirty) return;
+		
+		try {
+			// 直接更新 plugin.data 中的缓存字段
+			this.plugin.data.imageHashCache = Object.fromEntries(this.cache);
+			await this.plugin.saveData(this.plugin.data);
+			this.isDirty = false;
+		} catch (error) {
+			// 保存失败不影响功能
+		}
+	}
+	
+	/**
+	 * 强制保存缓存（扫描完成后调用）
+	 */
+	async flushCache() {
+		this.isDirty = true;
+		await this.saveCache();
 	}
 
 	/**
@@ -47,24 +66,24 @@ export class HashCacheManager {
 	/**
 	 * 设置哈希值缓存
 	 */
-	async setCachedHash(file: TFile, hash: string) {
+	setCachedHash(file: TFile, hash: string) {
 		this.cache.set(file.path, {
 			hash,
 			mtime: file.stat.mtime,
 			size: file.stat.size
 		});
-		// 异步保存，不阻塞
-		this.saveCache().catch(() => {
-			// 保存失败不影响功能
-		});
+		this.isDirty = true;
+		// 使用防抖保存，避免频繁写入
+		this.saveDebounced();
 	}
 
 	/**
 	 * 清除指定文件的缓存
 	 */
-	async clearHash(filePath: string) {
+	clearHash(filePath: string) {
 		this.cache.delete(filePath);
-		await this.saveCache();
+		this.isDirty = true;
+		this.saveDebounced();
 	}
 
 	/**
@@ -72,6 +91,7 @@ export class HashCacheManager {
 	 */
 	async clearAllCache() {
 		this.cache.clear();
+		this.isDirty = true;
 		await this.saveCache();
 	}
 
