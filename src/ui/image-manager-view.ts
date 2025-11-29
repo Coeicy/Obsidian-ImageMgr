@@ -69,6 +69,8 @@ export class ImageManagerView extends ItemView {
 	private tempImagesPerRow: number | null = null;
 	/** 拖拽框选管理器 */
 	private dragSelectManager: DragSelectManager | null = null;
+	/** 是否正在执行批量操作（批量操作期间暂停文件监听） */
+	private isBatchOperating: boolean = false;
 	/** 操作历史栈：记录搜索、排序、筛选、分组的操作顺序，用于倒序清除 */
 	private operationHistory: Array<'search' | 'sort' | 'filter' | 'group'> = [];
 	/** 清除按钮元素引用 */
@@ -268,6 +270,9 @@ export class ImageManagerView extends ItemView {
 		
 		// 注册 vault 文件变化事件（create, modify, delete）
 		this.fileEventListener = (file: TFile) => {
+			// 批量操作期间不触发刷新
+			if (this.isBatchOperating) return;
+			
 			// 检查是否是图片文件
 			const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
 			if (imageExtensions.some(ext => file.path.toLowerCase().endsWith(ext))) {
@@ -278,6 +283,9 @@ export class ImageManagerView extends ItemView {
 		
 		// 注册文件重命名/移动事件（使用更长的延迟，因为rename通常是一系列操作的开始）
 		this.renameEventListener = (file: TFile, oldPath: string) => {
+			// 批量操作期间不触发刷新
+			if (this.isBatchOperating) return;
+			
 			// 检查是否是图片文件
 			const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
 			if (imageExtensions.some(ext => file.path.toLowerCase().endsWith(ext))) {
@@ -2538,13 +2546,20 @@ export class ImageManagerView extends ItemView {
 
 	// 批量智能重命名
 	async batchPathRename() {
-		if (this.images.length === 0) {
+		// 检查是否有选中的图片
+		const selectedImages = this.getSelectedImages();
+		const useSelected = selectedImages.length > 0;
+		
+		// 使用选中的图片或所有图片
+		const sourceImages = useSelected ? selectedImages : this.images;
+		
+		if (sourceImages.length === 0) {
 			new Notice('没有可重命名的图片');
 			return;
 		}
 
 		// 过滤掉忽略的文件
-        const filteredImages = this.images.filter(img => !this.isIgnoredFile(img.name, img.md5, img.path));
+        const filteredImages = sourceImages.filter(img => !this.isIgnoredFile(img.name, img.md5, img.path));
 
 		if (filteredImages.length === 0) {
 			new Notice('🔒 所有图片都已锁定');
@@ -2552,13 +2567,14 @@ export class ImageManagerView extends ItemView {
 		}
 
 		// 询问用户是否确认批量智能重命名
-		const ignoredCount = this.images.length - filteredImages.length;
+		const ignoredCount = sourceImages.length - filteredImages.length;
 		const ignoredText = ignoredCount > 0 ? `\n\n已跳过 ${ignoredCount} 个锁定的文件。` : '';
+		const selectedText = useSelected ? '选中的 ' : '';
 		
 		const shouldProceed = await ConfirmModal.show(
 			this.app,
 			'批量智能重命名',
-			`将为 ${filteredImages.length} 张图片根据引用笔记进行智能重命名。\n\n此操作会修改所有图片的文件名，且会自动更新所有笔记中的引用链接。${ignoredText}\n\n是否继续？`,
+			`将为 ${selectedText}${filteredImages.length} 张图片根据引用笔记进行智能重命名。\n\n此操作会修改图片的文件名，并自动更新笔记中的引用链接。${ignoredText}\n\n是否继续？`,
 			['继续', '取消']
 		);
 
@@ -2574,6 +2590,9 @@ export class ImageManagerView extends ItemView {
 		if (!await this.handleDuplicateNameConflicts(duplicates)) {
 			return;
 		}
+
+		// 开始批量操作，暂停文件监听
+		this.isBatchOperating = true;
 
 		// 创建进度显示（如果启用）
 		let progressContainer: HTMLElement | null = null;
@@ -2688,8 +2707,11 @@ export class ImageManagerView extends ItemView {
 			`批量智能重命名完成！\n成功: ${result.successCount}，失败: ${result.errorCount}${skipText}，更新引用: ${result.updateCount} 个笔记`
 		);
 
-		// 刷新列表
-		await this.scanImages();
+		// 结束批量操作，恢复文件监听
+		this.isBatchOperating = false;
+
+		// 只刷新显示，不重新扫描（图片信息已在 applyPathNamingForImage 中更新）
+		this.applySortAndFilter();
 	}
 
 	/**
@@ -2987,11 +3009,27 @@ export class ImageManagerView extends ItemView {
 		const directory = imagePathParts.slice(0, -1).join('/');
 		
 		// 构建新路径
-		const newPath = directory + '/' + newFileName;
+		let newPath = directory + '/' + newFileName;
 		
 		// 如果文件名不变，直接返回
 		if (newPath === image.path) {
 			return { updatedRefs: 0 };
+		}
+
+		// 检查目标文件是否已存在，如果存在则添加序号
+		let finalNewFileName = newFileName;
+		let counter = 1;
+		while (this.app.vault.getAbstractFileByPath(newPath)) {
+			// 目标文件已存在，添加序号
+			const nameWithoutExt = baseName + '_' + imageIndex;
+			finalNewFileName = `${nameWithoutExt}_${counter}${fileExtension}`;
+			newPath = directory + '/' + finalNewFileName;
+			counter++;
+			
+			// 防止无限循环
+			if (counter > 1000) {
+				throw new Error('无法生成唯一文件名');
+			}
 		}
 
 		// 保存旧值
@@ -3003,7 +3041,7 @@ export class ImageManagerView extends ItemView {
 		
 		// 更新图片对象的路径和名称信息
 		image.path = newPath;
-		image.name = newFileName;
+		image.name = finalNewFileName;
 		
 		// 更新分组数据（如果图片在某个分组中）
 		await this.updateGroupDataOnMove(oldPath, newPath);
@@ -3013,7 +3051,7 @@ export class ImageManagerView extends ItemView {
 		
 		// 更新笔记中的引用链接
 		// 传入 referenceFiles 参数，避免在 updateReferencesInNotes 中进行全库扫描
-		const result = await this.updateReferencesInNotes(oldPath, newPath, oldName, newFileName, 'auto', referenceFiles);
+		const result = await this.updateReferencesInNotes(oldPath, newPath, oldName, finalNewFileName, 'auto', referenceFiles);
 		
 		const updatedRefs = result.updatedCount || 0;
 		
@@ -3025,7 +3063,7 @@ export class ImageManagerView extends ItemView {
 					oldPath,
 					newPath,
 					oldName,
-					newName: newFileName,
+					newName: finalNewFileName,
 					updatedRefs
 				}
 			};
