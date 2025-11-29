@@ -65,9 +65,12 @@ export class ConfirmModal extends Modal {
 			`;
 		}
 		
+		// 将换行符转换为 <br> 标签
+		const formattedMessage = message.replace(/\n/g, '<br>');
+		
 		this.contentEl.innerHTML = `
 			<h2 class="confirm-modal-title">${title}</h2>
-			<div class="confirm-modal-message">${message}</div>
+			<div class="confirm-modal-message">${formattedMessage}</div>
 			${buttonsHTML}
 		`;
 		
@@ -75,11 +78,8 @@ export class ConfirmModal extends Modal {
 	}
 	
 	onOpen() {
-		// 启用模态框可调整大小
-		makeModalResizable(this.modalEl, {
-			minWidth: 350,
-			minHeight: 200,
-		});
+		// 不启用 makeModalResizable，因为会导致关闭按钮位置错位
+		// 确认模态框不需要调整大小功能
 
 		// 恢复关闭按钮功能（右上角X）
 		const closeBtn = this.modalEl.querySelector('.modal-close-button') as HTMLElement;
