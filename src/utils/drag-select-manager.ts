@@ -11,8 +11,6 @@ export class DragSelectManager {
 	private container: HTMLElement;
 	private itemSelector: string;
 	private onSelectionChange: (selectedItems: HTMLElement[]) => void;
-	/** 标记是否刚刚完成了一次有效的框选，用于阻止 click 事件取消选中 */
-	private justFinishedDragSelect: boolean = false;
 
 	constructor(
 		container: HTMLElement,
@@ -26,7 +24,7 @@ export class DragSelectManager {
 	}
 
 	/**
-	 * 检查是否刚刚完成了拖动选择
+	 * 检查是否刚刚完成了拖动选择（用于阻止 click 事件取消选中）
 	 */
 	public wasJustDragging(): boolean {
 		return this.hasDragged;
@@ -128,13 +126,6 @@ export class DragSelectManager {
 
 			// 最终确认选择状态
 			this.finalizeSelection(minX, minY, maxX, maxY);
-			
-			// 标记刚刚完成了框选，阻止后续的 click 事件取消选中
-			this.justFinishedDragSelect = true;
-			// 在下一个事件循环中重置标记（click 事件会在 mouseup 之后立即触发）
-			setTimeout(() => {
-				this.justFinishedDragSelect = false;
-			}, 0);
 		}
 
 		this.isSelecting = false;
@@ -239,14 +230,6 @@ export class DragSelectManager {
 			item.classList.contains('selected')
 		);
 		this.onSelectionChange(selectedItems);
-	}
-
-	/**
-	 * 检查是否刚刚完成了框选操作
-	 * 用于外部判断是否应该忽略 click 事件
-	 */
-	hasJustFinishedDragSelect(): boolean {
-		return this.justFinishedDragSelect;
 	}
 
 	/**
