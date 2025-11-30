@@ -3814,6 +3814,11 @@ export class ImageManagerView extends ItemView {
 		
 		// 点击空白区域取消选中（像文件夹那样）
 		container.addEventListener('click', (e) => {
+			// 如果刚刚完成了拖动选择，不取消选中
+			if (this.dragSelectManager?.wasJustDragging()) {
+				return;
+			}
+			
 			const target = e.target as HTMLElement;
 			// 检查是否点击的是空白区域（不是图片卡片或其子元素）
 			const clickedOnItem = target.closest('.image-gallery-item');

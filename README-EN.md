@@ -37,12 +37,24 @@ ImageMgr is a feature-rich image management plugin for Obsidian that helps you e
 | 🗑️ **Recycle Bin** | Safe deletion with restore, permanent delete, batch operations |
 | 📜 **Operation Log** | Track all operation history based on MD5 hash |
 | 🈳 **Broken Link Detection** | Detect image links pointing to non-existent files |
+| 🔗 **Link Format Conversion** | Batch convert image link formats (shortest/relative/absolute) |
 | 🔒 **File Protection** | Lock important files to prevent accidental operations |
+| 🖱️ **Drag Select** | Drag mouse to batch select images like in file explorer |
 | ⚡ **Performance** | Lazy loading mechanism for smooth handling of large image sets |
 
 ## 📦 Installation
 
-1. Download `main.js`, `manifest.json`, `styles.css`
+### Option 1: BRAT (Recommended)
+
+1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin
+2. Open BRAT settings, click **Add Beta plugin**
+3. Enter repository: `Coeicy/Obsidian-ImageMgr`
+4. Click **Add Plugin** and wait for installation
+5. Enable ImageMgr in **Settings → Community Plugins**
+
+### Option 2: Manual Installation
+
+1. Download `main.js`, `manifest.json`, `styles.css` from [Latest Release](https://github.com/Coeicy/Obsidian-ImageMgr/releases)
 2. Create `.obsidian/plugins/imagemgr/` directory in your vault
 3. Copy the downloaded files to that directory
 4. Restart Obsidian and enable ImageMgr in **Settings → Community Plugins**
@@ -133,6 +145,16 @@ Safe deletion mechanism:
 - Deleted images moved to `.trash` directory
 - Support restore, permanent delete, clear all
 - Preserve MD5 hash for history tracking
+
+### Link Format Conversion
+
+Batch convert image link formats, synced with Obsidian settings:
+- **Shortest path**: Use filename only (when unique)
+- **Relative path**: Path relative to current note
+- **Absolute path**: Full path from vault root
+- Auto-read Obsidian's "New link format" setting
+- Support single click or batch conversion
+- Preserve original display text and size info
 
 ### File Protection
 
