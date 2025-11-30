@@ -1974,3 +1974,60 @@
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 	transform: translateY(-1px);
 }
+
+/* 链接格式转换模态框样式 */
+.link-format-modal .modal-content {
+	padding: 20px;
+	max-width: 550px;
+}
+
+.link-format-modal .link-format-desc {
+	margin-bottom: 16px;
+	color: var(--text-muted);
+	font-size: 0.9em;
+	line-height: 1.5;
+}
+
+.link-format-modal .radio-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 12px 14px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+
+.link-format-modal .radio-item:hover {
+	border-color: var(--interactive-accent);
+	background-color: var(--background-secondary-alt);
+}
+
+.link-format-modal .radio-item input[type="radio"] {
+	margin-top: 3px;
+	flex-shrink: 0;
+}
+
+.link-format-modal .label-content {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	flex: 1;
+}
+
+.link-format-modal .preview-container {
+	margin-bottom: 20px;
+	padding: 12px;
+	background-color: var(--background-secondary);
+	border-radius: 8px;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+.link-format-modal .button-section {
+	display: flex;
+	justify-content: flex-end;
+	gap: 10px;
+	margin-top: 16px;
+}

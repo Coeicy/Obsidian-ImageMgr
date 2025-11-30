@@ -1328,10 +1328,22 @@ export default class ImageManagementPlugin extends Plugin {
 							const references = await this.referenceManager.findImageReferences(imagePath, imageFile.name);
 							const ref = references.find(r => r.filePath === file.path);
 							const displayText = ref?.displayText || '';
+							const lineNumber = ref?.lineNumber;
 
-							let logMessage = `引用图片: ${imageFile.name}\n引用笔记: ${file.path}`;
+							// 构建美化的日志消息
+							let logMessage = `新增引用: ${imageFile.name}`;
+							logMessage += `\n引用笔记: ${file.path}`;
+							if (lineNumber) {
+								logMessage += ` (第${lineNumber}行)`;
+							}
 							if (displayText) {
 								logMessage += `\n显示文本: "${displayText}"`;
+							}
+							// 从 fullLine 中提取链接格式
+							const linkMatch = ref?.fullLine?.match(/!\[\[[^\]]+\]\]|!\[[^\]]*\]\([^)]+\)|<img[^>]+>/);
+							const linkFormat = linkMatch ? linkMatch[0] : '';
+							if (linkFormat) {
+								logMessage += `\n链接格式: ${linkFormat}`;
 							}
 
 							await this.logger.info(
@@ -1345,7 +1357,9 @@ export default class ImageManagementPlugin extends Plugin {
 										referencingFile: file.path,
 										referencingFileName: file.name,
 										displayText: displayText,
-										lineNumber: ref?.lineNumber
+										lineNumber: lineNumber,
+										linkFormat: linkFormat,
+										fullLine: ref?.fullLine
 									}
 								}
 							);
@@ -1370,9 +1384,12 @@ export default class ImageManagementPlugin extends Plugin {
 					if (imageFile) {
 						const imageHash = await this.getImageHash(imagePath);
 						if (this.logger) {
+							// 构建美化的日志消息
+							const logMessage = `移除引用: ${imageFile.name}\n来源笔记: ${file.path}`;
+
 							await this.logger.info(
 								OperationType.UNREFERENCE,
-								`取消引用: ${imageFile.name}\n引用笔记: ${file.path}`,
+								logMessage,
 								{
 									imageHash: imageHash,
 									imagePath: imagePath,

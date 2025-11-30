@@ -37,6 +37,7 @@ ImageMgr 是一个功能丰富的 Obsidian 图片管理插件，帮助您轻松�
 | 🗑️ **回收站** | 安全删除，支持恢复、永久删除、批量操作 |
 | 📜 **操作日志** | 基于 MD5 哈希追踪所有操作历史 |
 | 🈳 **空链接检测** | 检测笔记中指向不存在文件的图片链接 |
+| 🔗 **链接格式转换** | 批量转换图片链接格式（简短/相对/绝对路径） |
 | 🔒 **文件保护** | 锁定重要文件，防止误操作 |
 | ⚡ **性能优化** | 懒加载机制，流畅处理大量图片 |
 
@@ -134,6 +135,16 @@ ImageMgr 是一个功能丰富的 Obsidian 图片管理插件，帮助您轻松�
 - 支持恢复、永久删除、清空
 - 保留 MD5 哈希用于历史追踪
 
+### 链接格式转换
+
+批量转换图片链接格式，与 Obsidian 设置同步：
+- **尽可能简短**：仅使用文件名（适用于文件名唯一的情况）
+- **相对路径**：基于当前笔记的相对路径
+- **绝对路径**：从仓库根目录开始的完整路径
+- 自动读取 Obsidian 的"新链接格式"设置
+- 支持单个链接点击转换或批量转换
+- 保留原有的显示文本和尺寸信息
+
 ### 文件保护
 
 锁定重要文件防止误操作：
@@ -211,15 +222,18 @@ src/
 ├── types.ts             # 类型定义
 ├── constants.ts         # 常量配置
 ├── ui/                  # UI 组件
-│   ├── image-manager-view.ts
-│   ├── image-detail-modal.ts
-│   ├── settings-tab.ts
+│   ├── image-manager-view.ts  # 图片管理主视图
+│   ├── image-detail-modal.ts  # 图片详情模态框
+│   ├── link-format-modal.ts   # 链接格式转换
+│   ├── broken-links-modal.ts  # 空链接检测
+│   ├── trash-modal.ts         # 回收站
+│   ├── settings-tab.ts        # 设置页
 │   └── ...
 └── utils/               # 工具函数
-    ├── logger.ts
-    ├── lock-list-manager.ts # 锁定列表管理
-    ├── reference-manager.ts
-    ├── image-processor.ts
+    ├── logger.ts              # 操作日志
+    ├── lock-list-manager.ts   # 锁定列表管理
+    ├── reference-manager.ts   # 引用管理
+    ├── trash-manager.ts       # 回收站管理
     └── ...
 ```
 
