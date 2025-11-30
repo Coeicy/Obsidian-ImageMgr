@@ -155,6 +155,54 @@ export class ReferenceManager {
 	}
 
 	/**
+	 * 计算从笔记到图片的相对路径
+	 * @param notePath - 笔记文件路径
+	 * @param imagePath - 图片文件路径
+	 * @returns 相对路径
+	 */
+	calculateRelativePath(notePath: string, imagePath: string): string {
+		const noteDir = notePath.includes('/') 
+			? notePath.substring(0, notePath.lastIndexOf('/'))
+			: '';
+		const imageDir = imagePath.includes('/')
+			? imagePath.substring(0, imagePath.lastIndexOf('/'))
+			: '';
+		const imageName = imagePath.split('/').pop() || imagePath;
+
+		if (noteDir === imageDir) {
+			// 同一目录，使用文件名
+			return imageName;
+		}
+
+		// 计算相对路径
+		const noteParts = noteDir ? noteDir.split('/') : [];
+		const imageParts = imageDir ? imageDir.split('/') : [];
+
+		// 找到共同前缀
+		let commonLength = 0;
+		while (commonLength < noteParts.length && 
+			   commonLength < imageParts.length && 
+			   noteParts[commonLength] === imageParts[commonLength]) {
+			commonLength++;
+		}
+
+		// 构建相对路径
+		const upCount = noteParts.length - commonLength;
+		const downParts = imageParts.slice(commonLength);
+
+		let relativePath = '';
+		for (let i = 0; i < upCount; i++) {
+			relativePath += '../';
+		}
+		if (downParts.length > 0) {
+			relativePath += downParts.join('/') + '/';
+		}
+		relativePath += imageName;
+
+		return relativePath;
+	}
+
+	/**
 	 * 检查指定行号是否在代码块内（包括代码块和行内代码）
 	 * @param file - 文件对象
 	 * @param lineIndex - 行号（0-based）
@@ -415,48 +463,96 @@ export class ReferenceManager {
 							}
 
 							// 更新各种格式的图片引用
-							// 1. ![[oldPath]] 或 ![[oldName]]
-							if (newLine.match(/!\[\[.*\]\]/)) {
-								newLine = newLine.replace(
-									new RegExp(
-										`!\\[\\[(?:${PathValidator.escapeRegex(oldPath)}|${PathValidator.escapeRegex(oldName)})\\]\\]`,
-										'g'
-									),
-									`![[${newPath}]]`
-								);
+							// 1. Wiki 格式（带!）: ![[path]] 或 ![[path|text]] 或 ![[path|text|size]]
+							// 使用 parseWikiLink 和 buildWikiLink 正确保留显示文本和尺寸
+							const wikiWithExclamPattern = /!\[\[([^\]]+)\]\]/g;
+							let wikiMatch;
+							while ((wikiMatch = wikiWithExclamPattern.exec(newLine)) !== null) {
+								const fullMatch = wikiMatch[0];
+								const parsed = parseWikiLink(fullMatch);
+								
+								// 检查路径是否匹配（支持完整路径、仅文件名、相对路径）
+								// 使用 metadataCache 解析链接实际指向的文件
+								const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(parsed.path, file.path);
+								const resolvedPath = resolvedFile?.path || '';
+								
+								// 匹配条件：解析后的路径等于旧路径，或者链接路径直接匹配旧路径/旧文件名
+								const isMatch = resolvedPath === oldPath || 
+									parsed.path === oldPath || 
+									parsed.path === oldName ||
+									parsed.path.endsWith('/' + oldName) ||
+									parsed.path.endsWith('../' + oldName);
+								
+								if (isMatch) {
+									// 重建链接，保留显示文本和尺寸
+									// 保持原有的路径格式（相对/绝对/简短）
+									let newLinkPath = newPath;
+									
+									// 如果原链接使用相对路径，保持相对路径格式
+									if (parsed.path.startsWith('../') || parsed.path.startsWith('./')) {
+										// 计算新的相对路径
+										newLinkPath = this.calculateRelativePath(file.path, newPath);
+									} else if (!parsed.path.includes('/')) {
+										// 原链接只有文件名，新链接也只用文件名
+										newLinkPath = newName;
+									}
+									
+									const newParts: WikiLinkParts = {
+										path: newLinkPath,
+										displayText: parsed.displayText,
+										width: parsed.width,
+										height: parsed.height
+									};
+									const newLink = buildWikiLink(newParts, true);
+									newLine = newLine.replace(fullMatch, newLink);
+									// 重置正则表达式索引，因为字符串已改变
+									wikiWithExclamPattern.lastIndex = 0;
+								}
 							}
 
-							// 2. ![[oldPath|显示文本]] 或 ![[oldName|显示文本]]
-							if (newLine.match(/!\[\[.*\|.*\]\]/)) {
-								newLine = newLine.replace(
-									new RegExp(
-										`!\\[\\[(?:${PathValidator.escapeRegex(oldPath)}|${PathValidator.escapeRegex(oldName)})\\|([^\\]]+)\\]\\]`,
-										'g'
-									),
-									`![[${newPath}|$1]]`
-								);
-							}
-
-							// 3. [[oldPath]] 或 [[oldName]] (不带!)
-							if (newLine.match(/(?!\!)\[\[.*\]\]/)) {
-								newLine = newLine.replace(
-									new RegExp(
-										`(^|[^!])\\[\\[(?:${PathValidator.escapeRegex(oldPath)}|${PathValidator.escapeRegex(oldName)})\\]\\]`,
-										'g'
-									),
-									`$1[[${newPath}]]`
-								);
-							}
-
-							// 4. [[oldPath|显示文本]] 或 [[oldName|显示文本]] (不带!)
-							if (newLine.match(/(?!\!)\[\[.*\|.*\]\]/)) {
-								newLine = newLine.replace(
-									new RegExp(
-										`(^|[^!])\\[\\[(?:${PathValidator.escapeRegex(oldPath)}|${PathValidator.escapeRegex(oldName)})\\|([^\\]]+)\\]\\]`,
-										'g'
-									),
-									`$1[[${newPath}|$2]]`
-								);
+							// 2. Wiki 格式（不带!）: [[path]] 或 [[path|text]] 或 [[path|text|size]]
+							// 需要确保前面没有 !
+							const wikiNoExclamPattern = /(?:^|[^!])\[\[([^\]]+)\]\]/g;
+							while ((wikiMatch = wikiNoExclamPattern.exec(newLine)) !== null) {
+								// 提取实际的 [[...]] 部分
+								const fullMatchWithPrefix = wikiMatch[0];
+								const prefix = fullMatchWithPrefix.startsWith('[[') ? '' : fullMatchWithPrefix[0];
+								const linkPart = prefix ? fullMatchWithPrefix.slice(1) : fullMatchWithPrefix;
+								
+								const parsed = parseWikiLink(linkPart);
+								
+								// 检查路径是否匹配（支持完整路径、仅文件名、相对路径）
+								const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(parsed.path, file.path);
+								const resolvedPath = resolvedFile?.path || '';
+								
+								const isMatch = resolvedPath === oldPath || 
+									parsed.path === oldPath || 
+									parsed.path === oldName ||
+									parsed.path.endsWith('/' + oldName) ||
+									parsed.path.endsWith('../' + oldName);
+								
+								if (isMatch) {
+									// 重建链接，保留显示文本和尺寸
+									let newLinkPath = newPath;
+									
+									// 如果原链接使用相对路径，保持相对路径格式
+									if (parsed.path.startsWith('../') || parsed.path.startsWith('./')) {
+										newLinkPath = this.calculateRelativePath(file.path, newPath);
+									} else if (!parsed.path.includes('/')) {
+										newLinkPath = newName;
+									}
+									
+									const newParts: WikiLinkParts = {
+										path: newLinkPath,
+										displayText: parsed.displayText,
+										width: parsed.width,
+										height: parsed.height
+									};
+									const newLink = buildWikiLink(newParts, false);
+									newLine = newLine.replace(linkPart, newLink);
+									// 重置正则表达式索引
+									wikiNoExclamPattern.lastIndex = 0;
+								}
 							}
 
 							// 5. ![alt](oldPath) 或 ![alt](oldName) - Markdown格式
