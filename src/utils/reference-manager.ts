@@ -131,10 +131,14 @@ export function parseHtmlImageSize(htmlTag: string): { width?: number; height?: 
 
 export class ReferenceManager {
 	private fileRenameListeners: Set<(oldPath: string, newPath: string) => Promise<void>> = new Set();
+	/** 用于防止重复处理同一个重命名事件（使用时间戳防止短时间内重复处理） */
+	private static recentRenames: Map<string, number> = new Map();
+	/** rename 事件处理函数引用，用于清理 */
+	private renameHandler: ((file: any, oldPath: string) => Promise<void>) | null = null;
 
 	constructor(private app: App, private plugin?: ImageManagementPlugin) {
-		// 监听文件重命名事件
-		this.app.vault.on('rename', async (file: any, oldPath: string) => {
+		// 创建事件处理函数
+		this.renameHandler = async (file: any, oldPath: string) => {
 			try {
 				if (file && file instanceof TFile && file.extension && file.extension.match(/png|jpg|jpeg|gif|webp/i)) {
 					await this.handleFileRename(oldPath, file.path);
@@ -142,7 +146,20 @@ export class ReferenceManager {
 			} catch (err) {
 				console.error('[ReferenceManager] 文件重命名处理错误:', err);
 			}
-		});
+		};
+		
+		// 监听文件重命名事件
+		this.app.vault.on('rename', this.renameHandler);
+	}
+	
+	/**
+	 * 清理事件监听器（插件卸载时调用）
+	 */
+	cleanup() {
+		if (this.renameHandler) {
+			this.app.vault.off('rename', this.renameHandler);
+			this.renameHandler = null;
+		}
 	}
 
 	/**
@@ -979,18 +996,36 @@ export class ReferenceManager {
 	
 	/**
 	 * 处理文件重命名事件
+	 * 注意：此方法由 vault.on('rename') 事件触发
+	 * 使用时间戳防止短时间内重复处理同一个重命名操作
 	 */
 	private async handleFileRename(oldPath: string, newPath: string): Promise<void> {
+		// 防止重复处理同一个重命名事件（2秒内的相同操作视为重复）
+		const renameKey = `${oldPath}->${newPath}`;
+		const now = Date.now();
+		const lastProcessed = ReferenceManager.recentRenames.get(renameKey);
+		
+		if (lastProcessed && (now - lastProcessed) < 2000) {
+			// 2秒内已处理过，跳过
+			return;
+		}
+		
+		// 记录处理时间
+		ReferenceManager.recentRenames.set(renameKey, now);
+		
+		// 清理过期的记录（超过5秒的）
+		for (const [key, time] of ReferenceManager.recentRenames.entries()) {
+			if (now - time > 5000) {
+				ReferenceManager.recentRenames.delete(key);
+			}
+		}
+		
 		try {
 			const fileName = oldPath.split('/').pop() || '';
 			const newName = newPath.split('/').pop() || '';
 
 			// 更新引用
-			const { updatedCount } = await this.updateReferencesInNotes(oldPath, newPath, fileName, newName);
-
-			if (updatedCount > 0) {
-				new Notice(`已更新 ${updatedCount} 个笔记中的图片引用`);
-			}
+			await this.updateReferencesInNotes(oldPath, newPath, fileName, newName);
 
 			// 触发所有监听器
 			for (const listener of this.fileRenameListeners) {

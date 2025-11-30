@@ -133,8 +133,8 @@ export class ImageScanner {
 					// 计算哈希值
 					try {
 						const hash = await calculateFileHash(file, this.vault);
-						// 保存到缓存
-						await this.hashCacheManager.setCachedHash(file, hash);
+						// 保存到缓存（不再是 async）
+						this.hashCacheManager.setCachedHash(file, hash);
 						return { hash, index: globalIndex };
 					} catch (error) {
 						if (this.plugin?.logger) {
@@ -188,6 +188,11 @@ export class ImageScanner {
 			total: imageFiles.length, 
 			phase: 'complete' 
 		});
+		
+		// 扫描完成后强制保存哈希缓存
+		if (enableDeduplication) {
+			await this.hashCacheManager.flushCache();
+		}
 		
 		const uniqueCount = enableDeduplication && hashMap.size > 0 
 			? hashMap.size 

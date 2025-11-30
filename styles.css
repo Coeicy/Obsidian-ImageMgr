@@ -1620,22 +1620,18 @@
 }
 
 /* 直接使用更具体的选择器覆盖Obsidian默认样式 */
-.confirm-modal .modal-content {
-	max-width: 380px !important;
-	width: 380px !important;
-	min-width: 320px !important;
+.confirm-modal.modal .modal-content {
+	max-width: 100% !important;
+	width: 100% !important;
 	padding: 24px !important;
 	box-sizing: border-box !important;
-	border-radius: 16px !important;
-	background: var(--background-primary) !important;
-	border: 2px solid var(--background-modifier-border) !important;
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25) !important;
+	border-radius: 0 !important;
+	background: transparent !important;
+	border: none !important;
+	box-shadow: none !important;
 	margin: 0 !important;
-	/* 确保内容可滚动并有足够的z-index */
 	position: relative !important;
-	z-index: 101 !important;
 	overflow: visible !important;
-	animation: modalFadeIn 0.25s ease-out !important;
 }
 
 @keyframes modalFadeIn {
@@ -1650,17 +1646,19 @@
 }
 
 /* 确保对话框居中并可见 */
-.confirm-modal .modal {
-	background: transparent !important;
-	border: none !important;
-	box-shadow: none !important;
+.confirm-modal.modal {
+	background: var(--background-primary) !important;
+	border: 2px solid var(--background-modifier-border) !important;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25) !important;
 	margin: 0 !important;
 	padding: 0 !important;
 	width: fit-content !important;
-	max-width: none !important;
-	min-width: 0 !important;
+	max-width: min(520px, 90vw) !important;
+	min-width: 400px !important;
 	position: relative !important;
 	z-index: 101 !important;
+	border-radius: 16px !important;
+	overflow: visible !important;
 }
 
 /* 隐藏 Obsidian 默认的背景层 */
@@ -1775,8 +1773,8 @@
 	border-color: var(--background-modifier-border-hover) !important;
 }
 
-/* 关闭按钮美化 - 确保在右上角可见 */
-.confirm-modal .modal-close-button {
+/* 关闭按钮美化 - 在模态框右上角 */
+.confirm-modal.modal .modal-close-button {
 	display: flex !important;
 	align-items: center !important;
 	justify-content: center !important;
@@ -1786,7 +1784,7 @@
 	width: 28px !important;
 	height: 28px !important;
 	border-radius: 50% !important;
-	background: transparent !important;
+	background: var(--background-secondary) !important;
 	color: var(--text-muted) !important;
 	border: none !important;
 	cursor: pointer !important;
@@ -1794,19 +1792,18 @@
 	transition: all 0.2s ease !important;
 	padding: 0 !important;
 	margin: 0 !important;
-	/* 确保按钮内容显示 */
 	font-size: 16px !important;
 	line-height: 1 !important;
 	opacity: 1 !important;
 }
 
-.confirm-modal .modal-close-button:hover {
+.confirm-modal.modal .modal-close-button:hover {
 	background: var(--background-modifier-hover) !important;
 	color: var(--text-normal) !important;
 	transform: scale(1.1) !important;
 }
 
-.confirm-modal .modal-close-button:active {
+.confirm-modal.modal .modal-close-button:active {
 	transform: scale(0.95) !important;
 }
 
