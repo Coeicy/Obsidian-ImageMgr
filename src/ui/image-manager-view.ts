@@ -20,6 +20,7 @@ import { isFileIgnored } from '../utils/file-filter';
 import { PathValidator } from '../utils/path-validator';
 import { matchesShortcut, isInputElement, SHORTCUT_DEFINITIONS } from '../utils/keyboard-shortcut-manager';
 import { DragSelectManager } from '../utils/drag-select-manager';
+import { LinkFormatModal } from './link-format-modal';
 
 /** 图片管理视图的类型标识符 */
 export const IMAGE_MANAGER_VIEW_TYPE = 'image-manager-view';
@@ -69,8 +70,6 @@ export class ImageManagerView extends ItemView {
 	private tempImagesPerRow: number | null = null;
 	/** 拖拽框选管理器 */
 	private dragSelectManager: DragSelectManager | null = null;
-	/** 是否正在执行批量操作（批量操作期间暂停文件监听） */
-	private isBatchOperating: boolean = false;
 	/** 操作历史栈：记录搜索、排序、筛选、分组的操作顺序，用于倒序清除 */
 	private operationHistory: Array<'search' | 'sort' | 'filter' | 'group'> = [];
 	/** 清除按钮元素引用 */
@@ -156,6 +155,12 @@ export class ImageManagerView extends ItemView {
 		brokenLinksBtn.setAttribute('id', 'broken-links-btn');
 		this.updateButtonIndicator(brokenLinksBtn, 'broken-links');
 		brokenLinksBtn.addEventListener('click', () => this.showBrokenLinks());
+
+		// 链接转换按钮
+		const linkFormatBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
+		linkFormatBtn.setAttribute('id', 'link-format-btn');
+		this.updateButtonIndicator(linkFormatBtn, 'link-format');
+		linkFormatBtn.addEventListener('click', () => this.showLinkFormatModal());
 
 		// 库统计按钮
 		const statsBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
@@ -270,9 +275,6 @@ export class ImageManagerView extends ItemView {
 		
 		// 注册 vault 文件变化事件（create, modify, delete）
 		this.fileEventListener = (file: TFile) => {
-			// 批量操作期间不触发刷新
-			if (this.isBatchOperating) return;
-			
 			// 检查是否是图片文件
 			const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
 			if (imageExtensions.some(ext => file.path.toLowerCase().endsWith(ext))) {
@@ -283,9 +285,6 @@ export class ImageManagerView extends ItemView {
 		
 		// 注册文件重命名/移动事件（使用更长的延迟，因为rename通常是一系列操作的开始）
 		this.renameEventListener = (file: TFile, oldPath: string) => {
-			// 批量操作期间不触发刷新
-			if (this.isBatchOperating) return;
-			
 			// 检查是否是图片文件
 			const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
 			if (imageExtensions.some(ext => file.path.toLowerCase().endsWith(ext))) {
@@ -303,7 +302,7 @@ export class ImageManagerView extends ItemView {
 	}
 
 	// 更新按钮提示
-	updateButtonIndicator(btn: HTMLElement, type: 'search' | 'sort' | 'filter' | 'rename' | 'group' | 'path-rename' | 'duplicate' | 'broken-links' | 'stats' | 'settings' | 'clear-selection' | 'clear-search') {
+	updateButtonIndicator(btn: HTMLElement, type: 'search' | 'sort' | 'filter' | 'rename' | 'group' | 'path-rename' | 'duplicate' | 'broken-links' | 'link-format' | 'stats' | 'settings' | 'clear-selection' | 'clear-search') {
 		let hasActiveFilter = false;
 		
         if (type === 'search') {
@@ -355,6 +354,7 @@ export class ImageManagerView extends ItemView {
 			'path-rename': { icon: '🔠', text: '智能重命名' },
 			'duplicate': { icon: '🔍', text: '重复检测' },
 			'broken-links': { icon: '🈳', text: '空链接' },
+			'link-format': { icon: '🔗', text: '链接转换' },
 			'stats': { icon: '📊', text: '库统计' },
 			'settings': { icon: '⚙️', text: '设置' },
 			'clear-selection': { icon: '🧹', text: '清除选择' },
@@ -1248,20 +1248,13 @@ export class ImageManagerView extends ItemView {
 
 			// 图片信息区域（放在图片下方，两行布局）- 纯净画廊模式下隐藏
 			const infoEl = itemEl.createDiv('image-info');
-			// 检查分组是否需要显示标签（锁定分组、引用分组、类型分组不显示）
-			const isSystemGroup = image.group && (
-				image.group === '已锁定' || image.group === '未锁定' ||  // 锁定分组
-				image.group === '未被引用' || image.group.startsWith('被引用') ||  // 引用分组
-				['PNG', 'JPG', 'JPEG', 'GIF', 'WEBP', 'SVG', 'BMP', '未知类型'].includes(image.group.toUpperCase())  // 类型分组
-			);
-			const shouldShowGroupTag = image.group && !isSystemGroup;
 			// 检查是否有任何内容需要显示
 			const hasContent = !this.plugin.settings.pureGallery && (
 				this.plugin.settings.showImageName ||
 				this.plugin.settings.showImageSize ||
 				this.plugin.settings.showImageDimensions ||
 				(isIgnored && this.plugin.settings.showLockIcon) ||
-				shouldShowGroupTag
+				image.group
 			);
 			
 			if (hasContent) {
@@ -1309,7 +1302,7 @@ export class ImageManagerView extends ItemView {
 			}
 			
 			// 第二行：锁定图标 文件大小 尺寸 分组
-			if (!this.plugin.settings.pureGallery && (this.plugin.settings.showImageSize || this.plugin.settings.showImageDimensions || (isIgnored && this.plugin.settings.showLockIcon) || shouldShowGroupTag)) {
+			if (!this.plugin.settings.pureGallery && (this.plugin.settings.showImageSize || this.plugin.settings.showImageDimensions || (isIgnored && this.plugin.settings.showLockIcon) || image.group)) {
 				const metaRow = infoEl.createDiv('meta-row');
 				metaRow.style.display = 'flex';
 				metaRow.style.alignItems = 'center';
@@ -1351,20 +1344,23 @@ export class ImageManagerView extends ItemView {
 				}
 				
 				// 分组标签（如果有）
-				// 锁定分组使用图标显示，引用分组不显示标签（已通过分组标题区分）
-				if (shouldShowGroupTag) {
-					const groupTag = metaRow.createSpan('image-group-tag');
-					groupTag.textContent = image.group!;
-					groupTag.style.backgroundColor = 'var(--background-modifier-border)';
-					groupTag.style.color = 'var(--text-muted)';
-					groupTag.style.padding = '0 4px';
-					groupTag.style.borderRadius = '3px';
-					groupTag.style.fontSize = '0.9em';
-					groupTag.style.maxWidth = '80px';
-					groupTag.style.overflow = 'hidden';
-					groupTag.style.textOverflow = 'ellipsis';
-					groupTag.style.whiteSpace = 'nowrap';
-					groupTag.title = `分组: ${image.group}`;
+				// 锁定分组使用图标显示，其他分组显示文字
+				if (image.group) {
+					// 锁定分组不显示标签（已通过🔒图标区分）
+					if (image.group !== '已锁定' && image.group !== '未锁定') {
+						const groupTag = metaRow.createSpan('image-group-tag');
+						groupTag.textContent = image.group;
+						groupTag.style.backgroundColor = 'var(--background-modifier-border)';
+						groupTag.style.color = 'var(--text-muted)';
+						groupTag.style.padding = '0 4px';
+						groupTag.style.borderRadius = '3px';
+						groupTag.style.fontSize = '0.9em';
+						groupTag.style.maxWidth = '80px';
+						groupTag.style.overflow = 'hidden';
+						groupTag.style.textOverflow = 'ellipsis';
+						groupTag.style.whiteSpace = 'nowrap';
+						groupTag.title = `分组: ${image.group}`;
+					}
 				}
 
 				// 文件大小
@@ -1545,28 +1541,21 @@ export class ImageManagerView extends ItemView {
 								metaRow.appendChild(lockIcon);
 								
 								// 分组标签（如果有）
-								// 锁定分组、引用分组、类型分组不显示标签
 								if (image.group) {
-									const isSystemGroup = 
-										image.group === '已锁定' || image.group === '未锁定' ||  // 锁定分组
-										image.group === '未被引用' || image.group.startsWith('被引用') ||  // 引用分组
-										['PNG', 'JPG', 'JPEG', 'GIF', 'WEBP', 'SVG', 'BMP', '未知类型'].includes(image.group.toUpperCase());  // 类型分组
-									if (!isSystemGroup) {
-										const groupTag = document.createElement('span');
-										groupTag.className = 'image-group-tag';
-										groupTag.textContent = image.group;
-										groupTag.style.backgroundColor = 'var(--background-modifier-border)';
-										groupTag.style.color = 'var(--text-muted)';
-										groupTag.style.padding = '0 4px';
-										groupTag.style.borderRadius = '3px';
-										groupTag.style.fontSize = '0.9em';
-										groupTag.style.maxWidth = '80px';
-										groupTag.style.overflow = 'hidden';
-										groupTag.style.textOverflow = 'ellipsis';
-										groupTag.style.whiteSpace = 'nowrap';
-										groupTag.title = `分组: ${image.group}`;
-										metaRow.appendChild(groupTag);
-									}
+									const groupTag = document.createElement('span');
+									groupTag.className = 'image-group-tag';
+									groupTag.textContent = image.group;
+									groupTag.style.backgroundColor = 'var(--background-modifier-border)';
+									groupTag.style.color = 'var(--text-muted)';
+									groupTag.style.padding = '0 4px';
+									groupTag.style.borderRadius = '3px';
+									groupTag.style.fontSize = '0.9em';
+									groupTag.style.maxWidth = '80px';
+									groupTag.style.overflow = 'hidden';
+									groupTag.style.textOverflow = 'ellipsis';
+									groupTag.style.whiteSpace = 'nowrap';
+									groupTag.title = `分组: ${image.group}`;
+									metaRow.appendChild(groupTag);
 								}
 
 								// 添加其他内容（文件大小、尺寸等）
@@ -2546,20 +2535,13 @@ export class ImageManagerView extends ItemView {
 
 	// 批量智能重命名
 	async batchPathRename() {
-		// 检查是否有选中的图片
-		const selectedImages = this.getSelectedImages();
-		const useSelected = selectedImages.length > 0;
-		
-		// 使用选中的图片或所有图片
-		const sourceImages = useSelected ? selectedImages : this.images;
-		
-		if (sourceImages.length === 0) {
+		if (this.images.length === 0) {
 			new Notice('没有可重命名的图片');
 			return;
 		}
 
 		// 过滤掉忽略的文件
-        const filteredImages = sourceImages.filter(img => !this.isIgnoredFile(img.name, img.md5, img.path));
+        const filteredImages = this.images.filter(img => !this.isIgnoredFile(img.name, img.md5, img.path));
 
 		if (filteredImages.length === 0) {
 			new Notice('🔒 所有图片都已锁定');
@@ -2567,14 +2549,13 @@ export class ImageManagerView extends ItemView {
 		}
 
 		// 询问用户是否确认批量智能重命名
-		const ignoredCount = sourceImages.length - filteredImages.length;
+		const ignoredCount = this.images.length - filteredImages.length;
 		const ignoredText = ignoredCount > 0 ? `\n\n已跳过 ${ignoredCount} 个锁定的文件。` : '';
-		const selectedText = useSelected ? '选中的 ' : '';
 		
 		const shouldProceed = await ConfirmModal.show(
 			this.app,
 			'批量智能重命名',
-			`将为 ${selectedText}${filteredImages.length} 张图片根据引用笔记进行智能重命名。\n\n此操作会修改图片的文件名，并自动更新笔记中的引用链接。${ignoredText}\n\n是否继续？`,
+			`将为 ${filteredImages.length} 张图片根据引用笔记进行智能重命名。\n\n此操作会修改所有图片的文件名，且会自动更新所有笔记中的引用链接。${ignoredText}\n\n是否继续？`,
 			['继续', '取消']
 		);
 
@@ -2590,9 +2571,6 @@ export class ImageManagerView extends ItemView {
 		if (!await this.handleDuplicateNameConflicts(duplicates)) {
 			return;
 		}
-
-		// 开始批量操作，暂停文件监听
-		this.isBatchOperating = true;
 
 		// 创建进度显示（如果启用）
 		let progressContainer: HTMLElement | null = null;
@@ -2707,11 +2685,8 @@ export class ImageManagerView extends ItemView {
 			`批量智能重命名完成！\n成功: ${result.successCount}，失败: ${result.errorCount}${skipText}，更新引用: ${result.updateCount} 个笔记`
 		);
 
-		// 结束批量操作，恢复文件监听
-		this.isBatchOperating = false;
-
-		// 只刷新显示，不重新扫描（图片信息已在 applyPathNamingForImage 中更新）
-		this.applySortAndFilter();
+		// 刷新列表
+		await this.scanImages();
 	}
 
 	/**
@@ -3009,27 +2984,11 @@ export class ImageManagerView extends ItemView {
 		const directory = imagePathParts.slice(0, -1).join('/');
 		
 		// 构建新路径
-		let newPath = directory + '/' + newFileName;
+		const newPath = directory + '/' + newFileName;
 		
 		// 如果文件名不变，直接返回
 		if (newPath === image.path) {
 			return { updatedRefs: 0 };
-		}
-
-		// 检查目标文件是否已存在，如果存在则添加序号
-		let finalNewFileName = newFileName;
-		let counter = 1;
-		while (this.app.vault.getAbstractFileByPath(newPath)) {
-			// 目标文件已存在，添加序号
-			const nameWithoutExt = baseName + '_' + imageIndex;
-			finalNewFileName = `${nameWithoutExt}_${counter}${fileExtension}`;
-			newPath = directory + '/' + finalNewFileName;
-			counter++;
-			
-			// 防止无限循环
-			if (counter > 1000) {
-				throw new Error('无法生成唯一文件名');
-			}
 		}
 
 		// 保存旧值
@@ -3041,7 +3000,7 @@ export class ImageManagerView extends ItemView {
 		
 		// 更新图片对象的路径和名称信息
 		image.path = newPath;
-		image.name = finalNewFileName;
+		image.name = newFileName;
 		
 		// 更新分组数据（如果图片在某个分组中）
 		await this.updateGroupDataOnMove(oldPath, newPath);
@@ -3051,7 +3010,7 @@ export class ImageManagerView extends ItemView {
 		
 		// 更新笔记中的引用链接
 		// 传入 referenceFiles 参数，避免在 updateReferencesInNotes 中进行全库扫描
-		const result = await this.updateReferencesInNotes(oldPath, newPath, oldName, finalNewFileName, 'auto', referenceFiles);
+		const result = await this.updateReferencesInNotes(oldPath, newPath, oldName, newFileName, 'auto', referenceFiles);
 		
 		const updatedRefs = result.updatedCount || 0;
 		
@@ -3063,7 +3022,7 @@ export class ImageManagerView extends ItemView {
 					oldPath,
 					newPath,
 					oldName,
-					newName: finalNewFileName,
+					newName: newFileName,
 					updatedRefs
 				}
 			};
@@ -3855,8 +3814,8 @@ export class ImageManagerView extends ItemView {
 		
 		// 点击空白区域取消选中（像文件夹那样）
 		container.addEventListener('click', (e) => {
-			// 如果刚刚完成了框选操作，忽略这次 click 事件
-			if (this.dragSelectManager && this.dragSelectManager.hasJustFinishedDragSelect()) {
+			// 如果刚刚完成了拖动选择，不取消选中
+			if (this.dragSelectManager?.wasJustDragging()) {
 				return;
 			}
 			
@@ -4055,5 +4014,13 @@ export class ImageManagerView extends ItemView {
 		this.updateClearButtonState();
 		
 		new Notice('已清除所有分组');
+	}
+
+	/**
+	 * 显示链接格式转换模态框
+	 */
+	showLinkFormatModal() {
+		const modal = new LinkFormatModal(this.app, this.plugin);
+		modal.open();
 	}
 }
