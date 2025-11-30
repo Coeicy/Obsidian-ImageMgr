@@ -1343,25 +1343,7 @@ export class ImageManagerView extends ItemView {
 					});
 				}
 				
-				// 分组标签（如果有）
-				// 锁定分组使用图标显示，其他分组显示文字
-				if (image.group) {
-					// 锁定分组不显示标签（已通过🔒图标区分）
-					if (image.group !== '已锁定' && image.group !== '未锁定') {
-						const groupTag = metaRow.createSpan('image-group-tag');
-						groupTag.textContent = image.group;
-						groupTag.style.backgroundColor = 'var(--background-modifier-border)';
-						groupTag.style.color = 'var(--text-muted)';
-						groupTag.style.padding = '0 4px';
-						groupTag.style.borderRadius = '3px';
-						groupTag.style.fontSize = '0.9em';
-						groupTag.style.maxWidth = '80px';
-						groupTag.style.overflow = 'hidden';
-						groupTag.style.textOverflow = 'ellipsis';
-						groupTag.style.whiteSpace = 'nowrap';
-						groupTag.title = `分组: ${image.group}`;
-					}
-				}
+				// 分组标签不再显示（分组标题已经显示了分组名称）
 
 				// 文件大小
 				if (this.plugin.settings.showImageSize) {
@@ -1540,23 +1522,7 @@ export class ImageManagerView extends ItemView {
 								
 								metaRow.appendChild(lockIcon);
 								
-								// 分组标签（如果有）
-								if (image.group) {
-									const groupTag = document.createElement('span');
-									groupTag.className = 'image-group-tag';
-									groupTag.textContent = image.group;
-									groupTag.style.backgroundColor = 'var(--background-modifier-border)';
-									groupTag.style.color = 'var(--text-muted)';
-									groupTag.style.padding = '0 4px';
-									groupTag.style.borderRadius = '3px';
-									groupTag.style.fontSize = '0.9em';
-									groupTag.style.maxWidth = '80px';
-									groupTag.style.overflow = 'hidden';
-									groupTag.style.textOverflow = 'ellipsis';
-									groupTag.style.whiteSpace = 'nowrap';
-									groupTag.title = `分组: ${image.group}`;
-									metaRow.appendChild(groupTag);
-								}
+								// 分组标签不再显示（分组标题已经显示了分组名称）
 
 								// 添加其他内容（文件大小、尺寸等）
 								if (this.plugin.settings.showImageSize) {
