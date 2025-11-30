@@ -39,6 +39,7 @@ ImageMgr 是一个功能丰富的 Obsidian 图片管理插件，帮助您轻松�
 | 🈳 **空链接检测** | 检测笔记中指向不存在文件的图片链接 |
 | 🔗 **链接格式转换** | 批量转换图片链接格式（简短/相对/绝对路径） |
 | 🔒 **文件保护** | 锁定重要文件，防止误操作 |
+| 🖱️ **拖动框选** | 像文件夹一样拖动鼠标批量选择图片 |
 | ⚡ **性能优化** | 懒加载机制，流畅处理大量图片 |
 
 ## 📦 安装
@@ -51,15 +52,12 @@ ImageMgr 是一个功能丰富的 Obsidian 图片管理插件，帮助您轻松�
 4. 点击 **Add Plugin**，等待安装完成
 5. 在 **设置 → 社区插件** 中启用 ImageMgr
 
-> BRAT 支持自动更新，无需手动下载文件
-
 ### 方式二：手动安装
 
-1. 前往 [Releases](https://github.com/Coeicy/Obsidian-ImageMgr/releases) 下载最新版本
-2. 下载 `main.js`、`manifest.json`、`styles.css` 三个文件
-3. 在 Obsidian 仓库中创建 `.obsidian/plugins/imagemgr/` 目录
-4. 将下载的文件复制到该目录
-5. 重启 Obsidian，在 **设置 → 社区插件** 中启用 ImageMgr
+1. 下载 [最新 Release](https://github.com/Coeicy/Obsidian-ImageMgr/releases) 中的 `main.js`、`manifest.json`、`styles.css`
+2. 在 Obsidian 仓库中创建 `.obsidian/plugins/imagemgr/` 目录
+3. 将下载的文件复制到该目录
+4. 重启 Obsidian，在 **设置 → 社区插件** 中启用 ImageMgr
 
 ## 🚀 快速开始
 
@@ -124,9 +122,6 @@ ImageMgr 是一个功能丰富的 Obsidian 图片管理插件，帮助您轻松�
 - 自动查找图片的引用笔记
 - 根据笔记路径和图片序号生成命名
 - 支持多引用处理策略
-- 支持选中图片批量重命名
-- 自动处理文件名冲突（添加序号）
-- 批量操作期间暂停文件监听，提升性能
 
 ### 引用追踪
 

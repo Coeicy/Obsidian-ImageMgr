@@ -4,6 +4,7 @@
  */
 export class DragSelectManager {
 	private isSelecting: boolean = false;
+	private hasDragged: boolean = false; // 标记是否真正进行了拖动
 	private startX: number = 0;
 	private startY: number = 0;
 	private selectionBox: HTMLElement | null = null;
@@ -22,6 +23,13 @@ export class DragSelectManager {
 		this.itemSelector = itemSelector;
 		this.onSelectionChange = onSelectionChange;
 		this.setupEventListeners();
+	}
+
+	/**
+	 * 检查是否刚刚完成了拖动选择
+	 */
+	public wasJustDragging(): boolean {
+		return this.hasDragged;
 	}
 
 	private setupEventListeners() {
@@ -53,6 +61,7 @@ export class DragSelectManager {
 		}
 
 		this.isSelecting = true;
+		this.hasDragged = false; // 重置拖动标记
 		this.startX = e.clientX;
 		this.startY = e.clientY;
 
@@ -88,6 +97,7 @@ export class DragSelectManager {
 
 		// 只有移动距离超过 5px 才显示选择框
 		if (width > 5 || height > 5) {
+			this.hasDragged = true; // 标记已经进行了拖动
 			this.selectionBox.style.display = 'block';
 			this.selectionBox.style.left = minX + 'px';
 			this.selectionBox.style.top = minY + 'px';
@@ -128,6 +138,20 @@ export class DragSelectManager {
 		}
 
 		this.isSelecting = false;
+
+		// 如果进行了拖动选择，触发回调并延迟重置标记
+		if (this.hasDragged) {
+			const items = this.container.querySelectorAll(this.itemSelector) as NodeListOf<HTMLElement>;
+			const selectedItems = Array.from(items).filter((item) =>
+				item.classList.contains('selected')
+			);
+			this.onSelectionChange(selectedItems);
+			
+			// 延迟重置 hasDragged，让 click 事件能检测到
+			setTimeout(() => {
+				this.hasDragged = false;
+			}, 50);
+		}
 
 		// 移除选择框
 		if (this.selectionBox) {
