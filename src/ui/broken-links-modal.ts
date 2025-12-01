@@ -1,3 +1,10 @@
+/**
+ * 空链接检测模态框模块
+ * 
+ * 提供检测和修复笔记中空链接（指向不存在图片的链接）的功能。
+ * 支持从操作日志中恢复链接。
+ */
+
 import { App, Modal, Notice, TFile } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { OperationType, LogEntry } from '../utils/logger';
@@ -5,11 +12,16 @@ import { parseWikiLink, buildWikiLink, WikiLinkParts } from '../utils/reference-
 
 /**
  * 恢复操作类型
+ * - rename: 文件被重命名
+ * - move: 文件被移动
+ * - rename_and_move: 文件同时被重命名和移动
  */
 type RecoveryType = 'rename' | 'move' | 'rename_and_move';
 
 /**
- * 扩展的空链接信息，包含可恢复信息
+ * 扩展的空链接信息接口
+ * 
+ * 包含空链接的详细信息和可能的恢复信息
  */
 interface BrokenLinkInfo {
 	filePath: string;
@@ -29,8 +41,19 @@ interface BrokenLinkInfo {
 	};
 }
 
+/**
+ * 空链接检测模态框类
+ * 
+ * 功能：
+ * - 显示笔记中指向不存在图片的链接
+ * - 从操作日志中查找可能的恢复信息
+ * - 支持自动修复链接（基于重命名/移动记录）
+ * - 支持手动删除空链接
+ */
 export class BrokenLinksModal extends Modal {
+	/** 空链接列表 */
 	brokenLinks: Array<{filePath: string, lineNumber: number, linkText: string}>;
+	/** 插件实例 */
 	plugin?: ImageManagementPlugin;
 	/** 增强后的链接信息（包含恢复信息） */
 	private enhancedLinks: BrokenLinkInfo[] = [];

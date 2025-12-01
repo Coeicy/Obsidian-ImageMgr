@@ -39,8 +39,21 @@ export class LockListManager {
 	private isInitialized: boolean = false;
 	private onLockListChanged: (() => void) | null = null;
 
+	/** 事件监听器引用（用于清理） */
+	private eventRefs: any[] = [];
+
 	constructor(plugin: ImageManagementPlugin) {
 		this.plugin = plugin;
+	}
+
+	/**
+	 * 清理资源（插件卸载时调用）
+	 */
+	cleanup() {
+		// 清理事件监听器引用
+		this.eventRefs = [];
+		this.lockListCache.clear();
+		this.isInitialized = false;
 	}
 
 	/**
@@ -177,25 +190,28 @@ export class LockListManager {
 	 */
 	private setupFileSystemMonitoring() {
 		// 监听文件删除事件
-		this.plugin.registerEvent(
+		const deleteRef = this.plugin.registerEvent(
 			this.plugin.app.vault.on('delete', (file: TAbstractFile) => {
 				this.handleFileDeleted(file);
 			})
 		);
+		this.eventRefs.push(deleteRef);
 
 		// 监听文件重命名/移动事件
-		this.plugin.registerEvent(
+		const renameRef = this.plugin.registerEvent(
 			this.plugin.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
 				this.handleFileRenamed(file, oldPath);
 			})
 		);
+		this.eventRefs.push(renameRef);
 
 		// 监听文件修改事件（用于更新 lastModified）
-		this.plugin.registerEvent(
+		const modifyRef = this.plugin.registerEvent(
 			this.plugin.app.vault.on('modify', (file: TAbstractFile) => {
 				this.handleFileModified(file);
 			})
 		);
+		this.eventRefs.push(modifyRef);
 	}
 
 	/**
@@ -433,6 +449,24 @@ export class LockListManager {
 
 		// 保存到设置
 		await this.saveLockListToSettings();
+		
+		// 记录日志
+		if (this.plugin.logger) {
+			await this.plugin.logger.info(
+				OperationType.LOCK,
+				`锁定文件: ${fileName}`,
+				{
+					imageHash: md5,
+					imagePath: filePath,
+					imageName: fileName,
+					details: {
+						filePath: filePath,
+						md5: md5
+					}
+				}
+			);
+		}
+		
 		return true;
 	}
 
@@ -447,6 +481,7 @@ export class LockListManager {
 	async removeLockedFile(fileName: string, md5?: string, filePath?: string, skipCallback: boolean = false) {
 		const lowerFileName = fileName.toLowerCase();
 		const keysToRemove: string[] = [];
+		const removedFiles: Array<{ fileName: string; filePath?: string; md5?: string }> = [];
 		
 		for (const [key, lockedFile] of this.lockListCache.entries()) {
 			// 1. MD5 必须匹配（如果双方都有）
@@ -470,6 +505,11 @@ export class LockListManager {
 			
 			// 三要素都匹配，标记删除
 			keysToRemove.push(key);
+			removedFiles.push({
+				fileName: lockedFile.fileName,
+				filePath: lockedFile.filePath,
+				md5: lockedFile.md5
+			});
 		}
 		
 		for (const key of keysToRemove) {
@@ -478,12 +518,32 @@ export class LockListManager {
 
 		// 保存到设置
 		await this.saveLockListToSettings(skipCallback);
+		
+		// 记录日志（如果有文件被解锁）
+		if (removedFiles.length > 0 && this.plugin.logger) {
+			await this.plugin.logger.info(
+				OperationType.UNLOCK,
+				`解锁文件: ${fileName}`,
+				{
+					imageHash: md5,
+					imagePath: filePath,
+					imageName: fileName,
+					details: {
+						removedCount: removedFiles.length,
+						removedFiles: removedFiles
+					}
+				}
+			);
+		}
 	}
 
 	/**
 	 * 清空所有锁定文件
 	 */
 	async clearAllLockedFiles() {
+		const count = this.lockListCache.size;
+		const lockedFiles = Array.from(this.lockListCache.values()).map(f => f.fileName);
+		
 		this.lockListCache.clear();
 
 		// 保存到设置
@@ -492,6 +552,20 @@ export class LockListManager {
 		this.plugin.settings.ignoredHashMetadata = {};
 
 		await this.plugin.saveSettings();
+		
+		// 记录日志
+		if (count > 0 && this.plugin.logger) {
+			await this.plugin.logger.info(
+				OperationType.BATCH_UNLOCK,
+				`清空所有锁定文件: 共 ${count} 个`,
+				{
+					details: {
+						count: count,
+						lockedFiles: lockedFiles
+					}
+				}
+			);
+		}
 	}
 
 	/**
@@ -530,6 +604,8 @@ export class LockListManager {
 	 * @param items - 要移除的文件列表，每项包含 fileName 和可选的 md5
 	 */
 	async removeLockedFileBatch(items: Array<{ fileName: string; md5?: string }>) {
+		const removedFiles: string[] = [];
+		
 		for (const item of items) {
 			const lowerFileName = item.fileName.toLowerCase();
 			
@@ -542,6 +618,7 @@ export class LockListManager {
 			if (this.lockListCache.has(combinedKey)) {
 				this.lockListCache.delete(combinedKey);
 				removed = true;
+				removedFiles.push(item.fileName);
 			}
 			
 			// 如果精确匹配失败，尝试模糊匹配（兼容旧数据）
@@ -553,6 +630,7 @@ export class LockListManager {
 					// 哈希值和文件名都匹配才删除
 					if (sameHash && sameName) {
 						this.lockListCache.delete(k);
+						removedFiles.push(item.fileName);
 						break;
 					}
 				}
@@ -561,5 +639,19 @@ export class LockListManager {
 
 		// 保存到设置
 		await this.saveLockListToSettings();
+		
+		// 记录日志
+		if (removedFiles.length > 0 && this.plugin.logger) {
+			await this.plugin.logger.info(
+				OperationType.BATCH_UNLOCK,
+				`批量解锁文件: 共 ${removedFiles.length} 个`,
+				{
+					details: {
+						count: removedFiles.length,
+						removedFiles: removedFiles
+					}
+				}
+			);
+		}
 	}
 }

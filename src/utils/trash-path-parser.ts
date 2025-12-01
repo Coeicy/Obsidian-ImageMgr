@@ -1,9 +1,27 @@
+/**
+ * 回收站路径解析模块
+ * 
+ * 负责回收站文件路径的解析和生成。
+ * 
+ * 路径格式说明：
+ * - 完整格式：`.trash/时间戳_路径$文件名`
+ * - 简单格式：`.trash/时间戳_文件名`（根目录文件）
+ * 
+ * 特殊字符处理：
+ * - `/` 替换为 `@`（路径分隔符）
+ * - `$` 用于分隔路径和文件名
+ */
+
 import { TFile, TFolder, Vault } from 'obsidian';
 import { TrashItem } from './trash-manager';
 
 /**
  * 回收站路径解析器
- * 负责解析回收站文件路径，提取原始路径信息
+ * 
+ * 功能：
+ * - 解析回收站文件路径，提取原始路径信息
+ * - 生成回收站文件路径
+ * - 从 TFile 对象解析回收站项目
  */
 export class TrashPathParser {
 	private readonly trashFolderPath: string;
