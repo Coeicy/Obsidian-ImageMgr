@@ -1,12 +1,34 @@
+/**
+ * 引用选择模态框模块
+ * 
+ * 当图片被多个笔记引用时，提供选择特定引用笔记的界面。
+ * 用于智能重命名等需要基于引用笔记生成文件名的场景。
+ */
+
 import { Modal, TFile } from 'obsidian';
 import { makeModalResizable } from '../utils/resizable-modal';
 
+/**
+ * 引用选项接口
+ */
 export interface ReferenceOption {
+	/** 引用该图片的笔记文件 */
 	file: TFile;
+	/** 图片在该笔记中的位置索引 */
 	index: number;
+	/** 显示文本 */
 	displayText: string;
 }
 
+/**
+ * 引用选择模态框类
+ * 
+ * 功能：
+ * - 显示所有引用该图片的笔记列表
+ * - 支持键盘导航选择
+ * - 显示笔记路径和修改时间
+ * - 返回用户选择的笔记文件
+ */
 export class ReferenceSelectModal extends Modal {
 	private resolve: (value: TFile | null) => void;
 	private references: ReferenceOption[];

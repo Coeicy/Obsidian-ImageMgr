@@ -40,7 +40,7 @@ ImageMgr is a feature-rich image management plugin for Obsidian that helps you e
 | 🔗 **Link Format Conversion** | Batch convert image link formats (shortest/relative/absolute) |
 | 🔒 **File Protection** | Lock important files to prevent accidental operations |
 | 🖱️ **Drag Select** | Drag mouse to batch select images like in file explorer |
-| ⚡ **Performance** | Lazy loading mechanism for smooth handling of large image sets |
+| ⚡ **Performance** | Lazy loading, incremental scan cache for smooth handling of large image sets |
 
 ## 📦 Installation
 
@@ -163,30 +163,45 @@ Lock important files to prevent accidental operations:
 - Duplicate files won't be mistakenly locked
 - Batch operations auto-skip locked files
 - Click blank area to deselect
+- Lock/unlock operations auto-logged
+
+### Operation Logs
+
+Complete operation tracking system:
+- **Log Levels**: DEBUG, INFO, WARNING, ERROR
+- **Operation Types**: Scan, rename, move, delete, lock, reference update, etc.
+- **Detailed Info**: Records old/new values, affected notes, line numbers, etc.
+- **Image Tracking**: Track complete operation history based on MD5 hash
+- **Log Query**: Filter by time, level, operation type
+- **Export**: Export logs to JSON format
 
 ## ⚙️ Settings
 
 | Category | Options |
 |----------|---------|
-| **📌 Basic** | Auto scan, default path, include subfolders, MD5 dedup |
-| **🏠 Home** | Layout (columns, spacing, radius, height), defaults (sort, filter), statistics |
-| **🖼️ Image Card** | Pure gallery, adaptive size, show name/size/dimensions/index/lock icon |
-| **🗑️ Delete & Trash** | Confirm delete, system trash, plugin trash, restore path |
-| **🔗 Reference & Preview** | Keep detail open, reference time, mouse wheel mode |
-| **🔄 Rename** | Auto generate, path depth, duplicate handling, multi-reference handling |
-| **⚡ Performance** | Lazy loading, delay, cache size |
-| **🔍 Search** | Case sensitive, delay, path search |
-| **📦 Batch** | Max count, confirm threshold, progress display |
-| **🔒 Locked Files** | Lock list management, batch unlock |
-| **📋 Logs** | Log level, console output, view/clear logs |
-| **⌨️ Shortcuts** | Customize all keyboard shortcuts |
+| **📌 Basic** | Auto scan, default image folder, include subfolders |
+| **🏠 Home Layout** | Images per row, card spacing, card radius, fixed image height, default sort/filter |
+| **🖼️ Image Card** | Pure gallery mode, adaptive size, uniform card height, show name/size/dimensions/index/lock icon, name wrap, hover effect |
+| **🗑️ Delete & Trash** | Confirm before delete, move to system trash, enable plugin trash, restore path |
+| **🔗 Reference & Preview** | Keep detail open when going to note, show reference time, default wheel mode |
+| **🔄 Rename** | Auto generate names, path naming depth, duplicate handling, multi-reference handling, save batch rename log |
+| **⚡ Performance** | Enable lazy loading, lazy load delay, max cache size, incremental scan cache |
+| **🔍 Search** | Case sensitive, live search delay, search in path |
+| **📦 Batch** | Max batch operations (default 100), batch confirm threshold, show batch progress |
+| **🔒 Locked Files** | Lock list management, show file path, batch unlock |
+| **📊 Statistics** | Show statistics, statistics position (top/bottom) |
+| **📋 Logs** | Log level, output to console, enable debug log, view/clear logs |
+| **⌨️ Shortcuts** | Customize all shortcuts, reset to defaults |
+| **🔄 MD5 Dedup** | Enable deduplication, hash cache management |
 
 ## ❓ FAQ
 
 <details>
 <summary><b>Scanning is slow?</b></summary>
 
-MD5 deduplication calculates file hashes which can be slow. You can disable it in settings temporarily. Recommended to use periodically after initial scan.
+- **First scan**: MD5 deduplication calculates file hashes, first scan may be slow
+- **Incremental scan**: Plugin caches scan results, subsequent scans only process new/modified files, 50-80% faster
+- **Temporary disable**: You can disable MD5 deduplication in settings temporarily
 </details>
 
 <details>
@@ -228,21 +243,52 @@ npm run build
 
 ```
 src/
-├── main.ts              # Plugin entry
-├── settings.ts          # Settings definition
-├── types.ts             # Type definitions
-├── constants.ts         # Constants config
-├── ui/                  # UI components
-│   ├── image-manager-view.ts
-│   ├── image-detail-modal.ts
-│   ├── settings-tab.ts
-│   └── ...
-└── utils/               # Utility functions
-    ├── logger.ts
-    ├── lock-list-manager.ts # Lock list management
-    ├── reference-manager.ts
-    ├── image-processor.ts
-    └── ...
+├── main.ts                    # Plugin entry, lifecycle management
+├── settings.ts                # Settings definition and defaults
+├── types.ts                   # TypeScript type definitions
+├── constants.ts               # UI/timing/limits constants
+├── ui/                        # UI components
+│   ├── image-manager-view.ts  # Main image manager view
+│   ├── image-detail-modal.ts  # Image detail modal
+│   ├── settings-tab.ts        # Settings page
+│   ├── trash-modal.ts         # Recycle bin modal
+│   ├── link-format-modal.ts   # Link format conversion
+│   ├── broken-links-modal.ts  # Broken link detection
+│   ├── duplicate-detection-modal.ts  # Duplicate detection
+│   ├── log-viewer-modal.ts    # Log viewer
+│   ├── sort-modal.ts          # Multi-level sorting
+│   ├── filter-modal.ts        # Advanced filtering
+│   ├── group-modal.ts         # Group management
+│   ├── search-modal.ts        # Search modal
+│   ├── stats-modal.ts         # Statistics info
+│   ├── rename-modal.ts        # Rename modal
+│   ├── confirm-modal.ts       # Confirm dialog
+│   ├── reference-select-modal.ts  # Reference selection
+│   └── components/            # Reusable components
+│       ├── image-preview-panel.ts   # Image preview panel
+│       ├── image-controls-panel.ts  # Image controls panel
+│       └── image-history-panel.ts   # Operation history panel
+└── utils/                     # Utility functions
+    ├── logger.ts              # Operation log system
+    ├── error-handler.ts       # Error handler
+    ├── lock-list-manager.ts   # Lock list management
+    ├── reference-manager.ts   # Reference management
+    ├── reference-edit-service.ts  # Reference edit service
+    ├── trash-manager.ts       # Recycle bin management
+    ├── trash-path-parser.ts   # Trash path parser
+    ├── trash-formatter.ts     # Trash formatter
+    ├── history-manager.ts     # History management
+    ├── hash-cache-manager.ts  # Hash cache management
+    ├── image-hash.ts          # MD5 hash calculation
+    ├── image-scanner.ts       # Image scanner
+    ├── image-processor.ts     # Image processing
+    ├── image-optimizer.ts     # Image optimization
+    ├── file-filter.ts         # File filtering
+    ├── file-edit-service.ts   # File edit service
+    ├── path-validator.ts      # Path validation
+    ├── keyboard-shortcut-manager.ts  # Keyboard shortcuts
+    ├── drag-select-manager.ts # Drag selection management
+    └── resizable-modal.ts     # Resizable modal
 ```
 
 ### Tech Stack

@@ -1,3 +1,12 @@
+/**
+ * 图片哈希计算模块
+ * 
+ * 提供 MD5 哈希值计算功能，用于：
+ * - 图片去重检测
+ * - 文件完整性验证
+ * - 图片追踪和识别
+ */
+
 import * as SparkMD5 from 'spark-md5';
 import { TFile, Vault } from 'obsidian';
 

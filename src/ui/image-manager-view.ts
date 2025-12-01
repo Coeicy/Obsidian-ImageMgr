@@ -1,3 +1,17 @@
+/**
+ * 图片管理主视图模块
+ * 
+ * 插件的核心视图，提供图片浏览和管理功能。
+ * 
+ * 主要功能：
+ * - 图片网格展示（支持虚拟滚动）
+ * - 搜索、排序、筛选
+ * - 批量操作（选择、删除、重命名）
+ * - 分组显示
+ * - 键盘快捷键支持
+ * - 拖拽框选
+ */
+
 import { ItemView, Notice, TFile, WorkspaceLeaf } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { ImageInfo } from '../types';

@@ -1,3 +1,16 @@
+/**
+ * 插件设置标签页模块
+ * 
+ * 提供插件设置界面，包括：
+ * - 基础设置（扫描、文件夹、去重等）
+ * - 主页设置（布局、卡片样式等）
+ * - 性能设置（懒加载、缓存等）
+ * - 删除设置（确认、回收站等）
+ * - 快捷键设置
+ * - 日志设置
+ * - 锁定列表管理
+ */
+
 import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { ImageManagementSettings } from '../settings';
@@ -6,8 +19,19 @@ import { ConfirmModal } from './confirm-modal';
 import { SHORTCUT_DEFINITIONS, formatShortcut, parseShortcut } from '../utils/keyboard-shortcut-manager';
 import { LogLevel } from '../utils/logger';
 
+/** 视图类型标识符 */
 export const VIEW_TYPE = 'image-manager-view';
 
+/**
+ * 插件设置标签页类
+ * 
+ * 功能：
+ * - 分组显示所有设置项
+ * - 支持折叠/展开设置分组
+ * - 实时保存设置更改
+ * - 管理锁定文件列表
+ * - 自定义快捷键配置
+ */
 export class ImageManagementSettingTab extends PluginSettingTab {
 	plugin: ImageManagementPlugin;
 
