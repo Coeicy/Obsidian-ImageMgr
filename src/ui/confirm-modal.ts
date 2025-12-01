@@ -132,12 +132,43 @@ export class ConfirmModal extends Modal {
 		this.modalEl.focus();
 	}
 	
+	/**
+	 * 等待用户响应
+	 * 
+	 * 返回一个 Promise，在用户点击按钮或关闭对话框时 resolve。
+	 * 
+	 * @returns 用户的选择结果
+	 */
 	async waitForResponse(): Promise<ConfirmResult> {
 		return new Promise((resolve) => {
 			this.resolve = resolve;
 		});
 	}
 	
+	/**
+	 * 静态方法：显示确认对话框并等待用户响应
+	 * 
+	 * 这是使用确认对话框的推荐方式，简化了创建和显示的流程。
+	 * 
+	 * @param app - Obsidian App 实例
+	 * @param title - 对话框标题
+	 * @param message - 对话框消息（支持换行符 \n）
+	 * @param options - 按钮文本数组 [主按钮, 次按钮]
+	 * @returns 用户的选择结果
+	 * 
+	 * @example
+	 * ```typescript
+	 * const result = await ConfirmModal.show(
+	 *   app,
+	 *   '确认删除',
+	 *   '确定要删除这张图片吗？\n此操作不可撤销。',
+	 *   ['删除', '取消']
+	 * );
+	 * if (result === 'save') {
+	 *   // 用户点击了删除
+	 * }
+	 * ```
+	 */
 	static async show(app: any, title: string, message: string, options?: string[]): Promise<ConfirmResult> {
 		const modal = new ConfirmModal(app, title, message, options);
 		modal.open();

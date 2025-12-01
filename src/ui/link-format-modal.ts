@@ -1,3 +1,10 @@
+/**
+ * 链接格式转换模态框模块
+ * 
+ * 提供将图片链接转换为不同格式的功能。
+ * 支持批量转换笔记中的图片链接路径格式。
+ */
+
 import { App, Modal, Notice, TFile } from 'obsidian';
 import { makeModalResizable } from '../utils/resizable-modal';
 import ImageManagementPlugin from '../main';

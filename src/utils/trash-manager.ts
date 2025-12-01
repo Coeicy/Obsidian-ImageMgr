@@ -1,3 +1,23 @@
+/**
+ * 回收站管理模块
+ * 
+ * 提供插件级别的回收站功能，支持：
+ * - 将删除的图片移动到回收站文件夹
+ * - 从回收站恢复图片到原始位置或指定位置
+ * - 永久删除回收站中的文件
+ * - 清空回收站
+ * 
+ * 回收站路径格式：
+ * `.trash/原始文件名__时间戳.扩展名`
+ * 
+ * 架构设计：
+ * - TrashFolderManager: 管理回收站文件夹的创建和访问
+ * - TrashItemCollector: 收集回收站中的文件项目
+ * - TrashPathParser: 解析回收站文件路径
+ * - TrashFormatter: 格式化显示信息
+ * - TrashManager: 主管理器，协调各组件
+ */
+
 import { App, TFile, TFolder, Vault } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { OperationType } from './logger';
@@ -6,14 +26,22 @@ import { TrashFormatter } from './trash-formatter';
 
 /**
  * 回收站项目接口
+ * 
+ * 表示回收站中的一个文件项目
  */
 export interface TrashItem {
-	path: string; // 回收站中的路径
-	originalPath: string; // 原始路径（用于显示，可能是简化后的）
-	originalFullPath: string; // 完整原始路径（用于恢复）
-	originalName: string; // 原始文件名
-	deletedAt: number; // 删除时间戳
-	size: number; // 文件大小
+	/** 回收站中的完整路径 */
+	path: string;
+	/** 原始路径（用于显示，可能是简化后的） */
+	originalPath: string;
+	/** 完整原始路径（用于恢复） */
+	originalFullPath: string;
+	/** 原始文件名 */
+	originalName: string;
+	/** 删除时间戳（毫秒） */
+	deletedAt: number;
+	/** 文件大小（字节） */
+	size: number;
 }
 
 /**
@@ -290,21 +318,57 @@ class TrashItemCollector {
 
 /**
  * 回收站管理器
- * 管理插件回收站文件夹和文件操作
+ * 
+ * 插件回收站的主管理类，协调各组件完成回收站操作。
+ * 
+ * 功能：
+ * - 移动文件到回收站（保留原始路径信息）
+ * - 从回收站恢复文件（支持恢复到原始位置或指定位置）
+ * - 永久删除回收站文件
+ * - 清空回收站
+ * - 获取回收站文件列表（带缓存）
+ * 
+ * 缓存机制：
+ * - 缓存有效期 5 秒
+ * - 操作后自动失效缓存
+ * - 支持强制刷新
+ * 
+ * @example
+ * ```typescript
+ * // 移动文件到回收站
+ * await trashManager.moveToTrash(file);
+ * 
+ * // 获取回收站列表
+ * const items = await trashManager.getTrashItems();
+ * 
+ * // 恢复文件
+ * await trashManager.restoreFile(item);
+ * ```
  */
 export class TrashManager {
+	/** 文件夹管理器 */
 	private readonly folderManager: TrashFolderManager;
+	/** 路径解析器 */
 	private readonly pathParser: TrashPathParser;
+	/** 格式化工具 */
 	private readonly formatter: TrashFormatter;
+	/** 文件收集器 */
 	private readonly collector: TrashItemCollector;
+	/** Vault 实例 */
 	private readonly vault: Vault;
+	/** 插件实例 */
 	private readonly plugin: ImageManagementPlugin;
 	
-	// 缓存机制
+	// ==================== 缓存机制 ====================
+	/** 缓存的回收站项目列表 */
 	private cachedItems: TrashItem[] | null = null;
+	/** 缓存时间戳 */
 	private cacheTimestamp: number = 0;
-	private readonly CACHE_DURATION = 5000; // 缓存有效期 5 秒
+	/** 缓存有效期（毫秒） */
+	private readonly CACHE_DURATION = 5000;
+	/** 是否正在加载 */
 	private isLoading: boolean = false;
+	/** 加载 Promise（用于避免重复加载） */
 	private loadPromise: Promise<TrashItem[]> | null = null;
 
 	constructor(app: App, plugin: ImageManagementPlugin) {

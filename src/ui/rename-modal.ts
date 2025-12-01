@@ -1,10 +1,35 @@
+/**
+ * 批量重命名模态框模块
+ * 
+ * 提供批量重命名图片的用户界面。
+ * 支持使用占位符自定义命名格式。
+ */
+
 import { App, Modal, Setting } from 'obsidian';
 import { makeModalResizable } from '../utils/resizable-modal';
 
+/**
+ * 批量重命名模态框类
+ * 
+ * 功能：
+ * - 自定义命名格式
+ * - 支持占位符：{index}（序号）、{name}（原文件名）
+ * 
+ * 使用示例：
+ * - `image_{index}` → image_001.png, image_002.png, ...
+ * - `{name}_副本` → 原文件名_副本.png
+ */
 export class RenameModal extends Modal {
+	/** 重命名格式模板 */
 	renamePattern: string = 'image_{index}';
+	/** 提交回调函数 */
 	onSubmit: (pattern: string) => void;
 
+	/**
+	 * 创建批量重命名模态框
+	 * @param app - Obsidian App 实例
+	 * @param onSubmit - 确认时的回调函数，接收命名格式
+	 */
 	constructor(app: App, onSubmit: (pattern: string) => void) {
 		super(app);
 		this.onSubmit = onSubmit;

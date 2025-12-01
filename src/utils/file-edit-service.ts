@@ -1,3 +1,14 @@
+/**
+ * 文件编辑服务模块
+ * 
+ * 处理图片文件的重命名和移动操作，包括：
+ * - 文件名验证和清理
+ * - 目录创建
+ * - 引用链接自动更新
+ * - 锁定文件检查
+ * - 操作历史记录
+ */
+
 import { App, Notice, TFile, TFolder, Vault } from 'obsidian';
 import { ImageInfo } from '../types';
 import { PathValidator } from './path-validator';
@@ -9,10 +20,31 @@ import { OperationType } from './logger';
 import { isFileIgnored } from './file-filter';
 
 /**
- * 文件编辑服务
- * 负责处理文件名和路径的编辑、保存、撤销逻辑
+ * 文件编辑服务类
+ * 
+ * 功能：
+ * - 重命名图片文件
+ * - 移动图片到其他目录
+ * - 自动创建目标目录
+ * - 自动更新笔记中的引用链接
+ * - 检查和处理锁定文件
+ * - 记录操作历史
+ * 
+ * 使用场景：
+ * - 图片详情页的文件名/路径编辑
+ * - 批量重命名操作
+ * - 智能重命名功能
  */
 export class FileEditService {
+	/**
+	 * 创建文件编辑服务实例
+	 * @param app - Obsidian App 实例
+	 * @param vault - Obsidian Vault 实例
+	 * @param image - 当前操作的图片信息
+	 * @param plugin - 插件实例（可选）
+	 * @param referenceManager - 引用管理器（可选，用于更新引用）
+	 * @param historyManager - 历史记录管理器（可选）
+	 */
 	constructor(
 		private app: App,
 		private vault: Vault,
@@ -23,7 +55,13 @@ export class FileEditService {
 	) {}
 
 	/**
-	 * 创建目录
+	 * 创建目录（包括所有父目录）
+	 * 
+	 * 递归创建指定路径的所有目录层级。
+	 * 如果目录已存在，则静默跳过。
+	 * 
+	 * @param path - 要创建的目录路径
+	 * @throws 路径为空时抛出错误
 	 */
 	async createDirectory(path: string): Promise<void> {
 		// 确保路径不以 / 开头或结尾
@@ -89,7 +127,21 @@ export class FileEditService {
 	}
 
 	/**
-	 * 保存文件更改（重命名/移动）
+	 * 保存文件更改（重命名和/或移动）
+	 * 
+	 * 执行流程：
+	 * 1. 检查文件是否被锁定，如果是则提示用户确认
+	 * 2. 验证目标路径，必要时创建目录
+	 * 3. 执行重命名/移动操作
+	 * 4. 更新笔记中的引用链接
+	 * 5. 记录操作历史
+	 * 
+	 * @param newBaseName - 新的文件名（不含扩展名）
+	 * @param fileExtension - 文件扩展名（如 '.png'）
+	 * @param newPath - 新的目录路径
+	 * @param originalFileName - 原始文件名
+	 * @param originalPath - 原始完整路径
+	 * @returns 操作结果对象，包含成功状态、新文件名、新路径或错误信息
 	 */
 	async saveChanges(
 		newBaseName: string,

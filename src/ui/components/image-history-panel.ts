@@ -1,3 +1,9 @@
+/**
+ * 图片历史记录面板组件模块
+ * 
+ * 负责图片详情模态框中的操作记录区域。
+ */
+
 import { App, Notice } from 'obsidian';
 import { ImageInfo } from '../../types';
 import ImageManagementPlugin from '../../main';
@@ -5,8 +11,13 @@ import { LogViewerModal } from '../log-viewer-modal';
 import { LogLevel, OperationTypeLabels, OperationType } from '../../utils/logger';
 
 /**
- * 操作记录板块组件
- * 负责显示图片的操作记录
+ * 图片历史记录面板组件
+ * 
+ * 功能：
+ * - 显示图片的操作历史记录
+ * - 支持自动刷新
+ * - 点击查看详细日志
+ * - 显示操作类型、时间和详情
  */
 export class ImageHistoryPanel {
 	private container: HTMLElement;

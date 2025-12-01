@@ -1,8 +1,40 @@
+/**
+ * 路径验证器模块
+ * 
+ * 提供路径和文件名的安全验证和清理功能，用于防止：
+ * - 目录遍历攻击（如 ../../../etc/passwd）
+ * - 文件名注入（如包含特殊字符的文件名）
+ * - 跨平台兼容性问题（Windows/Unix 路径差异）
+ */
+
 import { normalizePath } from 'obsidian';
 
 /**
  * 路径验证工具类
- * 提供路径安全验证和清理功能，防止路径遍历攻击和文件名注入
+ * 
+ * 提供静态方法用于：
+ * - 验证路径安全性（isSafePath）
+ * - 清理危险字符（sanitizePath, sanitizeFileName）
+ * - 验证文件名合法性（isValidFileName）
+ * - 安全组合路径（combinePath）
+ * 
+ * 安全考虑：
+ * - 阻止目录遍历（..）
+ * - 阻止绝对路径
+ * - 过滤 Windows/Unix 非法字符
+ * - 检查 Windows 保留名称（CON, PRN, AUX 等）
+ * - 限制文件名长度
+ * 
+ * @example
+ * ```typescript
+ * // 验证路径
+ * if (!PathValidator.isSafePath(userInput)) {
+ *   throw new Error('不安全的路径');
+ * }
+ * 
+ * // 清理文件名
+ * const safeName = PathValidator.sanitizeFileName(userInput);
+ * ```
  */
 export class PathValidator {
 	/**

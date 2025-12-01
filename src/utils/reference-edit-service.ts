@@ -1,3 +1,10 @@
+/**
+ * 引用编辑服务模块
+ * 
+ * 处理图片引用链接的显示文本和尺寸编辑功能。
+ * 支持 Wiki 链接、Markdown 链接和 HTML img 标签三种格式。
+ */
+
 import { App, Notice, TFile } from 'obsidian';
 import { ImageInfo } from '../types';
 import { ReferenceManager, parseWikiLink, buildWikiLink, WikiLinkParts, parseHtmlImageSize } from './reference-manager';
@@ -6,10 +13,36 @@ import ImageManagementPlugin from '../main';
 import { OperationType } from './logger';
 
 /**
- * 引用编辑服务
- * 负责处理显示文本和尺寸的编辑、保存逻辑
+ * 引用编辑服务类
+ * 
+ * 功能：
+ * - 编辑 Wiki 链接的显示文本（如 `![[image.png|显示文本]]`）
+ * - 编辑图片尺寸（如 `![[image.png|100x200]]`）
+ * - 编辑 Markdown 链接的 alt 文本（如 `![alt](image.png)`）
+ * - 编辑 HTML img 标签的 alt 和尺寸属性
+ * 
+ * 支持的链接格式：
+ * - Wiki 链接（带!）：`![[path|text|size]]`
+ * - Wiki 链接（不带!）：`[[path|text]]`
+ * - Markdown 链接：`![alt](path)`
+ * - HTML 标签：`<img src="path" alt="text" width="100">`
+ * 
+ * 编辑流程：
+ * 1. 读取笔记文件内容
+ * 2. 定位到指定行
+ * 3. 解析链接格式
+ * 4. 更新显示文本/尺寸
+ * 5. 保存文件
+ * 6. 记录历史和日志
  */
 export class ReferenceEditService {
+	/**
+	 * 创建引用编辑服务实例
+	 * @param app - Obsidian App 实例
+	 * @param image - 当前操作的图片信息
+	 * @param plugin - 插件实例（可选，用于日志记录）
+	 * @param historyManager - 历史记录管理器（可选，用于记录操作历史）
+	 */
 	constructor(
 		private app: App,
 		private image: ImageInfo,
@@ -19,6 +52,20 @@ export class ReferenceEditService {
 
 	/**
 	 * 保存显示文本和尺寸到笔记文件
+	 * 
+	 * 根据链接格式自动解析并更新显示文本和尺寸信息。
+	 * 支持 Wiki 链接、Markdown 链接和 HTML img 标签。
+	 * 
+	 * @param filePath - 笔记文件路径
+	 * @param lineNumber - 链接所在行号（1-based）
+	 * @param matchType - 匹配类型（用于日志）
+	 * @param oldLine - 原始行内容
+	 * @param newDisplayText - 新的显示文本
+	 * @param newWidth - 新的宽度（可选）
+	 * @param newHeight - 新的高度（可选）
+	 * @returns 是否保存成功
+	 * 
+	 * @throws 文件不存在或行号超出范围时抛出错误
 	 */
 	async saveDisplayText(
 		filePath: string,

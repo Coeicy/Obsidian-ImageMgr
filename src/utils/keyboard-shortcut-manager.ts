@@ -1,18 +1,41 @@
 /**
  * 快捷键管理器
- * 统一管理插件的键盘快捷键
+ * 
+ * 统一管理插件的键盘快捷键，提供：
+ * - 快捷键定义和默认值
+ * - 快捷键解析和匹配
+ * - 快捷键格式化显示（支持 Mac 符号）
+ * - 输入框检测（避免在输入时触发快捷键）
+ * 
+ * 快捷键分类：
+ * - navigation: 导航类（切换图片、关闭等）
+ * - preview: 预览类（缩放、旋转等）
+ * - edit: 编辑类（删除、保存等）
+ * - view: 视图类（搜索、排序、筛选等）
+ * - batch: 批量操作类（批量重命名、移动等）
  */
 
+/**
+ * 快捷键定义接口
+ */
 export interface ShortcutDefinition {
+	/** 快捷键唯一标识符 */
 	id: string;
+	/** 快捷键名称（用于显示） */
 	name: string;
+	/** 快捷键描述（用于帮助提示） */
 	description: string;
+	/** 默认快捷键（如 'Ctrl+S', 'ArrowLeft'） */
 	defaultKey: string;
+	/** 快捷键分类 */
 	category: 'navigation' | 'preview' | 'edit' | 'view' | 'batch';
 }
 
 /**
- * 快捷键定义
+ * 所有快捷键的定义
+ * 
+ * 包含图片详情页和图片管理视图的所有快捷键。
+ * 用户可以在设置中自定义这些快捷键。
  */
 export const SHORTCUT_DEFINITIONS: Record<string, ShortcutDefinition> = {
 	// 图片详情页 - 导航
@@ -207,8 +230,19 @@ export const SHORTCUT_DEFINITIONS: Record<string, ShortcutDefinition> = {
 };
 
 /**
- * 解析快捷键字符串
- * 支持格式：'Ctrl+S', 'Ctrl+Shift+F', 'ArrowLeft' 等
+ * 解析快捷键字符串为结构化对象
+ * 
+ * 支持的格式：
+ * - 单键：'ArrowLeft', 'Delete', 'F1'
+ * - 组合键：'Ctrl+S', 'Ctrl+Shift+F', 'Alt+Enter'
+ * - Mac 风格：'Cmd+S'（会被解析为 meta）
+ * 
+ * @param shortcut - 快捷键字符串
+ * @returns 包含主键和修饰键状态的对象
+ * 
+ * @example
+ * parseShortcut('Ctrl+Shift+S')
+ * // 返回 { key: 's', ctrl: true, shift: true, alt: false, meta: false }
  */
 export function parseShortcut(shortcut: string): {
 	key: string;
@@ -245,7 +279,25 @@ export function parseShortcut(shortcut: string): {
 }
 
 /**
- * 格式化快捷键显示
+ * 格式化快捷键为用户友好的显示字符串
+ * 
+ * 将快捷键字符串转换为适合显示的格式：
+ * - Windows/Linux：'Ctrl+Shift+S'
+ * - Mac：'⌃⇧S'（使用 Mac 专用符号）
+ * 
+ * 特殊键会被转换为符号：
+ * - ArrowLeft → ←
+ * - ArrowRight → →
+ * - ArrowUp → ↑
+ * - ArrowDown → ↓
+ * 
+ * @param shortcut - 快捷键字符串
+ * @param isMac - 是否使用 Mac 风格符号
+ * @returns 格式化后的显示字符串
+ * 
+ * @example
+ * formatShortcut('Ctrl+Shift+S', false) // 返回 'Ctrl+Shift+S'
+ * formatShortcut('Ctrl+Shift+S', true)  // 返回 '⌃⇧S'
  */
 export function formatShortcut(shortcut: string, isMac: boolean = false): string {
 	const parts = shortcut.split('+').map(s => s.trim());
@@ -277,7 +329,25 @@ export function formatShortcut(shortcut: string, isMac: boolean = false): string
 }
 
 /**
- * 检查键盘事件是否匹配快捷键
+ * 检查键盘事件是否匹配指定的快捷键
+ * 
+ * 匹配规则：
+ * 1. 空快捷键不匹配任何按键
+ * 2. 修饰键必须精确匹配（如果快捷键要求 Ctrl，则必须按下 Ctrl）
+ * 3. 如果快捷键有修饰键，则不允许额外的修饰键
+ * 4. 如果快捷键是纯按键（无修饰键），则允许任意修饰键组合
+ * 5. 支持特殊键别名（如 Delete/Del, Escape/Esc）
+ * 
+ * @param e - 键盘事件对象
+ * @param shortcut - 快捷键字符串
+ * @returns 如果事件匹配快捷键返回 true
+ * 
+ * @example
+ * // 在键盘事件处理中使用
+ * if (matchesShortcut(e, 'Ctrl+S')) {
+ *   e.preventDefault();
+ *   saveChanges();
+ * }
  */
 export function matchesShortcut(
 	e: KeyboardEvent,
@@ -337,7 +407,24 @@ export function matchesShortcut(
 }
 
 /**
- * 检查是否在输入框中（不应触发快捷键）
+ * 检查事件目标是否为输入元素
+ * 
+ * 用于判断是否应该触发快捷键。当用户在输入框中输入时，
+ * 通常不应该触发快捷键（如按 Delete 应该删除文字而不是删除图片）。
+ * 
+ * 检测的元素类型：
+ * - input 元素
+ * - textarea 元素
+ * - contentEditable 元素
+ * 
+ * @param target - 事件目标
+ * @returns 如果目标是输入元素返回 true
+ * 
+ * @example
+ * document.addEventListener('keydown', (e) => {
+ *   if (isInputElement(e.target)) return; // 在输入框中，不处理快捷键
+ *   // 处理快捷键...
+ * });
  */
 export function isInputElement(target: EventTarget | null): boolean {
 	if (!target) return false;

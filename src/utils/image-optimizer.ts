@@ -1,20 +1,36 @@
+/**
+ * 图片优化和编辑模块
+ * 
+ * 提供图片编辑功能，包括旋转、翻转和调整尺寸。
+ * 使用 Canvas API 在浏览器端处理图片。
+ */
+
 import { Notice } from 'obsidian';
 
 /**
- * 图片编辑选项
+ * 图片编辑选项接口
  */
 export interface EditOptions {
-	rotate?: number; // 旋转角度 (90, 180, 270)
-	flip?: boolean; // 水平翻转
-	flop?: boolean; // 垂直翻转
+	/** 旋转角度（90、180、270 度） */
+	rotate?: number;
+	/** 是否水平翻转 */
+	flip?: boolean;
+	/** 是否垂直翻转 */
+	flop?: boolean;
+	/** 调整尺寸选项 */
 	resize?: {
+		/** 目标宽度（像素） */
 		width?: number;
+		/** 目标高度（像素） */
 		height?: number;
 	};
 }
 
 /**
- * 将ArrayBuffer转换为Blob URL
+ * 将 ArrayBuffer 转换为 HTMLImageElement
+ * 
+ * @param arrayBuffer - 图片的二进制数据
+ * @returns 加载完成的图片元素
  */
 function arrayBufferToImage(arrayBuffer: ArrayBuffer): Promise<HTMLImageElement> {
 	return new Promise((resolve, reject) => {
@@ -31,7 +47,12 @@ function arrayBufferToImage(arrayBuffer: ArrayBuffer): Promise<HTMLImageElement>
 }
 
 /**
- * 将Canvas转换为Blob
+ * 将 Canvas 转换为 Blob
+ * 
+ * @param canvas - Canvas 元素
+ * @param format - 输出格式（如 'png'、'jpeg'）
+ * @param quality - 输出质量（0-100）
+ * @returns 图片 Blob 对象
  */
 function canvasToBlob(canvas: HTMLCanvasElement, format: string, quality: number): Promise<Blob> {
 	return new Promise((resolve, reject) => {
@@ -44,7 +65,18 @@ function canvasToBlob(canvas: HTMLCanvasElement, format: string, quality: number
 }
 
 /**
- * 编辑图片（旋转、翻转等）
+ * 编辑图片
+ * 
+ * 支持旋转、翻转和调整尺寸操作。
+ * 
+ * @param input - 图片的二进制数据（Buffer 或 ArrayBuffer）
+ * @param options - 编辑选项
+ * @returns 编辑后的图片数据
+ * 
+ * @example
+ * ```typescript
+ * const result = await editImage(imageBuffer, { rotate: 90 });
+ * ```
  */
 export async function editImage(
 	input: Buffer | ArrayBuffer,

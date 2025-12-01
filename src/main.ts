@@ -222,6 +222,21 @@ export default class ImageManagementPlugin extends Plugin {
 		if (this.referenceManager) {
 			this.referenceManager.cleanup();
 		}
+		
+		// 清理 LockListManager 的资源
+		if (this.lockListManager) {
+			this.lockListManager.cleanup();
+		}
+		
+		// 清理 TrashManager 的缓存
+		if (this.trashManager) {
+			this.trashManager.invalidateCache();
+		}
+		
+		// 记录插件卸载日志
+		if (this.logger) {
+			this.logger.info(OperationType.PLUGIN_UNLOAD, '插件已卸载');
+		}
 	}
 
 	async activateView() {

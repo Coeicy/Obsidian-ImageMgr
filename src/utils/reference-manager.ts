@@ -1,3 +1,20 @@
+/**
+ * 引用管理模块
+ * 
+ * 负责图片引用的查询、解析和更新功能。
+ * 
+ * 功能：
+ * - 查找图片在笔记中的所有引用
+ * - 解析 Wiki 链接、Markdown 链接和 HTML img 标签
+ * - 更新笔记中的图片引用（重命名后自动更新）
+ * - 监听文件重命名事件
+ * 
+ * 支持的链接格式：
+ * - Wiki 链接：`![[image.png]]`、`![[image.png|显示文本]]`、`![[image.png|100x200]]`
+ * - Markdown 链接：`![alt](image.png)`
+ * - HTML 标签：`<img src="image.png">`
+ */
+
 import { App, TFile } from 'obsidian';
 import { Notice } from 'obsidian';
 import { PathValidator } from './path-validator';
@@ -5,25 +22,40 @@ import ImageManagementPlugin from '../main';
 import { OperationType } from './logger';
 
 /**
- * 引用管理器
- * 负责图片引用查询、更新和解析
- */
-/**
- * 解析 Wiki 链接中的显示文本和尺寸
+ * Wiki 链接解析结果接口
+ * 
+ * 解析 Wiki 链接中的路径、显示文本和尺寸信息。
+ * 
  * 支持的格式：
- * - ![[path]] - 无显示文本和尺寸
- * - ![[path|100]] - 仅尺寸（宽度）
- * - ![[path|100x200]] - 仅尺寸（宽x高）
- * - ![[path|显示文本]] - 仅显示文本
- * - ![[path|显示文本|100x200]] - 显示文本和尺寸（如果支持）
+ * - `![[path]]` - 无显示文本和尺寸
+ * - `![[path|100]]` - 仅尺寸（宽度）
+ * - `![[path|100x200]]` - 仅尺寸（宽x高）
+ * - `![[path|显示文本]]` - 仅显示文本
+ * - `![[path|显示文本|100x200]]` - 显示文本和尺寸
  */
 export interface WikiLinkParts {
+	/** 图片路径 */
 	path: string;
+	/** 显示文本（可选） */
 	displayText: string;
+	/** 宽度（像素，可选） */
 	width?: number;
+	/** 高度（像素，可选） */
 	height?: number;
 }
 
+/**
+ * 解析 Wiki 链接字符串
+ * 
+ * @param linkContent - Wiki 链接字符串（如 `![[path|text|size]]`）
+ * @returns 解析后的链接部分
+ * 
+ * @example
+ * ```typescript
+ * parseWikiLink('![[image.png|标题|100x200]]');
+ * // { path: 'image.png', displayText: '标题', width: 100, height: 200 }
+ * ```
+ */
 export function parseWikiLink(linkContent: string): WikiLinkParts {
 	const parts: WikiLinkParts = {
 		path: '',
@@ -90,6 +122,18 @@ export function parseWikiLink(linkContent: string): WikiLinkParts {
 
 /**
  * 构建 Wiki 链接字符串
+ * 
+ * 根据提供的部分构建完整的 Wiki 链接。
+ * 
+ * @param parts - Wiki 链接的各个部分
+ * @param withExclam - 是否添加感叹号前缀（图片嵌入需要）
+ * @returns 构建的 Wiki 链接字符串
+ * 
+ * @example
+ * ```typescript
+ * buildWikiLink({ path: 'image.png', displayText: '标题', width: 100 }, true);
+ * // '![[image.png|标题|100]]'
+ * ```
  */
 export function buildWikiLink(parts: WikiLinkParts, withExclam: boolean = true): string {
 	const prefix = withExclam ? '!' : '';

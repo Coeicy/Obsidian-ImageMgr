@@ -1,3 +1,17 @@
+/**
+ * 日志管理模块
+ * 
+ * 提供插件的日志记录和管理功能。
+ * 
+ * 功能：
+ * - 多级别日志记录（DEBUG、INFO、WARNING、ERROR）
+ * - 按操作类型分类日志
+ * - 日志持久化存储
+ * - 日志查询和过滤
+ * - 日志导出
+ * - 控制台输出控制
+ */
+
 import { App } from 'obsidian';
 import ImageManagementPlugin from '../main';
 
@@ -49,6 +63,10 @@ export enum OperationType {
 	FLIP = 'FLIP',
 	/** 尺寸调整 - 修改图片的宽度或高度 */
 	RESIZE = 'RESIZE',
+	/** 复制图片 - 复制图片到剪贴板或其他位置 */
+	COPY = 'COPY',
+	/** 查看图片 - 打开图片详情 */
+	VIEW = 'VIEW',
 	
 	// ==================== 批量操作 ====================
 	/** 批量重命名 - 同时重命名多个图片 */
@@ -57,6 +75,10 @@ export enum OperationType {
 	BATCH_MOVE = 'BATCH_MOVE',
 	/** 批量删除 - 同时删除多个图片 */
 	BATCH_DELETE = 'BATCH_DELETE',
+	/** 批量锁定 - 同时锁定多个图片 */
+	BATCH_LOCK = 'BATCH_LOCK',
+	/** 批量解锁 - 同时解锁多个图片 */
+	BATCH_UNLOCK = 'BATCH_UNLOCK',
 	
 	// ==================== 引用操作 ====================
 	/** 引用图片 - 在笔记中引用图片 */
@@ -69,6 +91,10 @@ export enum OperationType {
 	UPDATE_DISPLAY_TEXT = 'UPDATE_DISPLAY_TEXT',
 	/** 查找引用 - 查询哪些笔记引用了该图片 */
 	FIND_REFERENCE = 'FIND_REFERENCE',
+	/** 修复空链接 - 修复指向不存在图片的链接 */
+	FIX_BROKEN_LINK = 'FIX_BROKEN_LINK',
+	/** 转换链接格式 - 转换链接路径格式（绝对/相对/最短） */
+	CONVERT_LINK_FORMAT = 'CONVERT_LINK_FORMAT',
 	
 	// ==================== 分组操作 ====================
 	/** 创建分组 - 创建新的图片分组 */
@@ -79,6 +105,8 @@ export enum OperationType {
 	GROUP_MERGE = 'GROUP_MERGE',
 	/** 更新分组 - 修改分组内容（如拖拽图片到分组） */
 	GROUP_UPDATE = 'GROUP_UPDATE',
+	/** 重置分组 - 清除所有分组 */
+	GROUP_RESET = 'GROUP_RESET',
 	
 	// ==================== 文件保护操作 ====================
 	/** 锁定文件 - 防止文件被意外修改或删除 */
@@ -93,20 +121,50 @@ export enum OperationType {
 	RESTORE = 'RESTORE',
 	/** 永久删除 - 从回收站永久删除文件 */
 	PERMANENT_DELETE = 'PERMANENT_DELETE',
+	/** 清空回收站 - 永久删除回收站中的所有文件 */
+	EMPTY_TRASH = 'EMPTY_TRASH',
+	
+	// ==================== 重复检测操作 ====================
+	/** 检测重复 - 检测重复的图片文件 */
+	DETECT_DUPLICATE = 'DETECT_DUPLICATE',
+	/** 删除重复 - 删除重复的图片文件 */
+	DELETE_DUPLICATE = 'DELETE_DUPLICATE',
+	
+	// ==================== 搜索筛选操作 ====================
+	/** 搜索图片 - 按关键词搜索图片 */
+	SEARCH = 'SEARCH',
+	/** 筛选图片 - 按条件筛选图片 */
+	FILTER = 'FILTER',
+	/** 排序图片 - 按条件排序图片 */
+	SORT = 'SORT',
+	
+	// ==================== 缓存操作 ====================
+	/** 缓存更新 - 更新哈希缓存 */
+	CACHE_UPDATE = 'CACHE_UPDATE',
+	/** 缓存清理 - 清理过期缓存 */
+	CACHE_CLEAR = 'CACHE_CLEAR',
 	
 	// ==================== 系统操作 ====================
 	/** 插件加载 - 插件启动时的初始化操作 */
 	PLUGIN_LOAD = 'PLUGIN_LOAD',
+	/** 插件卸载 - 插件关闭时的清理操作 */
+	PLUGIN_UNLOAD = 'PLUGIN_UNLOAD',
 	/** 插件错误 - 插件运行中发生的错误 */
 	PLUGIN_ERROR = 'PLUGIN_ERROR',
 	/** 设置更改 - 用户修改了插件设置 */
 	SETTINGS_CHANGE = 'SETTINGS_CHANGE',
 	/** 其他插件操作 - 其他杂项操作 */
-	PLUGIN_OPERATION = 'PLUGIN_OPERATION'
+	PLUGIN_OPERATION = 'PLUGIN_OPERATION',
+	/** 日志导出 - 导出日志文件 */
+	LOG_EXPORT = 'LOG_EXPORT',
+	/** 日志清理 - 清理日志记录 */
+	LOG_CLEAR = 'LOG_CLEAR'
 }
 
 /**
  * 操作类型中文映射
+ * 
+ * 用于在 UI 中显示操作类型的中文名称
  */
 export const OperationTypeLabels: Record<OperationType, string> = {
 	// 图片操作
@@ -118,11 +176,15 @@ export const OperationTypeLabels: Record<OperationType, string> = {
 	[OperationType.ROTATE]: '旋转',
 	[OperationType.FLIP]: '翻转',
 	[OperationType.RESIZE]: '尺寸调整',
+	[OperationType.COPY]: '复制图片',
+	[OperationType.VIEW]: '查看图片',
 	
 	// 批量操作
 	[OperationType.BATCH_RENAME]: '批量重命名',
 	[OperationType.BATCH_MOVE]: '批量移动',
 	[OperationType.BATCH_DELETE]: '批量删除',
+	[OperationType.BATCH_LOCK]: '批量锁定',
+	[OperationType.BATCH_UNLOCK]: '批量解锁',
 	
 	// 引用操作
 	[OperationType.REFERENCE]: '引用图片',
@@ -130,12 +192,15 @@ export const OperationTypeLabels: Record<OperationType, string> = {
 	[OperationType.UPDATE_REFERENCE]: '更新引用',
 	[OperationType.UPDATE_DISPLAY_TEXT]: '更新显示文本',
 	[OperationType.FIND_REFERENCE]: '查找引用',
+	[OperationType.FIX_BROKEN_LINK]: '修复空链接',
+	[OperationType.CONVERT_LINK_FORMAT]: '转换链接格式',
 	
 	// 分组操作
 	[OperationType.GROUP_CREATE]: '创建分组',
 	[OperationType.GROUP_DELETE]: '删除分组',
 	[OperationType.GROUP_MERGE]: '合并分组',
 	[OperationType.GROUP_UPDATE]: '更新分组',
+	[OperationType.GROUP_RESET]: '重置分组',
 	
 	// 文件保护操作
 	[OperationType.LOCK]: '锁定文件',
@@ -145,42 +210,114 @@ export const OperationTypeLabels: Record<OperationType, string> = {
 	[OperationType.TRASH]: '移动到回收站',
 	[OperationType.RESTORE]: '恢复文件',
 	[OperationType.PERMANENT_DELETE]: '永久删除',
+	[OperationType.EMPTY_TRASH]: '清空回收站',
+	
+	// 重复检测操作
+	[OperationType.DETECT_DUPLICATE]: '检测重复',
+	[OperationType.DELETE_DUPLICATE]: '删除重复',
+	
+	// 搜索筛选操作
+	[OperationType.SEARCH]: '搜索图片',
+	[OperationType.FILTER]: '筛选图片',
+	[OperationType.SORT]: '排序图片',
+	
+	// 缓存操作
+	[OperationType.CACHE_UPDATE]: '更新缓存',
+	[OperationType.CACHE_CLEAR]: '清理缓存',
 	
 	// 系统操作
 	[OperationType.PLUGIN_LOAD]: '插件加载',
+	[OperationType.PLUGIN_UNLOAD]: '插件卸载',
 	[OperationType.PLUGIN_ERROR]: '插件错误',
 	[OperationType.SETTINGS_CHANGE]: '设置更改',
-	[OperationType.PLUGIN_OPERATION]: '插件操作'
+	[OperationType.PLUGIN_OPERATION]: '插件操作',
+	[OperationType.LOG_EXPORT]: '导出日志',
+	[OperationType.LOG_CLEAR]: '清理日志'
 };
 
 /**
  * 日志条目接口
+ * 
+ * 记录单条操作日志的完整信息
  */
 export interface LogEntry {
-	id: string;              // 日志ID（唯一）
-	timestamp: number;       // 时间戳
-	level: LogLevel;         // 日志级别
-	operation: OperationType; // 操作类型
-	message: string;         // 日志消息
-	filePath?: string;       // 触发日志的文件路径
-	imageHash?: string;      // 图片MD5哈希值（如果与图片相关）
-	imagePath?: string;      // 图片路径（辅助信息）
-	imageName?: string;      // 图片名称（辅助信息）
-	details?: any;           // 详细信息（JSON对象）
-	error?: string;          // 错误信息（如果有）
-	stackTrace?: string;     // 堆栈跟踪（如果有错误）
+	/** 日志唯一标识符 */
+	id: string;
+	/** 日志时间戳（毫秒） */
+	timestamp: number;
+	/** 日志级别 */
+	level: LogLevel;
+	/** 操作类型 */
+	operation: OperationType;
+	/** 日志消息（简短描述） */
+	message: string;
+	/** 触发日志的源文件路径（用于调试） */
+	filePath?: string;
+	/** 图片 MD5 哈希值（用于追踪同一图片的操作） */
+	imageHash?: string;
+	/** 图片路径 */
+	imagePath?: string;
+	/** 图片名称 */
+	imageName?: string;
+	/** 详细信息（JSON 对象，包含操作的具体参数） */
+	details?: {
+		/** 旧文件名（重命名操作） */
+		oldName?: string;
+		/** 新文件名（重命名操作） */
+		newName?: string;
+		/** 旧路径（移动操作） */
+		oldPath?: string;
+		/** 新路径（移动操作） */
+		newPath?: string;
+		/** 操作数量（批量操作） */
+		count?: number;
+		/** 成功数量（批量操作） */
+		successCount?: number;
+		/** 失败数量（批量操作） */
+		failedCount?: number;
+		/** 操作耗时（毫秒） */
+		duration?: number;
+		/** 文件大小（字节） */
+		fileSize?: number;
+		/** 引用的笔记列表 */
+		referencedNotes?: string[];
+		/** 分组名称 */
+		groupName?: string;
+		/** 搜索关键词 */
+		searchQuery?: string;
+		/** 筛选条件 */
+		filterOptions?: any;
+		/** 排序条件 */
+		sortOptions?: any;
+		/** 其他自定义信息 */
+		[key: string]: any;
+	};
+	/** 错误信息（如果有） */
+	error?: string;
+	/** 堆栈跟踪（如果有错误） */
+	stackTrace?: string;
 }
 
 /**
- * 日志过滤器
+ * 日志过滤器接口
+ * 
+ * 用于查询和筛选日志
  */
 export interface LogFilter {
-	level?: LogLevel[];           // 按级别筛选
-	operation?: OperationType[];  // 按操作类型筛选
-	imageHash?: string;           // 按图片哈希筛选
-	startTime?: number;           // 开始时间
-	endTime?: number;             // 结束时间
-	keyword?: string;             // 关键词搜索
+	/** 按日志级别筛选（多选） */
+	level?: LogLevel[];
+	/** 按操作类型筛选（多选） */
+	operation?: OperationType[];
+	/** 按图片哈希筛选（精确匹配） */
+	imageHash?: string;
+	/** 按图片路径筛选（模糊匹配） */
+	imagePath?: string;
+	/** 开始时间（时间戳） */
+	startTime?: number;
+	/** 结束时间（时间戳） */
+	endTime?: number;
+	/** 关键词搜索（搜索消息和详情） */
+	keyword?: string;
 }
 
 /**
@@ -208,14 +345,54 @@ function isDevelopmentMode(): boolean {
 }
 
 /**
- * 日志管理器
+ * 日志管理器类
+ * 
+ * 负责插件的日志记录、存储、查询和导出。
+ * 
+ * 功能：
+ * - 多级别日志记录（DEBUG、INFO、WARNING、ERROR）
+ * - 按操作类型分类日志
+ * - 日志持久化存储（保存到插件数据）
+ * - 日志查询和过滤
+ * - 日志导出（JSON 格式）
+ * - 控制台输出控制
+ * - 自动清理过期日志
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 记录信息日志
+ * await logger.info(OperationType.RENAME, '重命名成功', {
+ *   imageHash: 'abc123',
+ *   imagePath: 'images/photo.png',
+ *   details: { oldName: 'old.png', newName: 'new.png' }
+ * });
+ * 
+ * // 记录错误日志
+ * await logger.error(OperationType.DELETE, '删除失败', {
+ *   error: new Error('文件不存在')
+ * });
+ * 
+ * // 查询日志
+ * const logs = logger.query({
+ *   operation: [OperationType.RENAME, OperationType.MOVE],
+ *   startTime: Date.now() - 86400000 // 最近24小时
+ * });
+ * ```
  */
 export class Logger {
+	/** 日志存储数组 */
 	private logs: LogEntry[] = [];
-	private readonly MAX_LOGS = 1000; // 最多保存1000条日志
+	/** 最大日志条数 */
+	private readonly MAX_LOGS = 1000;
+	/** 插件实例引用 */
 	private plugin: ImageManagementPlugin;
+	/** 是否为开发模式 */
 	private isDevMode: boolean;
 
+	/**
+	 * 创建日志管理器实例
+	 * @param plugin - 插件实例
+	 */
 	constructor(plugin: ImageManagementPlugin) {
 		this.plugin = plugin;
 		this.isDevMode = isDevelopmentMode();
@@ -490,7 +667,13 @@ export class Logger {
 	}
 
 	/**
-	 * 快捷方法 - DEBUG
+	 * 记录调试日志
+	 * 
+	 * 用于记录详细的调试信息，仅在启用 DEBUG 日志时记录。
+	 * 
+	 * @param operation - 操作类型
+	 * @param message - 日志消息
+	 * @param options - 可选参数（图片信息、详情等）
 	 */
 	async debug(operation: OperationType, message: string, options?: {
 		imageHash?: string;
@@ -503,7 +686,13 @@ export class Logger {
 	}
 
 	/**
-	 * 快捷方法 - INFO
+	 * 记录信息日志
+	 * 
+	 * 用于记录正常的操作信息，如成功的操作。
+	 * 
+	 * @param operation - 操作类型
+	 * @param message - 日志消息
+	 * @param options - 可选参数（图片信息、详情等）
 	 */
 	async info(operation: OperationType, message: string, options?: {
 		imageHash?: string;
@@ -516,7 +705,13 @@ export class Logger {
 	}
 
 	/**
-	 * 快捷方法 - WARNING
+	 * 记录警告日志
+	 * 
+	 * 用于记录可能的问题或异常情况，但不影响功能。
+	 * 
+	 * @param operation - 操作类型
+	 * @param message - 日志消息
+	 * @param options - 可选参数（图片信息、详情等）
 	 */
 	async warn(operation: OperationType, message: string, options?: {
 		imageHash?: string;
@@ -529,7 +724,13 @@ export class Logger {
 	}
 
 	/**
-	 * 快捷方法 - ERROR
+	 * 记录错误日志
+	 * 
+	 * 用于记录错误信息，包括异常和失败的操作。
+	 * 
+	 * @param operation - 操作类型
+	 * @param message - 日志消息
+	 * @param options - 可选参数（图片信息、详情、错误对象等）
 	 */
 	async error(operation: OperationType, message: string, options?: {
 		imageHash?: string;
