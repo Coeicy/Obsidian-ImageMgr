@@ -3384,66 +3384,88 @@ export class ImageDetailModal extends Modal {
 						const newLeaf = this.app.workspace.splitActiveLeaf('vertical');
 						if (newLeaf) {
 							await newLeaf.openFile(file as TFile);
-							// 滚动到指定行
-							setTimeout(() => {
+							// 滚动到指定行并选中引用
+							setTimeout(async () => {
 								const view = newLeaf.view;
-								if (view && 'editor' in view && ref.lineNumber) {
+								if (view && 'editor' in view && ref.lineNumber && ref.lineNumber > 0) {
 									const editor = (view as any).editor;
-									if (editor && typeof editor.setCursor === 'function') {
+									if (editor && typeof editor.setSelection === 'function') {
 										const line = ref.lineNumber - 1;
-										const pos = { line: line, ch: 0 };
+										let ch = 0;
+										let linkLength = 0;
 										
-										// 设置光标位置（这会自动滚动到该位置）
-										editor.setCursor(pos);
-										
-										// 尝试滚动到指定位置（使用更安全的方法）
-										// Obsidian 的 CodeMirror 编辑器在 setCursor 后通常会自动滚动
-										// 如果需要额外滚动，尝试使用编辑器视图的 scrollPosIntoView
-										try {
-											// 检查是否有 cm 或 codemirror 实例
-											const cm = (editor as any).cm || (editor as any).codemirror;
-											if (cm && typeof cm.scrollIntoView === 'function') {
-												cm.scrollIntoView(pos);
+										// 使用 fullLine 定位引用位置
+										if (ref.fullLine) {
+											// 查找图片引用的位置（支持 Wiki/Markdown/HTML 格式）
+											const patterns = [
+												new RegExp(`!\\[\\[[^\\]]*${this.image.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\]]*\\]\\]`),
+												new RegExp(`!\\[[^\\]]*\\]\\([^)]*${this.image.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^)]*\\)`),
+												new RegExp(`<img[^>]*${this.image.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^>]*>`, 'i')
+											];
+											for (const pattern of patterns) {
+												const match = ref.fullLine.match(pattern);
+												if (match && match.index !== undefined) {
+													ch = match.index;
+													linkLength = match[0].length;
+													break;
+												}
 											}
-										} catch (e) {
-											// 忽略错误，setCursor 已经设置了位置
+										}
+										
+										const pos = { line, ch };
+										const endPos = { line, ch: ch + linkLength };
+										if (linkLength > 0) {
+											editor.setSelection(pos, endPos);
+										} else {
+											editor.setCursor(pos);
 										}
 									}
 								}
-							}, 300); // 增加延迟确保文件已完全加载
+							}, 300);
 						}
 					} else {
 						// 关闭模态框：在当前标签页打开笔记
 						const newLeaf = this.app.workspace.getLeaf(true);
 						if (newLeaf) {
 							await newLeaf.openFile(file as TFile);
-							// 滚动到指定行
-							setTimeout(() => {
+							// 滚动到指定行并选中引用
+							setTimeout(async () => {
 								const view = newLeaf.view;
-								if (view && 'editor' in view && ref.lineNumber) {
+								if (view && 'editor' in view && ref.lineNumber && ref.lineNumber > 0) {
 									const editor = (view as any).editor;
-									if (editor && typeof editor.setCursor === 'function') {
+									if (editor && typeof editor.setSelection === 'function') {
 										const line = ref.lineNumber - 1;
-										const pos = { line: line, ch: 0 };
+										let ch = 0;
+										let linkLength = 0;
 										
-										// 设置光标位置（这会自动滚动到该位置）
-										editor.setCursor(pos);
-										
-										// 尝试滚动到指定位置（使用更安全的方法）
-										// Obsidian 的 CodeMirror 编辑器在 setCursor 后通常会自动滚动
-										// 如果需要额外滚动，尝试使用编辑器视图的 scrollPosIntoView
-										try {
-											// 检查是否有 cm 或 codemirror 实例
-											const cm = (editor as any).cm || (editor as any).codemirror;
-											if (cm && typeof cm.scrollIntoView === 'function') {
-												cm.scrollIntoView(pos);
+										// 使用 fullLine 定位引用位置
+										if (ref.fullLine) {
+											// 查找图片引用的位置（支持 Wiki/Markdown/HTML 格式）
+											const patterns = [
+												new RegExp(`!\\[\\[[^\\]]*${this.image.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\]]*\\]\\]`),
+												new RegExp(`!\\[[^\\]]*\\]\\([^)]*${this.image.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^)]*\\)`),
+												new RegExp(`<img[^>]*${this.image.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^>]*>`, 'i')
+											];
+											for (const pattern of patterns) {
+												const match = ref.fullLine.match(pattern);
+												if (match && match.index !== undefined) {
+													ch = match.index;
+													linkLength = match[0].length;
+													break;
+												}
 											}
-										} catch (e) {
-											// 忽略错误，setCursor 已经设置了位置
+										}
+										
+										const pos = { line, ch };
+										const endPos = { line, ch: ch + linkLength };
+										if (linkLength > 0) {
+											editor.setSelection(pos, endPos);
+										} else {
+											editor.setCursor(pos);
 										}
 									}
 								}
-							}, 300); // 增加延迟确保文件已完全加载
+							}, 300);
 							// 关闭模态框
 							this.close();
 						}

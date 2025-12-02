@@ -152,7 +152,7 @@ export class ImageManagerView extends ItemView {
 		this.updateButtonIndicator(groupBtn, 'group');
 		groupBtn.addEventListener('click', () => this.groupImages());
 
-		// 智能重命名按钮
+		// 批量重命名按钮
 		const pathRenameBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
 		pathRenameBtn.setAttribute('id', 'path-rename-btn');
 		this.updateButtonIndicator(pathRenameBtn, 'path-rename');
@@ -200,38 +200,10 @@ export class ImageManagerView extends ItemView {
 		const refreshBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
 		refreshBtn.setAttribute('id', 'refresh-btn');
 		refreshBtn.innerHTML = '<span class="icon">🔄</span><span class="btn-text">刷新</span>';
-		refreshBtn.title = '刷新显示（重新应用分组、筛选、搜索等）';
+		refreshBtn.title = '刷新显示（智能检测变化，只刷新有变化的内容）';
 		const view = this;
 		refreshBtn.addEventListener('click', async () => {
-			
-			// 重新扫描图片（会重新加载所有元数据，包括锁定状态、引用状态等）
-			await view.scanImages();
-			
-			// 清理无效的分组数据
-			view.cleanupInvalidGroupPaths();
-			
-			// 重新应用分组到图片
-			view.images.forEach(img => { img.group = undefined; });
-			Object.entries(view.plugin.data.imageGroups || {}).forEach(([name, paths]: [string, any]) => {
-				(paths as string[]).forEach(p => {
-					const img = view.images.find(i => i.path === p);
-					if (img) img.group = name;
-				});
-			});
-			
-			// 应用锁定分组（如果启用）
-			if (view.plugin.data.groupMeta?.['_lock_group']?.type === 'lock') {
-				view.images.forEach(img => {
-					const isLocked = view.isIgnoredFile(img.name, img.md5, img.path);
-					img.group = isLocked ? '已锁定' : '未锁定';
-				});
-			}
-			
-			
-			// 重新渲染UI（保留分组、筛选、搜索等状态）
-			view.renderImageList();
-			
-			new Notice('已刷新');
+			await view.smartRefresh();
 		});
 
 		// 合并的清除按钮（初始隐藏）
@@ -365,8 +337,8 @@ export class ImageManagerView extends ItemView {
 			'filter': { icon: '🎯', text: '筛选' },
 			'rename': { icon: '✏️', text: '重命名' },
 			'group': { icon: '📂', text: '分组' },
-			'path-rename': { icon: '🔠', text: '智能重命名' },
-			'duplicate': { icon: '🔍', text: '重复检测' },
+			'path-rename': { icon: '🔠', text: '批量重命名' },
+			'duplicate': { icon: '🔍', text: '重复图片' },
 			'broken-links': { icon: '🈳', text: '空链接' },
 			'link-format': { icon: '🔗', text: '链接转换' },
 			'stats': { icon: '📊', text: '库统计' },
@@ -548,6 +520,134 @@ export class ImageManagerView extends ItemView {
 		}
 	}
 
+	/**
+	 * 智能刷新：检测文件变化，只在有变化时重新扫描
+	 * 
+	 * 优化策略：
+	 * 1. 先快速检测文件系统变化（不读取文件内容）
+	 * 2. 无变化时：只重新应用分组并刷新 UI，显示"无文件变化，已刷新显示"
+	 * 3. 有变化时：执行完整扫描，显示变化统计（如"已刷新：新增 2，删除 1"）
+	 * 
+	 * 检测以下变化：
+	 * - 新增的图片文件（路径不在旧列表中）
+	 * - 删除的图片文件（旧路径在文件系统中不存在）
+	 * - 修改的图片文件（mtime 或 size 变化）
+	 * 
+	 * 性能优势：
+	 * - 避免无变化时的重复扫描和哈希计算
+	 * - 减少 UI 重绘开销
+	 * - 提供更精确的用户反馈
+	 */
+	async smartRefresh() {
+		// 如果正在扫描，直接返回
+		if (this.isScanning) {
+			new Notice('正在扫描中，请稍候...');
+			return;
+		}
+		
+		// 获取当前图片列表的快照（用于比较）
+		const oldImagePaths = new Set(this.images.map(img => img.path));
+		const oldImageMap = new Map(this.images.map(img => [img.path, { mtime: img.modified, size: img.size }]));
+		
+		// 快速检测文件系统变化（不进行完整扫描）
+		const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
+		const currentFiles = this.app.vault.getFiles().filter(file => 
+			!file.path.startsWith('.trash') && 
+			imageExtensions.some(ext => file.path.toLowerCase().endsWith(ext))
+		);
+		
+		// 检测变化
+		let hasChanges = false;
+		let addedCount = 0;
+		let removedCount = 0;
+		let modifiedCount = 0;
+		
+		// 检查新增和修改的文件
+		for (const file of currentFiles) {
+			if (!oldImagePaths.has(file.path)) {
+				hasChanges = true;
+				addedCount++;
+			} else {
+				const oldInfo = oldImageMap.get(file.path);
+				if (oldInfo && (oldInfo.mtime !== file.stat.mtime || oldInfo.size !== file.stat.size)) {
+					hasChanges = true;
+					modifiedCount++;
+				}
+			}
+		}
+		
+		// 检查删除的文件
+		const currentFilePaths = new Set(currentFiles.map(f => f.path));
+		for (const oldPath of oldImagePaths) {
+			if (!currentFilePaths.has(oldPath)) {
+				hasChanges = true;
+				removedCount++;
+			}
+		}
+		
+		// 如果没有文件变化，只重新应用分组和渲染
+		if (!hasChanges) {
+			// 清理无效的分组数据
+			this.cleanupInvalidGroupPaths();
+			
+			// 重新应用分组到图片
+			this.images.forEach(img => { img.group = undefined; });
+			Object.entries(this.plugin.data.imageGroups || {}).forEach(([name, paths]: [string, any]) => {
+				(paths as string[]).forEach(p => {
+					const img = this.images.find(i => i.path === p);
+					if (img) img.group = name;
+				});
+			});
+			
+			// 应用锁定分组（如果启用）
+			if (this.plugin.data.groupMeta?.['_lock_group']?.type === 'lock') {
+				this.images.forEach(img => {
+					const isLocked = this.isIgnoredFile(img.name, img.md5, img.path);
+					img.group = isLocked ? '已锁定' : '未锁定';
+				});
+			}
+			
+			// 重新渲染UI（保留分组、筛选、搜索等状态）
+			this.renderImageList();
+			
+			new Notice('无文件变化，已刷新显示');
+			return;
+		}
+		
+		// 有变化，执行完整扫描
+		await this.scanImages();
+		
+		// 清理无效的分组数据
+		this.cleanupInvalidGroupPaths();
+		
+		// 重新应用分组到图片
+		this.images.forEach(img => { img.group = undefined; });
+		Object.entries(this.plugin.data.imageGroups || {}).forEach(([name, paths]: [string, any]) => {
+			(paths as string[]).forEach(p => {
+				const img = this.images.find(i => i.path === p);
+				if (img) img.group = name;
+			});
+		});
+		
+		// 应用锁定分组（如果启用）
+		if (this.plugin.data.groupMeta?.['_lock_group']?.type === 'lock') {
+			this.images.forEach(img => {
+				const isLocked = this.isIgnoredFile(img.name, img.md5, img.path);
+				img.group = isLocked ? '已锁定' : '未锁定';
+			});
+		}
+		
+		// 重新渲染UI
+		this.renderImageList();
+		
+		// 显示变化统计
+		const changes: string[] = [];
+		if (addedCount > 0) changes.push(`新增 ${addedCount}`);
+		if (removedCount > 0) changes.push(`删除 ${removedCount}`);
+		if (modifiedCount > 0) changes.push(`修改 ${modifiedCount}`);
+		new Notice(`已刷新：${changes.join('，')}`);
+	}
+
 	applySortAndFilter() {
 		// 先搜索
 		let result = this.images;
@@ -556,18 +656,52 @@ export class ImageManagerView extends ItemView {
 		const nameQuery = this.filterOptions.nameFilter || this.searchQuery;
 		if (nameQuery && nameQuery.trim()) {
 			const query = nameQuery.toLowerCase().trim();
-			result = result.filter(image => {
-				// 文件名搜索
-				const nameMatch = image.name.toLowerCase().includes(query);
+			const searchInPath = this.plugin.settings.searchInPath;
+			
+			// 计算每个图片的匹配分数（用于相关性排序）
+			const scoredResults: Array<{ image: typeof result[0]; score: number }> = [];
+			
+			for (const image of result) {
+				let score = 0;
+				const nameLower = image.name.toLowerCase();
 				
-				// MD5哈希值搜索
-				const md5Match = image.md5 && image.md5.toLowerCase().includes(query);
+				// 文件名匹配（高优先级）
+				if (nameLower.includes(query)) {
+					// 文件名完全匹配（不含扩展名）得分最高
+					const nameWithoutExt = nameLower.replace(/\.[^.]+$/, '');
+					if (nameWithoutExt === query) {
+						score = 100; // 完全匹配
+					} else if (nameWithoutExt.startsWith(query)) {
+						score = 80; // 前缀匹配
+					} else {
+						score = 60; // 包含匹配
+					}
+				}
 				
-				// 路径搜索（包含目录路径）
-				const pathMatch = image.path.toLowerCase().includes(query);
+				// 路径匹配（低优先级，根据设置决定是否启用）
+				if (searchInPath && score === 0) {
+					const lastSlash = image.path.lastIndexOf('/');
+					const dirPath = lastSlash > 0 ? image.path.substring(0, lastSlash) : '';
+					if (dirPath.toLowerCase().includes(query)) {
+						score = 20; // 路径匹配得分较低
+					}
+				}
 				
-				return nameMatch || md5Match || pathMatch;
-			});
+				// MD5 搜索（只有当查询看起来像哈希值时才启用）
+				if (score === 0 && query.length >= 8 && /^[a-f0-9]+$/.test(query)) {
+					if (image.md5 && image.md5.toLowerCase().includes(query)) {
+						score = 10; // MD5 匹配得分最低
+					}
+				}
+				
+				if (score > 0) {
+					scoredResults.push({ image, score });
+				}
+			}
+			
+			// 按分数降序排序，分数相同时保持原有顺序
+			scoredResults.sort((a, b) => b.score - a.score);
+			result = scoredResults.map(r => r.image);
 		}
 
 		// 再筛选

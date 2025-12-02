@@ -3,6 +3,17 @@
  * 
  * 提供将图片链接转换为不同格式的功能。
  * 支持批量转换笔记中的图片链接路径格式。
+ * 
+ * 功能特性：
+ * - 搜索筛选：支持按笔记路径或图片名称搜索筛选
+ * - 智能识别：自动排除代码块（```）和行内代码（`）中的链接
+ * - 只识别图片：排除笔记链接，只处理图片嵌入链接
+ * - 实时更新：直接读取文件内容，确保识别最新添加的链接
+ * 
+ * 交互方式：
+ * - 点击单个链接：转换该链接
+ * - Ctrl+点击：跳转到笔记并选中链接
+ * - 转换全部：批量转换所有链接
  */
 
 import { App, Modal, Notice, TFile } from 'obsidian';
@@ -71,6 +82,8 @@ export class LinkFormatModal extends Modal {
 	private plugin: ImageManagementPlugin;
 	private selectedFormat: LinkFormatType = 'shortest';
 	private previewContainer: HTMLElement | null = null;
+	private searchQuery: string = '';
+	private allChanges: Array<{ filePath: string; lineNumber: number; oldLink: string; newLink: string }> = [];
 
 	constructor(app: App, plugin: ImageManagementPlugin) {
 		super(app);
@@ -238,6 +251,39 @@ export class LinkFormatModal extends Modal {
 			<code style="color: var(--text-success); background: var(--background-secondary); padding: 2px 6px; border-radius: 4px;">${exampleNew}</code>
 		`;
 
+		// 搜索框区域
+		const searchContainer = contentEl.createDiv('search-container');
+		searchContainer.style.cssText = `
+			margin-bottom: 12px;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			flex-shrink: 0;
+		`;
+		
+		const searchInput = searchContainer.createEl('input', {
+			type: 'text',
+			placeholder: '搜索笔记或图片名称...'
+		});
+		searchInput.style.cssText = `
+			flex: 1;
+			padding: 8px 12px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 6px;
+			background-color: var(--background-primary);
+			font-size: 0.9em;
+		`;
+		
+		// 搜索输入事件（防抖）
+		let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+		searchInput.addEventListener('input', () => {
+			if (searchTimeout) clearTimeout(searchTimeout);
+			searchTimeout = setTimeout(() => {
+				this.searchQuery = searchInput.value.trim().toLowerCase();
+				this.renderFilteredChanges();
+			}, 200);
+		});
+
 		// 预览区域
 		this.previewContainer = contentEl.createDiv('preview-container');
 		this.previewContainer.style.cssText = `
@@ -246,7 +292,8 @@ export class LinkFormatModal extends Modal {
 			border-radius: 8px;
 			display: none;
 			overflow-y: auto;
-			max-height: 50vh;
+			flex: 1;
+			min-height: 200px;
 		`;
 
 		// 自动加载预览
@@ -254,7 +301,7 @@ export class LinkFormatModal extends Modal {
 	}
 
 	/**
-	 * 预览变更
+	 * 预览变更（加载所有数据）
 	 */
 	async previewChanges() {
 		if (!this.previewContainer) return;
@@ -267,64 +314,156 @@ export class LinkFormatModal extends Modal {
 		loadingText.style.color = 'var(--text-muted)';
 
 		try {
-			const changes = await this.analyzeLinks();
-			
-			this.previewContainer.empty();
-			this.previewContainer.style.display = 'block';
-
-			if (changes.length === 0) {
-				const noChanges = this.previewContainer.createDiv();
-				noChanges.textContent = '没有需要转换的链接';
-				noChanges.style.color = 'var(--text-muted)';
-				return;
-			}
-
-			const summaryText = this.previewContainer.createDiv();
-			summaryText.innerHTML = `将转换 <strong>${changes.length}</strong> 个链接 <span style="color: var(--text-muted); font-size: 0.85em;">(点击单个链接可单独转换)</span>`;
-			summaryText.style.marginBottom = '10px';
-
-			// 显示所有变更
-			const exampleList = this.previewContainer.createDiv();
-			exampleList.style.cssText = `
-				font-size: 0.85em;
-			`;
-
-			for (let i = 0; i < changes.length; i++) {
-				const change = changes[i];
-				const changeItem = exampleList.createDiv();
-				// 最后一个不加底部边框
-				const isLast = i === changes.length - 1;
-				changeItem.style.cssText = `
-					padding: 8px;
-					${isLast ? '' : 'border-bottom: 1px solid var(--background-modifier-border);'}
-					cursor: pointer;
-					transition: background-color 0.15s ease;
-					border-radius: 4px;
-				`;
-				changeItem.innerHTML = `
-					<div style="color: var(--text-muted); font-size: 0.9em;">${change.filePath} (第${change.lineNumber}行)</div>
-					<div><code style="color: var(--text-error);">${this.escapeHtml(change.oldLink)}</code></div>
-					<div>→ <code style="color: var(--text-success);">${this.escapeHtml(change.newLink)}</code></div>
-				`;
-
-				// 悬停效果
-				changeItem.addEventListener('mouseenter', () => {
-					changeItem.style.backgroundColor = 'var(--background-modifier-hover)';
-				});
-				changeItem.addEventListener('mouseleave', () => {
-					changeItem.style.backgroundColor = 'transparent';
-				});
-
-				// 点击单独转换
-				changeItem.addEventListener('click', async () => {
-					await this.convertSingleLink(change, changeItem);
-				});
-			}
+			this.allChanges = await this.analyzeLinks();
+			this.renderFilteredChanges();
 		} catch (error) {
 			this.previewContainer.empty();
 			const errorText = this.previewContainer.createDiv();
 			errorText.textContent = `分析失败: ${error}`;
 			errorText.style.color = 'var(--text-error)';
+		}
+	}
+
+	/**
+	 * 渲染筛选后的变更列表
+	 */
+	private renderFilteredChanges() {
+		if (!this.previewContainer) return;
+
+		this.previewContainer.empty();
+		this.previewContainer.style.display = 'block';
+
+		// 根据搜索查询筛选
+		let filteredChanges = this.allChanges;
+		if (this.searchQuery) {
+			filteredChanges = this.allChanges.filter(change => {
+				const query = this.searchQuery;
+				// 搜索笔记路径
+				if (change.filePath.toLowerCase().includes(query)) return true;
+				// 搜索旧链接（图片名称）
+				if (change.oldLink.toLowerCase().includes(query)) return true;
+				// 搜索新链接
+				if (change.newLink.toLowerCase().includes(query)) return true;
+				return false;
+			});
+		}
+
+		if (this.allChanges.length === 0) {
+			const noChanges = this.previewContainer.createDiv();
+			noChanges.textContent = '没有需要转换的链接';
+			noChanges.style.color = 'var(--text-muted)';
+			return;
+		}
+
+		// 显示统计信息
+		const summaryText = this.previewContainer.createDiv();
+		if (this.searchQuery && filteredChanges.length !== this.allChanges.length) {
+			summaryText.innerHTML = `找到 <strong>${filteredChanges.length}</strong> / ${this.allChanges.length} 个链接 <span style="color: var(--text-muted); font-size: 0.85em;">(点击转换，Ctrl+点击跳转)</span>`;
+		} else {
+			summaryText.innerHTML = `将转换 <strong>${this.allChanges.length}</strong> 个链接 <span style="color: var(--text-muted); font-size: 0.85em;">(点击转换，Ctrl+点击跳转)</span>`;
+		}
+		summaryText.style.marginBottom = '10px';
+
+		if (filteredChanges.length === 0) {
+			const noResults = this.previewContainer.createDiv();
+			noResults.textContent = '没有匹配的结果';
+			noResults.style.cssText = 'color: var(--text-muted); padding: 20px; text-align: center;';
+			return;
+		}
+
+		// 显示变更列表
+		const exampleList = this.previewContainer.createDiv();
+		exampleList.style.cssText = `font-size: 0.85em;`;
+
+		for (let i = 0; i < filteredChanges.length; i++) {
+			const change = filteredChanges[i];
+			const changeItem = exampleList.createDiv();
+			const isLast = i === filteredChanges.length - 1;
+			changeItem.style.cssText = `
+				padding: 8px;
+				${isLast ? '' : 'border-bottom: 1px solid var(--background-modifier-border);'}
+				cursor: pointer;
+				transition: background-color 0.15s ease;
+				border-radius: 4px;
+			`;
+			changeItem.innerHTML = `
+				<div style="color: var(--text-muted); font-size: 0.9em;">${change.filePath} (第${change.lineNumber}行)</div>
+				<div><code style="color: var(--text-error);">${this.escapeHtml(change.oldLink)}</code></div>
+				<div>→ <code style="color: var(--text-success);">${this.escapeHtml(change.newLink)}</code></div>
+			`;
+
+			// 悬停效果
+			changeItem.addEventListener('mouseenter', () => {
+				changeItem.style.backgroundColor = 'var(--background-modifier-hover)';
+			});
+			changeItem.addEventListener('mouseleave', () => {
+				changeItem.style.backgroundColor = 'transparent';
+			});
+
+			// 点击处理：普通点击转换，Ctrl+点击跳转到笔记
+			changeItem.addEventListener('click', async (e) => {
+				if (e.ctrlKey || e.metaKey) {
+					// 传入旧链接文本，用于精确定位
+					await this.navigateToNote(change.filePath, change.lineNumber, change.oldLink);
+				} else {
+					await this.convertSingleLink(change, changeItem);
+				}
+			});
+		}
+	}
+
+	/**
+	 * 跳转到笔记指定行和链接位置
+	 */
+	async navigateToNote(filePath: string, lineNumber: number, linkText?: string) {
+		const file = this.app.vault.getAbstractFileByPath(filePath) as TFile;
+		if (!file) {
+			new Notice(`找不到文件: ${filePath}`);
+			return;
+		}
+
+		// 在新标签页打开笔记
+		const leaf = this.app.workspace.getLeaf(true);
+		if (leaf) {
+			await leaf.openFile(file);
+			// 滚动到指定行和链接位置
+			setTimeout(async () => {
+				const view = leaf.view;
+				if (view && 'editor' in view && lineNumber > 0) {
+					const editor = (view as any).editor;
+					if (editor && typeof editor.setCursor === 'function') {
+						const line = lineNumber - 1;
+						let ch = 0;
+						
+						// 如果提供了链接文本，尝试定位到链接的起始位置
+						if (linkText) {
+							try {
+								const content = await this.app.vault.read(file);
+								const lines = content.split('\n');
+								if (line < lines.length) {
+									const lineContent = lines[line];
+									const linkIndex = lineContent.indexOf(linkText);
+									if (linkIndex >= 0) {
+										ch = linkIndex;
+									}
+								}
+							} catch (e) {
+								// 定位失败，使用行首
+							}
+						}
+						
+						const pos = { line: line, ch: ch };
+						
+						// 选中链接文本，便于查看
+						if (linkText) {
+							const endPos = { line: line, ch: ch + linkText.length };
+							editor.setSelection(pos, endPos);
+						} else {
+							editor.setCursor(pos);
+						}
+					}
+				}
+			}, 300);
 		}
 	}
 
@@ -423,16 +562,35 @@ export class LinkFormatModal extends Modal {
 			try {
 				const content = await this.app.vault.read(file);
 				const lines = content.split('\n');
+				
+				// 跟踪是否在代码块内
+				let inCodeBlock = false;
 
 				for (let i = 0; i < lines.length; i++) {
 					const line = lines[i];
-
+					
+					// 检测代码块边界（```）
+					if (line.trim().startsWith('```')) {
+						inCodeBlock = !inCodeBlock;
+						continue;
+					}
+					
+					// 跳过代码块内的内容
+					if (inCodeBlock) continue;
+					
+					// 跳过行内代码（`...`）中的链接
+					// 简单检测：如果链接在反引号之间，跳过
+					
 					// 匹配 Wiki 格式: ![[path]] 或 ![[path|text]]
 					const wikiPattern = /!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
 					let match;
 
 					while ((match = wikiPattern.exec(line)) !== null) {
 						const linkPath = match[1];
+						const matchIndex = match.index;
+						
+						// 检查是否在行内代码中
+						if (this.isInInlineCode(line, matchIndex)) continue;
 						
 						// 检查是否是图片链接
 						const ext = linkPath.split('.').pop()?.toLowerCase() || '';
@@ -471,6 +629,21 @@ export class LinkFormatModal extends Modal {
 		}
 
 		return changes;
+	}
+	
+	/**
+	 * 检查指定位置是否在行内代码中
+	 */
+	private isInInlineCode(line: string, position: number): boolean {
+		// 统计位置之前的反引号数量
+		let backtickCount = 0;
+		for (let i = 0; i < position; i++) {
+			if (line[i] === '`') {
+				backtickCount++;
+			}
+		}
+		// 如果反引号数量为奇数，说明在行内代码中
+		return backtickCount % 2 === 1;
 	}
 
 	/**
@@ -713,10 +886,22 @@ export class LinkFormatModal extends Modal {
 				const content = await this.app.vault.read(file);
 				const lines = content.split('\n');
 				let modified = false;
+				
+				// 跟踪是否在代码块内
+				let inCodeBlock = false;
 
 				for (let i = 0; i < lines.length; i++) {
 					let line = lines[i];
 					let lineModified = false;
+					
+					// 检测代码块边界（```）
+					if (line.trim().startsWith('```')) {
+						inCodeBlock = !inCodeBlock;
+						continue;
+					}
+					
+					// 跳过代码块内的内容
+					if (inCodeBlock) continue;
 
 					// 匹配 Wiki 格式: ![[path]] 或 ![[path|text|size]]
 					const wikiPattern = /!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
@@ -724,6 +909,9 @@ export class LinkFormatModal extends Modal {
 					let match;
 
 					while ((match = wikiPattern.exec(line)) !== null) {
+						// 检查是否在行内代码中
+						if (this.isInInlineCode(line, match.index)) continue;
+						
 						matches.push({
 							match: match[0],
 							index: match.index,

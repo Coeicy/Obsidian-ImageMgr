@@ -3,6 +3,10 @@
  * 
  * 提供检测和修复笔记中空链接（指向不存在图片的链接）的功能。
  * 支持从操作日志中恢复链接。
+ * 
+ * 功能特性：
+ * - 点击跳转：点击空链接跳转到笔记并选中链接
+ * - 智能恢复：从操作日志中查找重命名/移动记录，自动修复链接
  */
 
 import { App, Modal, Notice, TFile } from 'obsidian';
@@ -370,34 +374,56 @@ export class BrokenLinksModal extends Modal {
 						const newLeaf = this.app.workspace.splitActiveLeaf('vertical');
 						if (newLeaf) {
 							await newLeaf.openFile(file as TFile);
-							// 滚动到指定行
-							setTimeout(() => {
+							// 滚动到指定行并选中链接
+							setTimeout(async () => {
 								const view = newLeaf.view;
 								if (view && 'editor' in view) {
 									const editor = (view as any).editor;
-									if (editor && typeof editor.setCursor === 'function') {
-										editor.setCursor({ line: link.lineNumber - 1, ch: 0 });
-										editor.scrollIntoView({ from: { line: link.lineNumber - 1, ch: 0 } });
+									if (editor && typeof editor.setSelection === 'function') {
+										const line = link.lineNumber - 1;
+										// 读取行内容，定位链接位置
+										const content = await this.app.vault.read(file as TFile);
+										const lines = content.split('\n');
+										let ch = 0;
+										if (line < lines.length && link.linkText) {
+											const lineContent = lines[line];
+											const linkIndex = lineContent.indexOf(link.linkText);
+											if (linkIndex >= 0) ch = linkIndex;
+										}
+										const pos = { line, ch };
+										const endPos = { line, ch: ch + (link.linkText?.length || 0) };
+										editor.setSelection(pos, endPos);
 									}
 								}
-							}, 100);
+							}, 300);
 						}
 					} else {
 						// 关闭模态框：在当前标签页打开笔记
 						const newLeaf = this.app.workspace.getLeaf(true);
 						if (newLeaf) {
 							await newLeaf.openFile(file as TFile);
-							// 滚动到指定行
-							setTimeout(() => {
+							// 滚动到指定行并选中链接
+							setTimeout(async () => {
 								const view = newLeaf.view;
 								if (view && 'editor' in view) {
 									const editor = (view as any).editor;
-									if (editor && typeof editor.setCursor === 'function') {
-										editor.setCursor({ line: link.lineNumber - 1, ch: 0 });
-										editor.scrollIntoView({ from: { line: link.lineNumber - 1, ch: 0 } });
+									if (editor && typeof editor.setSelection === 'function') {
+										const line = link.lineNumber - 1;
+										// 读取行内容，定位链接位置
+										const content = await this.app.vault.read(file as TFile);
+										const lines = content.split('\n');
+										let ch = 0;
+										if (line < lines.length && link.linkText) {
+											const lineContent = lines[line];
+											const linkIndex = lineContent.indexOf(link.linkText);
+											if (linkIndex >= 0) ch = linkIndex;
+										}
+										const pos = { line, ch };
+										const endPos = { line, ch: ch + (link.linkText?.length || 0) };
+										editor.setSelection(pos, endPos);
 									}
 								}
-							}, 100);
+							}, 300);
 							// 关闭模态框
 							this.close();
 						}
