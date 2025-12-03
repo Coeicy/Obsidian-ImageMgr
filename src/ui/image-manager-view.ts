@@ -1237,6 +1237,10 @@ export class ImageManagerView extends ItemView {
 		
 		for (let i = start; i < end; i++) {
 			const image = imageList[i];
+			// 跳过无效的图片数据
+			if (!image || !image.name || !image.path) {
+				continue;
+			}
 			const itemEl = document.createElement('div');
 			itemEl.className = 'image-gallery-item';
 			itemEl.style.width = itemWidth;
@@ -2580,6 +2584,11 @@ export class ImageManagerView extends ItemView {
 	}
 
 	openImageDetail(image: ImageInfo) {
+		// 检查图片信息是否有效
+		if (!image || !image.name || !image.path) {
+			new Notice('图片信息无效，无法打开详情页');
+			return;
+		}
 		const modal = new ImageDetailModal(this.app, image, this.app.vault, this.filteredImages, this.filteredImages.indexOf(image), this.plugin);
 		modal.open();
 	}
