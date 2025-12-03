@@ -1,4 +1,62 @@
 /**
+ * 图片引用信息接口
+ * 
+ * 代表一个引用该图片的笔记信息
+ */
+export interface ImageReferenceInfo {
+	/** 引用该图片的笔记路径 */
+	filePath: string;
+	/** 引用所在的行号 */
+	lineNumber: number;
+	/** 显示文本（Wiki 链接中的别名） */
+	displayText?: string;
+	/** 完整的引用行内容 */
+	fullLine?: string;
+	/** 链接格式类型（wiki/wiki-with-text/markdown/html 等） */
+	matchType?: string;
+	/** 链接路径格式（shortest/relative/absolute） */
+	linkPathFormat?: 'shortest' | 'relative' | 'absolute';
+}
+
+/**
+ * 空链接信息接口
+ * 
+ * 代表一个指向不存在图片的链接
+ */
+export interface BrokenLinkInfo {
+	/** 包含空链接的笔记路径 */
+	filePath: string;
+	/** 空链接所在的行号 */
+	lineNumber: number;
+	/** 原始链接文本 */
+	linkText: string;
+	/** 从链接中提取的图片路径 */
+	extractedPath?: string;
+}
+
+/**
+ * 链接格式统计接口
+ * 
+ * 统计各种链接格式的数量
+ */
+export interface LinkFormatStats {
+	/** Wiki 格式链接数量 ![[...]] */
+	wiki: number;
+	/** Markdown 格式链接数量 ![...](...) */
+	markdown: number;
+	/** HTML 格式链接数量 <img ...> */
+	html: number;
+	/** 最短路径格式数量 */
+	shortest: number;
+	/** 相对路径格式数量 */
+	relative: number;
+	/** 绝对路径格式数量 */
+	absolute: number;
+	/** 总链接数量 */
+	total: number;
+}
+
+/**
  * 图片信息接口
  * 
  * 代表一张图片的基本信息，包括路径、尺寸、哈希值等
@@ -23,6 +81,12 @@ export interface ImageInfo {
 	md5?: string;
 	/** 分组名称（可选，用于自定义分组） */
 	group?: string;
+	/** 引用该图片的笔记列表（缓存） */
+	references?: ImageReferenceInfo[];
+	/** 引用数量（快速访问） */
+	referenceCount?: number;
+	/** 引用信息最后更新时间戳 */
+	referencesUpdatedAt?: number;
 }
 
 /**
@@ -148,6 +212,12 @@ export interface PluginData {
 			height?: number;
 			/** MD5 哈希值 */
 			md5?: string;
+			/** 引用该图片的笔记列表（缓存） */
+			references?: ImageReferenceInfo[];
+			/** 引用数量 */
+			referenceCount?: number;
+			/** 引用信息最后更新时间戳 */
+			referencesUpdatedAt?: number;
 		};
 	};
 	
@@ -155,6 +225,22 @@ export interface PluginData {
 	 * 用于判断缓存是否过期
 	 */
 	lastScanTime?: number;
+	
+	/** 空链接缓存
+	 * 存储检测到的所有空链接（指向不存在图片的链接）
+	 */
+	brokenLinks?: BrokenLinkInfo[];
+	
+	/** 空链接最后更新时间戳 */
+	brokenLinksUpdatedAt?: number;
+	
+	/** 链接格式统计缓存
+	 * 存储各种链接格式的数量统计
+	 */
+	linkFormatStats?: LinkFormatStats;
+	
+	/** 链接格式统计最后更新时间戳 */
+	linkFormatStatsUpdatedAt?: number;
 }
 
 /**

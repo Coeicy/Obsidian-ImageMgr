@@ -144,6 +144,13 @@ export class ImageDetailModal extends Modal {
 		const { contentEl, modalEl } = this;
 		contentEl.empty();
 		
+		// 检查图片信息是否有效
+		if (!this.image || !this.image.name || !this.image.path) {
+			new Notice('图片信息无效，无法打开详情页');
+			this.close();
+			return;
+		}
+		
 		// 根据设置初始化滚轮模式（默认缩放模式）
 		// 确保默认是缩放模式：只有当设置明确为 'scroll' 时才切换，否则默认缩放
 		if (this.plugin?.settings?.defaultWheelMode === 'scroll') {
@@ -595,6 +602,12 @@ export class ImageDetailModal extends Modal {
 		
 		// 文件名保存/撤销按钮点击事件
 		fileNameActionBtn.addEventListener('click', async () => {
+			// 检查图片信息是否有效
+			if (!this.image || !this.image.name || !this.image.path) {
+				new Notice('❌ 图片信息无效');
+				return;
+			}
+			
 			if (fileNameActionBtn.textContent === '✅') {
 				// 保存文件名（只保存文件名，不改变路径）
 				const newBaseName = fileNameInput.value.trim();
@@ -967,6 +980,12 @@ export class ImageDetailModal extends Modal {
 		
 		// 保存按钮点击事件
 		pathActionBtn.addEventListener('click', async () => {
+			// 检查图片信息是否有效
+			if (!this.image || !this.image.name || !this.image.path) {
+				new Notice('❌ 图片信息无效');
+				return;
+			}
+			
 			if (pathActionBtn.textContent === '✅') {
 				// 保存路径（只保存路径，不改变文件名）
 				let newPath = pathInput.value.trim();
@@ -1542,25 +1561,31 @@ export class ImageDetailModal extends Modal {
 		const linkInfo = basicInfoContent.createDiv('info-group');
 		// 模块间距由 basicInfoContent 的 gap 统一管理
 		const linkTitle = linkInfo.createEl('h3');
-		linkTitle.textContent = '🔗 统计中...'; // 初始显示，稍后更新
 		this.linkTitle = linkTitle; // 保存引用
 		
-		// 异步获取引用次数并更新标题
-		(async () => {
-			if (this.isTrashFile) {
-				linkTitle.textContent = '🔗 回收站文件无引用信息';
-				linkTitle.style.opacity = '0.6';
-			} else if (this.referenceManager) {
-				const references = await this.referenceManager.findImageReferences(this.image.path, this.image.name);
-				if (references.length > 0) {
+		// 优先使用缓存的引用信息，避免每次都重新统计
+		if (this.isTrashFile) {
+			linkTitle.textContent = '🔗 回收站文件无引用信息';
+			linkTitle.style.opacity = '0.6';
+		} else if (this.image.referenceCount !== undefined) {
+			// 使用缓存的引用数量（立即显示）
+			linkTitle.textContent = `🔗 共${this.image.referenceCount}条引用`;
+		} else {
+			// 没有缓存，显示统计中并异步获取
+			linkTitle.textContent = '🔗 统计中...';
+			(async () => {
+				if (this.referenceManager) {
+					const references = await this.referenceManager.findImageReferences(this.image.path, this.image.name);
+					// 更新缓存
+					this.image.references = references;
+					this.image.referenceCount = references.length;
+					this.image.referencesUpdatedAt = Date.now();
 					linkTitle.textContent = `🔗 共${references.length}条引用`;
 				} else {
 					linkTitle.textContent = '🔗 共0条引用';
 				}
-			} else {
-				linkTitle.textContent = '🔗 共0条引用';
-			}
-		})();
+			})();
+		}
 		
 		// 代码引用区域
 		const linkContainer = linkInfo.createDiv('link-container');
@@ -1973,34 +1998,46 @@ export class ImageDetailModal extends Modal {
 	}
 
 	showPreviousImage() {
-		if (this.currentIndex > 0) {
+		if (this.currentIndex > 0 && this.allImages.length > 0) {
 			this.currentIndex--;
-			this.image = this.allImages[this.currentIndex];
-			this.updateImageInComponents();
+			const newImage = this.allImages[this.currentIndex];
+			if (newImage && newImage.name && newImage.path) {
+				this.image = newImage;
+				this.updateImageInComponents();
+			}
 		}
 	}
 
 	showNextImage() {
-		if (this.currentIndex < this.allImages.length - 1) {
+		if (this.currentIndex < this.allImages.length - 1 && this.allImages.length > 0) {
 			this.currentIndex++;
-			this.image = this.allImages[this.currentIndex];
-			this.updateImageInComponents();
+			const newImage = this.allImages[this.currentIndex];
+			if (newImage && newImage.name && newImage.path) {
+				this.image = newImage;
+				this.updateImageInComponents();
+			}
 		}
 	}
 
 	showFirstImage() {
 		if (this.allImages.length > 0) {
 			this.currentIndex = 0;
-			this.image = this.allImages[this.currentIndex];
-			this.updateImageInComponents();
+			const newImage = this.allImages[this.currentIndex];
+			if (newImage && newImage.name && newImage.path) {
+				this.image = newImage;
+				this.updateImageInComponents();
+			}
 		}
 	}
 
 	showLastImage() {
 		if (this.allImages.length > 0) {
 			this.currentIndex = this.allImages.length - 1;
-			this.image = this.allImages[this.currentIndex];
-			this.updateImageInComponents();
+			const newImage = this.allImages[this.currentIndex];
+			if (newImage && newImage.name && newImage.path) {
+				this.image = newImage;
+				this.updateImageInComponents();
+			}
 		}
 	}
 	
@@ -2008,6 +2045,11 @@ export class ImageDetailModal extends Modal {
 	 * 更新组件中的图片（切换图片时使用）
 	 */
 	private updateImageInComponents() {
+		// 检查图片信息是否有效
+		if (!this.image || !this.image.name || !this.image.path) {
+			return;
+		}
+		
 		const isIgnored = this.isIgnoredFile(this.image.name);
 		
 		// 更新预览面板
@@ -2235,18 +2277,22 @@ export class ImageDetailModal extends Modal {
 			if (this.isTrashFile) {
 				this.linkTitle.textContent = '🔗 回收站文件无引用信息';
 				this.linkTitle.style.opacity = '0.6';
+			} else if (this.image.referenceCount !== undefined) {
+				// 优先使用缓存的引用数量（立即显示）
+				this.linkTitle.textContent = `🔗 共${this.image.referenceCount}条引用`;
+				this.linkTitle.style.opacity = '1';
 			} else {
+				// 没有缓存，显示统计中并异步获取
 				this.linkTitle.textContent = '🔗 统计中...';
 				this.linkTitle.style.opacity = '1';
-				// 异步获取引用次数并更新标题
 				(async () => {
 					if (this.referenceManager && this.linkTitle) {
 						const references = await this.referenceManager.findImageReferences(this.image.path, this.image.name);
-						if (references.length > 0) {
-							this.linkTitle.textContent = `🔗 共${references.length}条引用`;
-						} else {
-							this.linkTitle.textContent = '🔗 共0条引用';
-						}
+						// 更新缓存
+						this.image.references = references;
+						this.image.referenceCount = references.length;
+						this.image.referencesUpdatedAt = Date.now();
+						this.linkTitle.textContent = `🔗 共${references.length}条引用`;
 					} else if (this.linkTitle) {
 						this.linkTitle.textContent = '🔗 共0条引用';
 					}
@@ -3328,10 +3374,20 @@ export class ImageDetailModal extends Modal {
 
 	// 渲染图片引用
 	async renderImageReferences(container: HTMLElement) {
-		if (!this.referenceManager) {
-			return;
+		// 优先使用缓存的引用信息
+		let references = this.image.references;
+		
+		// 如果没有缓存或缓存为空，尝试从 referenceManager 获取
+		if (!references || references.length === 0) {
+			if (!this.referenceManager) {
+				return;
+			}
+			references = await this.referenceManager.findImageReferences(this.image.path, this.image.name);
+			// 更新缓存
+			this.image.references = references;
+			this.image.referenceCount = references.length;
+			this.image.referencesUpdatedAt = Date.now();
 		}
-		const references = await this.referenceManager.findImageReferences(this.image.path, this.image.name);
 		
 		if (references.length === 0) {
 			const emptyMsg = container.createDiv({ cls: 'reference-empty' });
@@ -4271,7 +4327,7 @@ export class ImageDetailModal extends Modal {
 					}
 					
 					try {
-						const success = await this.saveDisplayText(ref.filePath, ref.lineNumber, ref.matchType, ref.fullLine, newDisplayText, keepWidth, keepHeight);
+						const success = await this.saveDisplayText(ref.filePath, ref.lineNumber, ref.matchType || 'wiki', ref.fullLine || '', newDisplayText, keepWidth, keepHeight);
 						
 						// 调试日志（仅在DEBUG模式下记录）
 						if (this.plugin?.logger && this.plugin.settings.enableDebugLog) {
@@ -4456,7 +4512,7 @@ export class ImageDetailModal extends Modal {
 						}
 						
 						// 撤销时，oldLine 是文件的当前内容，newDisplayText 是要恢复到的值（beforeSaveDisplayText）
-						const undoSuccess = await this.saveDisplayText(ref.filePath, ref.lineNumber, beforeSaveMatchType, currentLine, beforeSaveDisplayText, beforeSaveWidth, beforeSaveHeight);
+						const undoSuccess = await this.saveDisplayText(ref.filePath, ref.lineNumber, beforeSaveMatchType || 'wiki', currentLine, beforeSaveDisplayText, beforeSaveWidth, beforeSaveHeight);
 						
 						if (undoSuccess) {
 							// 撤销成功（只恢复显示文本，不影响尺寸）
@@ -4636,7 +4692,7 @@ export class ImageDetailModal extends Modal {
 						if (sizeInput) sizeInput.disabled = true;
 						
 						try {
-							const success = await this.saveDisplayText(ref.filePath, ref.lineNumber, ref.matchType, ref.fullLine, keepDisplayText, newWidth, newHeight);
+							const success = await this.saveDisplayText(ref.filePath, ref.lineNumber, ref.matchType || 'wiki', ref.fullLine || '', keepDisplayText, newWidth, newHeight);
 							
 							if (success) {
 								// 保存成功
@@ -4750,7 +4806,7 @@ export class ImageDetailModal extends Modal {
 							const keepDisplayText = displayInput.value.trim();
 							
 							// 撤销尺寸：恢复到保存前的尺寸
-							const undoSuccess = await this.saveDisplayText(ref.filePath, ref.lineNumber, ref.matchType, currentLine, keepDisplayText, beforeSaveSizeWidth, beforeSaveSizeHeight);
+							const undoSuccess = await this.saveDisplayText(ref.filePath, ref.lineNumber, ref.matchType || 'wiki', currentLine, keepDisplayText, beforeSaveSizeWidth, beforeSaveSizeHeight);
 							
 							if (undoSuccess) {
 								// 撤销成功
