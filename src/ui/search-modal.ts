@@ -1,11 +1,47 @@
+/**
+ * 搜索模态框模块
+ * 
+ * 提供图片搜索功能的用户界面。
+ */
+
 import { App, Modal, Setting } from 'obsidian';
 import { makeModalResizable } from '../utils/resizable-modal';
 
+/**
+ * 搜索模态框类
+ * 
+ * 功能：
+ * - 输入搜索关键词（支持文件名和 MD5 哈希值）
+ * - 实时搜索反馈
+ * - 清除搜索条件
+ * - 键盘快捷键支持（Enter 确认、Escape 取消、Delete 清除）
+ * 
+ * 使用方式：
+ * ```typescript
+ * const modal = new SearchModal(
+ *   app,
+ *   currentQuery,
+ *   (query) => { console.log('搜索:', query); },
+ *   () => { console.log('清除搜索'); }
+ * );
+ * modal.open();
+ * ```
+ */
 export class SearchModal extends Modal {
+	/** 当前搜索关键词 */
 	searchQuery: string = '';
+	/** 搜索提交回调函数 */
 	onSubmit: (query: string) => void;
+	/** 清除搜索回调函数（可选） */
 	onClear?: () => void;
 
+	/**
+	 * 创建搜索模态框实例
+	 * @param app - Obsidian App 实例
+	 * @param currentQuery - 当前的搜索关键词
+	 * @param onSubmit - 搜索提交时的回调函数
+	 * @param onClear - 清除搜索时的回调函数（可选）
+	 */
 	constructor(app: App, currentQuery: string, onSubmit: (query: string) => void, onClear?: () => void) {
 		super(app);
 		this.searchQuery = currentQuery;

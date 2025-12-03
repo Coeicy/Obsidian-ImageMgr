@@ -1,3 +1,10 @@
+/**
+ * 排序模态框模块
+ * 
+ * 提供图片列表排序功能的用户界面。
+ * 支持多重排序（多个规则按优先级应用）。
+ */
+
 import { App, Modal, Setting } from 'obsidian';
 import { makeModalResizable } from '../utils/resizable-modal';
 

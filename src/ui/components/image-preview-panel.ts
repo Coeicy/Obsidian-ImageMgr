@@ -1,9 +1,20 @@
+/**
+ * 图片预览面板组件模块
+ * 
+ * 负责图片详情模态框中的图片预览区域。
+ */
+
 import { Vault, TFile } from 'obsidian';
 import { ImageInfo } from '../../types';
 
 /**
- * 图片预览板块组件
- * 负责显示图片和锁定按钮
+ * 图片预览面板组件
+ * 
+ * 功能：
+ * - 显示图片预览
+ * - 支持缩放、拖拽平移
+ * - 显示锁定/解锁按钮
+ * - 支持滚轮缩放
  */
 export class ImagePreviewPanel {
 	private container: HTMLElement;
@@ -60,6 +71,7 @@ export class ImagePreviewPanel {
 				cls: 'lock-btn'
 			});
 			lockBtn.title = this.isIgnored ? '已锁定（点击解锁）' : '点击锁定文件';
+			lockBtn.tabIndex = -1; // 防止按钮自动获得焦点
 			lockBtn.style.position = 'absolute';
 			lockBtn.style.top = '8px';
 			lockBtn.style.right = '8px';

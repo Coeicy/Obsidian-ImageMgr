@@ -1,10 +1,25 @@
+/**
+ * 日志查看器模态框模块
+ * 
+ * 提供插件操作日志的查看和管理功能。
+ */
+
 import { App, Modal, Notice, Setting } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { Logger, LogEntry, LogLevel, OperationType, OperationTypeLabels, LogFilter } from '../utils/logger';
 import { makeModalResizable } from '../utils/resizable-modal';
 
 /**
- * 日志查看器模态框
+ * 日志查看器模态框类
+ * 
+ * 功能：
+ * - 查看所有操作日志或特定图片的日志
+ * - 按日志级别筛选（DEBUG、INFO、WARNING、ERROR）
+ * - 按操作类型筛选
+ * - 关键词搜索
+ * - 复制日志到剪贴板
+ * - 清除日志
+ * - 导出日志
  */
 export class LogViewerModal extends Modal {
 	private plugin: ImageManagementPlugin;

@@ -125,7 +125,7 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 
 	// ==================== 批量操作设置 ====================
 	/** 批量操作最大数量 - 单次批量操作的最大文件数 */
-	maxBatchOperations: 1000,
+	maxBatchOperations: 100,
 	/** 批量确认阈值 - 超过此数量时需要用户确认 */
 	batchConfirmThreshold: 10,
 	/** 是否显示批量操作进度 - 显示进度条和实时统计 */
