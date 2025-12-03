@@ -71,6 +71,7 @@ export class ImagePreviewPanel {
 				cls: 'lock-btn'
 			});
 			lockBtn.title = this.isIgnored ? '已锁定（点击解锁）' : '点击锁定文件';
+			lockBtn.tabIndex = -1; // 防止按钮自动获得焦点
 			lockBtn.style.position = 'absolute';
 			lockBtn.style.top = '8px';
 			lockBtn.style.right = '8px';

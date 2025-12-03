@@ -6,7 +6,7 @@
  */
 
 import { App, Notice, TFile, Vault } from 'obsidian';
-import { ImageInfo } from '../types';
+import { ImageInfo, ImageReferenceInfo, BrokenLinkInfo, LinkFormatStats } from '../types';
 import { calculateFileHash } from './image-hash';
 import { HashCacheManager } from './hash-cache-manager';
 import ImageManagementPlugin from '../main';
@@ -18,6 +18,8 @@ import { OperationType } from './logger';
  * 用于向 UI 报告扫描进度，支持多个阶段：
  * - scanning: 扫描文件阶段
  * - hashing: 计算哈希值阶段
+ * - references: 统计引用信息阶段
+ * - links: 统计链接格式和空链接阶段
  * - complete: 扫描完成
  */
 export interface ScanProgress {
@@ -28,7 +30,7 @@ export interface ScanProgress {
 	/** 当前正在处理的文件名（可选） */
 	currentFile?: string;
 	/** 当前扫描阶段 */
-	phase: 'scanning' | 'hashing' | 'complete';
+	phase: 'scanning' | 'hashing' | 'references' | 'links' | 'complete';
 	/** 是否使用了缓存（增量扫描） */
 	usedCache?: boolean;
 	/** 缓存命中数量 */
@@ -53,6 +55,10 @@ export interface ScanResult {
 	totalSize: number;
 	/** 哈希值到图片列表的映射（用于快速查找重复） */
 	hashMap: Map<string, ImageInfo[]>;
+	/** 空链接列表（指向不存在图片的链接） */
+	brokenLinks?: BrokenLinkInfo[];
+	/** 链接格式统计 */
+	linkFormatStats?: LinkFormatStats;
 }
 
 /**
@@ -141,7 +147,7 @@ export class ImageScanner {
 				let imageInfo: ImageInfo;
 				
 				if (useCachedData && fileUnchanged) {
-					// 使用缓存数据
+					// 使用缓存数据（包含引用信息）
 					imageInfo = {
 						path: file.path,
 						name: file.name,
@@ -149,7 +155,10 @@ export class ImageScanner {
 						modified: cached.mtime,
 						width: cached.width,
 						height: cached.height,
-						md5: cached.md5
+						md5: cached.md5,
+						references: cached.references,
+						referenceCount: cached.referenceCount,
+						referencesUpdatedAt: cached.referencesUpdatedAt
 					};
 					cacheHits++;
 				} else {
@@ -299,6 +308,32 @@ export class ImageScanner {
 			}
 		}
 		
+		// 第三阶段：统计引用信息
+		onProgress?.({ 
+			current: 0, 
+			total: imageInfos.length, 
+			phase: 'references',
+			usedCache: useCachedData,
+			cacheHits,
+			newScans
+		});
+		
+		// 批量统计引用信息
+		await this.calculateReferences(imageInfos, onProgress, useCachedData, cacheHits, newScans);
+		
+		// 第四阶段：统计链接格式和空链接
+		onProgress?.({ 
+			current: 0, 
+			total: 100, 
+			phase: 'links',
+			usedCache: useCachedData,
+			cacheHits,
+			newScans
+		});
+		
+		// 计算链接格式统计和空链接
+		const { brokenLinks, linkFormatStats } = await this.calculateLinkStats(imageInfos, onProgress, useCachedData, cacheHits, newScans);
+		
 		onProgress?.({ 
 			current: imageFiles.length, 
 			total: imageFiles.length, 
@@ -308,8 +343,16 @@ export class ImageScanner {
 			newScans
 		});
 		
-		// 扫描完成后保存扫描缓存
+		// 扫描完成后保存扫描缓存（包含引用信息）
 		await this.saveScanCache(imageInfos, currentFilePaths);
+		
+		// 保存空链接和链接格式统计到插件数据
+		if (this.plugin) {
+			this.plugin.data.brokenLinks = brokenLinks;
+			this.plugin.data.brokenLinksUpdatedAt = Date.now();
+			this.plugin.data.linkFormatStats = linkFormatStats;
+			this.plugin.data.linkFormatStatsUpdatedAt = Date.now();
+		}
 		
 		// 扫描完成后强制保存哈希缓存
 		if (enableDeduplication) {
@@ -326,8 +369,175 @@ export class ImageScanner {
 			duplicateCount,
 			uniqueCount,
 			totalSize,
-			hashMap
+			hashMap,
+			brokenLinks,
+			linkFormatStats
 		};
+	}
+	
+	/**
+	 * 批量计算引用信息
+	 * 
+	 * 扫描所有 Markdown 文件，查找图片引用并填充到 ImageInfo 中。
+	 * 支持的链接格式：
+	 * - Wiki 格式：![[image.png]] 或 ![[image.png|显示文本]]
+	 * - Wiki 无感叹号格式：[[image.png]]
+	 * - Markdown 格式：![alt](image.png)
+	 * - HTML 格式：<img src="image.png">
+	 * 
+	 * 计算结果会存储在 ImageInfo 的以下字段：
+	 * - references: 引用信息数组
+	 * - referenceCount: 引用数量
+	 * - referencesUpdatedAt: 更新时间戳
+	 * 
+	 * @param imageInfos 图片信息数组
+	 * @param onProgress 进度回调
+	 * @param useCachedData 是否使用缓存数据
+	 * @param cacheHits 缓存命中数
+	 * @param newScans 新扫描数
+	 */
+	private async calculateReferences(
+		imageInfos: ImageInfo[], 
+		onProgress?: (progress: ScanProgress) => void,
+		useCachedData?: boolean,
+		cacheHits?: number,
+		newScans?: number
+	): Promise<void> {
+		// 构建图片路径到 ImageInfo 的映射，方便快速查找
+		const imagePathMap = new Map<string, ImageInfo>();
+		for (const info of imageInfos) {
+			imagePathMap.set(info.path, info);
+			// 初始化引用信息
+			info.references = [];
+			info.referenceCount = 0;
+		}
+		
+		// 获取所有 Markdown 文件
+		const mdFiles = this.app.vault.getMarkdownFiles();
+		const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'];
+		
+		// 遍历所有 Markdown 文件，查找图片引用
+		for (let i = 0; i < mdFiles.length; i++) {
+			const mdFile = mdFiles[i];
+			
+			try {
+				const cache = this.app.metadataCache.getFileCache(mdFile);
+				if (!cache || !cache.embeds) continue;
+				
+				// 读取文件内容以获取完整行
+				const content = await this.vault.cachedRead(mdFile);
+				const lines = content.split('\n');
+				
+				for (const embed of cache.embeds) {
+					// 解析链接目标
+					const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(embed.link, mdFile.path);
+					if (!resolvedFile) continue;
+					
+					// 检查是否是图片文件
+					const ext = resolvedFile.extension?.toLowerCase();
+					if (!ext || !imageExtensions.includes(ext)) continue;
+					
+					// 查找对应的 ImageInfo
+					const imageInfo = imagePathMap.get(resolvedFile.path);
+					if (!imageInfo) continue;
+					
+					// 获取行号和行内容
+					const lineNumber = embed.position.start.line + 1;
+					const fullLine = lines[embed.position.start.line] || '';
+					
+					// 提取显示文本和链接格式类型
+					let displayText = '';
+					let matchType = 'wiki'; // 默认类型
+					
+					// 检测 Wiki 格式 ![[...]]
+					const wikiMatch = fullLine.match(/!\[\[([^\]]+)\]\]/);
+					if (wikiMatch) {
+						const parts = wikiMatch[1].split('|');
+						if (parts.length > 1) {
+							// 最后一个非数字部分可能是显示文本
+							for (let j = parts.length - 1; j > 0; j--) {
+								const part = parts[j].trim();
+								if (!/^\d+x?\d*$/.test(part)) {
+									displayText = part;
+									matchType = 'wiki-with-text';
+									break;
+								}
+							}
+						}
+					} else {
+						// 检测无感叹号的 Wiki 格式 [[...]]
+						const wikiNoExclamMatch = fullLine.match(/\[\[([^\]]+)\]\]/);
+						if (wikiNoExclamMatch) {
+							matchType = 'wiki-no-exclam';
+							const parts = wikiNoExclamMatch[1].split('|');
+							if (parts.length > 1) {
+								for (let j = parts.length - 1; j > 0; j--) {
+									const part = parts[j].trim();
+									if (!/^\d+x?\d*$/.test(part)) {
+										displayText = part;
+										matchType = 'wiki-no-exclam-with-text';
+										break;
+									}
+								}
+							}
+						} else {
+							// 检测 Markdown 格式 ![...](...)
+							const mdMatch = fullLine.match(/!\[([^\]]*)\]\([^)]+\)/);
+							if (mdMatch) {
+								matchType = 'markdown';
+								displayText = mdMatch[1] || '';
+							} else {
+								// 检测 HTML 格式 <img ...>
+								const htmlMatch = fullLine.match(/<img[^>]+>/i);
+								if (htmlMatch) {
+									matchType = 'html';
+									// 尝试提取 alt 属性
+									const altMatch = htmlMatch[0].match(/alt=["']([^"']*)["']/i);
+									if (altMatch) {
+										displayText = altMatch[1];
+									}
+								}
+							}
+						}
+					}
+					
+					// 添加引用信息
+					const refInfo: ImageReferenceInfo = {
+						filePath: mdFile.path,
+						lineNumber,
+						displayText: displayText || undefined,
+						fullLine,
+						matchType
+					};
+					
+					imageInfo.references!.push(refInfo);
+				}
+			} catch (error) {
+				// 静默失败，继续处理其他文件
+			}
+			
+			// 每处理 50 个文件更新一次进度
+			if (i % 50 === 0) {
+				onProgress?.({ 
+					current: i, 
+					total: mdFiles.length, 
+					phase: 'references',
+					currentFile: mdFile.name,
+					usedCache: useCachedData,
+					cacheHits,
+					newScans
+				});
+				// 让出控制权
+				await new Promise(resolve => setTimeout(resolve, 0));
+			}
+		}
+		
+		// 更新引用数量和时间戳
+		const now = Date.now();
+		for (const info of imageInfos) {
+			info.referenceCount = info.references?.length || 0;
+			info.referencesUpdatedAt = now;
+		}
 	}
 	
 	/**
@@ -337,8 +547,17 @@ export class ImageScanner {
 	 */
 	private async saveScanCache(imageInfos: ImageInfo[], currentFilePaths: Set<string>): Promise<void> {
 		try {
-			// 构建新的扫描缓存
-			const newCache: { [path: string]: { mtime: number; size: number; width?: number; height?: number; md5?: string } } = {};
+			// 构建新的扫描缓存（包含引用信息）
+			const newCache: { [path: string]: { 
+				mtime: number; 
+				size: number; 
+				width?: number; 
+				height?: number; 
+				md5?: string;
+				references?: ImageReferenceInfo[];
+				referenceCount?: number;
+				referencesUpdatedAt?: number;
+			} } = {};
 			
 			for (const info of imageInfos) {
 				newCache[info.path] = {
@@ -346,7 +565,10 @@ export class ImageScanner {
 					size: info.size,
 					width: info.width,
 					height: info.height,
-					md5: info.md5
+					md5: info.md5,
+					references: info.references,
+					referenceCount: info.referenceCount,
+					referencesUpdatedAt: info.referencesUpdatedAt
 				};
 			}
 			
@@ -441,6 +663,207 @@ export class ImageScanner {
 				? new Date(lastScanTime).toLocaleString() 
 				: '从未扫描'
 		};
+	}
+	
+	/**
+	 * 计算链接格式统计和空链接
+	 * 
+	 * 扫描所有 Markdown 文件，统计：
+	 * 1. 各种链接格式的数量（Wiki/Markdown/HTML）
+	 * 2. 链接路径格式的数量（最短/相对/绝对）
+	 * 3. 空链接（指向不存在图片的链接）
+	 * 
+	 * @param imageInfos 图片信息数组
+	 * @param onProgress 进度回调
+	 * @returns 空链接列表和链接格式统计
+	 */
+	private async calculateLinkStats(
+		imageInfos: ImageInfo[],
+		onProgress?: (progress: ScanProgress) => void,
+		useCachedData?: boolean,
+		cacheHits?: number,
+		newScans?: number
+	): Promise<{ brokenLinks: BrokenLinkInfo[]; linkFormatStats: LinkFormatStats }> {
+		const brokenLinks: BrokenLinkInfo[] = [];
+		const linkFormatStats: LinkFormatStats = {
+			wiki: 0,
+			markdown: 0,
+			html: 0,
+			shortest: 0,
+			relative: 0,
+			absolute: 0,
+			total: 0
+		};
+		
+		// 构建图片路径集合，用于快速检查图片是否存在
+		const imagePathSet = new Set<string>();
+		const imageNameSet = new Set<string>();
+		for (const info of imageInfos) {
+			imagePathSet.add(info.path);
+			imageNameSet.add(info.name.toLowerCase());
+		}
+		
+		// 获取所有 Markdown 文件
+		const mdFiles = this.app.vault.getMarkdownFiles();
+		const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'];
+		
+		// 遍历所有 Markdown 文件
+		for (let i = 0; i < mdFiles.length; i++) {
+			const mdFile = mdFiles[i];
+			
+			try {
+				// 读取文件内容
+				const content = await this.vault.cachedRead(mdFile);
+				const lines = content.split('\n');
+				
+				// 检测是否在代码块中
+				let inCodeBlock = false;
+				
+				for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+					const line = lines[lineNum];
+					
+					// 检测代码块开始/结束
+					if (line.trim().startsWith('```')) {
+						inCodeBlock = !inCodeBlock;
+						continue;
+					}
+					
+					// 跳过代码块内的内容
+					if (inCodeBlock) continue;
+					
+					// 检测 Wiki 格式链接 ![[...]]
+					const wikiMatches = line.matchAll(/!\[\[([^\]]+)\]\]/g);
+					for (const match of wikiMatches) {
+						const linkContent = match[1];
+						const linkParts = linkContent.split('|');
+						const linkPath = linkParts[0].trim();
+						
+						// 检查是否是图片链接
+						const ext = linkPath.split('.').pop()?.toLowerCase();
+						if (!ext || !imageExtensions.includes(ext)) continue;
+						
+						linkFormatStats.wiki++;
+						linkFormatStats.total++;
+						
+						// 检查链接路径格式
+						this.classifyLinkPathFormat(linkPath, mdFile.path, linkFormatStats);
+						
+						// 检查是否是空链接
+						const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(linkPath, mdFile.path);
+						if (!resolvedFile) {
+							brokenLinks.push({
+								filePath: mdFile.path,
+								lineNumber: lineNum + 1,
+								linkText: match[0],
+								extractedPath: linkPath
+							});
+						}
+					}
+					
+					// 检测 Markdown 格式链接 ![...](...) - 排除行内代码
+					const mdMatches = line.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g);
+					for (const match of mdMatches) {
+						const linkPath = match[2].trim();
+						
+						// 跳过外部链接
+						if (linkPath.startsWith('http://') || linkPath.startsWith('https://')) continue;
+						
+						// 检查是否是图片链接
+						const ext = linkPath.split('.').pop()?.toLowerCase();
+						if (!ext || !imageExtensions.includes(ext)) continue;
+						
+						linkFormatStats.markdown++;
+						linkFormatStats.total++;
+						
+						// 检查链接路径格式
+						this.classifyLinkPathFormat(linkPath, mdFile.path, linkFormatStats);
+						
+						// 检查是否是空链接
+						const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(linkPath, mdFile.path);
+						if (!resolvedFile) {
+							brokenLinks.push({
+								filePath: mdFile.path,
+								lineNumber: lineNum + 1,
+								linkText: match[0],
+								extractedPath: linkPath
+							});
+						}
+					}
+					
+					// 检测 HTML 格式链接 <img ...>
+					const htmlMatches = line.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi);
+					for (const match of htmlMatches) {
+						const linkPath = match[1].trim();
+						
+						// 跳过外部链接
+						if (linkPath.startsWith('http://') || linkPath.startsWith('https://')) continue;
+						
+						// 检查是否是图片链接
+						const ext = linkPath.split('.').pop()?.toLowerCase();
+						if (!ext || !imageExtensions.includes(ext)) continue;
+						
+						linkFormatStats.html++;
+						linkFormatStats.total++;
+						
+						// 检查链接路径格式
+						this.classifyLinkPathFormat(linkPath, mdFile.path, linkFormatStats);
+						
+						// 检查是否是空链接
+						const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(linkPath, mdFile.path);
+						if (!resolvedFile) {
+							brokenLinks.push({
+								filePath: mdFile.path,
+								lineNumber: lineNum + 1,
+								linkText: match[0],
+								extractedPath: linkPath
+							});
+						}
+					}
+				}
+			} catch (error) {
+				// 静默失败，继续处理其他文件
+			}
+			
+			// 每处理 50 个文件更新一次进度
+			if (i % 50 === 0) {
+				onProgress?.({
+					current: Math.round((i / mdFiles.length) * 100),
+					total: 100,
+					phase: 'links',
+					usedCache: useCachedData,
+					cacheHits,
+					newScans
+				});
+				// 让出控制权
+				await new Promise(resolve => setTimeout(resolve, 0));
+			}
+		}
+		
+		return { brokenLinks, linkFormatStats };
+	}
+	
+	/**
+	 * 分类链接路径格式
+	 * 
+	 * @param linkPath 链接路径
+	 * @param notePath 笔记路径
+	 * @param stats 统计对象
+	 */
+	private classifyLinkPathFormat(linkPath: string, notePath: string, stats: LinkFormatStats): void {
+		// 判断路径格式
+		if (linkPath.includes('/')) {
+			// 包含路径分隔符
+			if (linkPath.startsWith('./') || linkPath.startsWith('../')) {
+				// 相对路径
+				stats.relative++;
+			} else {
+				// 绝对路径（从仓库根目录开始）
+				stats.absolute++;
+			}
+		} else {
+			// 仅文件名，最短格式
+			stats.shortest++;
+		}
 	}
 }
 
