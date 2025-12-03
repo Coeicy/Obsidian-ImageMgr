@@ -1,14 +1,38 @@
+/**
+ * 图片分组模态框模块
+ * 
+ * 提供图片分组功能的用户界面。
+ */
+
 import { App, Modal, Setting, TextComponent } from 'obsidian';
 import { Notice } from 'obsidian';
 import { makeModalResizable } from '../utils/resizable-modal';
 
+/**
+ * 分组选项接口
+ */
 export interface GroupOptions {
+    /** 分组方式 */
     mode: 'folder' | 'type' | 'reference' | 'lock' | 'custom';
-    name?: string; // 自定义分组名称（当 mode = custom 时必填）
+    /** 自定义分组名称（当 mode = custom 时必填） */
+    name?: string;
+    /** 作用范围 */
     scope: 'all' | 'filtered' | 'selected';
+    /** 操作类型 */
     action?: 'apply' | 'reset';
 }
 
+/**
+ * 图片分组模态框类
+ * 
+ * 功能：
+ * - 按文件夹分组
+ * - 按文件类型分组（PNG、JPG 等）
+ * - 按引用状态分组（被引用/未引用）
+ * - 按锁定状态分组
+ * - 自定义分组名称
+ * - 选择作用范围（全部/筛选结果/选中）
+ */
 export class GroupModal extends Modal {
 	onSubmit: (options: GroupOptions) => void;
 	selectedCount: number;

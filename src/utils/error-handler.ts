@@ -1,3 +1,9 @@
+/**
+ * 错误处理模块
+ * 
+ * 提供统一的错误处理和用户通知功能。
+ */
+
 import { Notice } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { OperationType, LogLevel } from './logger';

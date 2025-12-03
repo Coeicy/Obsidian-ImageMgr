@@ -1,17 +1,49 @@
 /**
  * 拖拽框选管理器
- * 提供类似文件夹的拖拽框选功能
+ * 
+ * 提供类似文件资源管理器的拖拽框选功能，允许用户通过拖动鼠标
+ * 在空白区域创建选择框来批量选择图片卡片。
+ * 
+ * 功能特点：
+ * - 在容器空白区域拖动鼠标创建半透明选择框
+ * - 实时检测与选择框相交的图片卡片并更新选中状态
+ * - 自动同步复选框的选中状态
+ * - 支持选择完成后的回调通知
+ * - 智能过滤：不会在点击按钮、复选框或图片卡片时启动框选
+ * 
+ * 使用方式：
+ * ```typescript
+ * const dragSelect = new DragSelectManager(
+ *   containerEl,
+ *   '.image-card',
+ *   (selectedItems) => { console.log('选中了', selectedItems.length, '项'); }
+ * );
+ * ```
  */
 export class DragSelectManager {
+	/** 是否正在进行框选操作 */
 	private isSelecting: boolean = false;
-	private hasDragged: boolean = false; // 标记是否真正进行了拖动
+	/** 标记是否真正进行了拖动（用于区分点击和拖动） */
+	private hasDragged: boolean = false;
+	/** 框选起始点 X 坐标（相对于视口） */
 	private startX: number = 0;
+	/** 框选起始点 Y 坐标（相对于视口） */
 	private startY: number = 0;
+	/** 选择框 DOM 元素 */
 	private selectionBox: HTMLElement | null = null;
+	/** 框选操作的容器元素 */
 	private container: HTMLElement;
+	/** 可选择项目的 CSS 选择器 */
 	private itemSelector: string;
+	/** 选择状态变化时的回调函数 */
 	private onSelectionChange: (selectedItems: HTMLElement[]) => void;
 
+	/**
+	 * 创建拖拽框选管理器实例
+	 * @param container - 框选操作的容器元素
+	 * @param itemSelector - 可选择项目的 CSS 选择器（如 '.image-card'）
+	 * @param onSelectionChange - 选择状态变化时的回调函数
+	 */
 	constructor(
 		container: HTMLElement,
 		itemSelector: string,
@@ -24,18 +56,42 @@ export class DragSelectManager {
 	}
 
 	/**
-	 * 检查是否刚刚完成了拖动选择（用于阻止 click 事件取消选中）
+	 * 检查是否刚刚完成了拖动选择
+	 * 
+	 * 用于在 click 事件处理中判断是否应该阻止取消选中操作。
+	 * 当用户完成框选后，click 事件会立即触发，此方法返回 true
+	 * 可以用来避免意外取消刚刚选中的项目。
+	 * 
+	 * @returns 如果刚刚完成了拖动选择返回 true
 	 */
 	public wasJustDragging(): boolean {
 		return this.hasDragged;
 	}
 
+	/**
+	 * 设置事件监听器
+	 * 
+	 * 监听以下事件：
+	 * - mousedown: 在容器上检测框选开始
+	 * - mousemove: 在文档上跟踪鼠标移动（支持拖出容器）
+	 * - mouseup: 在文档上检测框选结束
+	 */
 	private setupEventListeners() {
 		this.container.addEventListener('mousedown', (e) => this.handleMouseDown(e));
 		document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
 		document.addEventListener('mouseup', (e) => this.handleMouseUp(e));
 	}
 
+	/**
+	 * 处理鼠标按下事件
+	 * 
+	 * 检查点击位置是否适合启动框选：
+	 * - 不在复选框、按钮、输入框上
+	 * - 不在图片卡片上（点击卡片应该是选中单个）
+	 * - 在容器内的空白区域
+	 * 
+	 * @param e - 鼠标事件对象
+	 */
 	private handleMouseDown(e: MouseEvent) {
 		// 如果点击的是复选框或其他交互元素，不启动框选
 		const target = e.target as HTMLElement;
@@ -77,6 +133,16 @@ export class DragSelectManager {
 		document.body.appendChild(this.selectionBox);
 	}
 
+	/**
+	 * 处理鼠标移动事件
+	 * 
+	 * 在框选过程中：
+	 * 1. 计算选择框的位置和大小
+	 * 2. 只有移动距离超过 5px 才显示选择框（避免误触）
+	 * 3. 实时更新与选择框相交的项目的选中状态
+	 * 
+	 * @param e - 鼠标事件对象
+	 */
 	private handleMouseMove(e: MouseEvent) {
 		if (!this.isSelecting || !this.selectionBox) {
 			return;
@@ -107,6 +173,17 @@ export class DragSelectManager {
 		}
 	}
 
+	/**
+	 * 处理鼠标释放事件
+	 * 
+	 * 完成框选操作：
+	 * 1. 最终确认选择状态
+	 * 2. 触发选择变化回调
+	 * 3. 移除选择框 DOM 元素
+	 * 4. 延迟重置 hasDragged 标记（让 click 事件能检测到）
+	 * 
+	 * @param e - 鼠标事件对象
+	 */
 	private handleMouseUp(e: MouseEvent) {
 		if (!this.isSelecting) {
 			return;
@@ -188,13 +265,24 @@ export class DragSelectManager {
 		this.onSelectionChange(selectedItems);
 	}
 
+	/**
+	 * 更新选择状态（拖动过程中实时调用）
+	 * 
+	 * 遍历所有可选择项目，检测它们是否与选择框相交，
+	 * 并相应地更新选中状态和复选框样式。
+	 * 
+	 * @param minX - 选择框左边界
+	 * @param minY - 选择框上边界
+	 * @param maxX - 选择框右边界
+	 * @param maxY - 选择框下边界
+	 */
 	private updateSelection(minX: number, minY: number, maxX: number, maxY: number) {
 		const items = this.container.querySelectorAll(this.itemSelector) as NodeListOf<HTMLElement>;
 
 		items.forEach((item) => {
 			const rect = item.getBoundingClientRect();
 
-			// 检测是否与选择框相交
+			// 检测是否与选择框相交（矩形碰撞检测）
 			const isIntersecting =
 				rect.left < maxX &&
 				rect.right > minX &&

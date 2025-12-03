@@ -1,3 +1,10 @@
+/**
+ * 筛选模态框模块
+ * 
+ * 提供图片列表多维度筛选功能的用户界面。
+ * 支持按文件类型、锁定状态、引用状态、大小范围、文件名和文件夹筛选。
+ */
+
 import { App, Modal, Setting } from 'obsidian';
 import { makeModalResizable } from '../utils/resizable-modal';
 

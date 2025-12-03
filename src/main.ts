@@ -74,6 +74,11 @@ export default class ImageManagementPlugin extends Plugin {
 	 * 初始化期间不记录日志，避免启动时产生大量日志
 	 */
 	private isInitializing: boolean = true;
+	
+	/** 延迟保存数据的防抖函数 */
+	private debouncedSaveData = debounce(async () => {
+		await this.saveData(this.data);
+	}, 2000, true);
 
 	/**
 	 * 插件加载生命周期方法
@@ -158,14 +163,18 @@ export default class ImageManagementPlugin extends Plugin {
 			// 使用防抖（debounce）避免频繁扫描文件，延迟 2 秒执行
 			this.registerEvent(
 				this.app.metadataCache.on('changed', debounce(async (file, data, cache) => {
-					await this.detectDisplayTextChanges(file);
+					// 确保 file 有效且有 name 属性
+					if (file && file.name) {
+						await this.detectDisplayTextChanges(file);
+					}
 				}, 2000, false))
 			);
 
 			// 注册文件创建监听器，检测图片文件导入/添加
 			this.registerEvent(
 				this.app.vault.on('create', async (file) => {
-					if (file instanceof TFile) {
+					// 确保 file 有效且有 name 属性
+					if (file instanceof TFile && file.name) {
 						await this.detectImageCreate(file);
 					}
 				})
@@ -174,7 +183,8 @@ export default class ImageManagementPlugin extends Plugin {
 			// 注册文件重命名监听器，检测图片文件重命名
 			this.registerEvent(
 				this.app.vault.on('rename', async (file, oldPath) => {
-					if (file instanceof TFile) {
+					// 确保 file 有效且有 name 属性
+					if (file instanceof TFile && file.name) {
 						await this.detectImageRename(file, oldPath);
 					}
 				})
@@ -183,7 +193,8 @@ export default class ImageManagementPlugin extends Plugin {
 			// 注册文件删除监听器，检测图片文件删除
 			this.registerEvent(
 				this.app.vault.on('delete', async (file) => {
-					if (file instanceof TFile) {
+					// 确保 file 有效且有 name 属性
+					if (file instanceof TFile && file.name) {
 						await this.handleFileDelete(file);
 					}
 				})
@@ -192,7 +203,10 @@ export default class ImageManagementPlugin extends Plugin {
 			// 注册metadataCache变化监听器，检测引用/取消引用
 			this.registerEvent(
 				this.app.metadataCache.on('changed', async (file, data, cache) => {
-					await this.detectReferenceChanges(file, cache);
+					// 确保 file 有效且有 name 属性
+					if (file && file.name) {
+						await this.detectReferenceChanges(file, cache);
+					}
 				})
 			);
 		} catch (error) {
@@ -221,6 +235,21 @@ export default class ImageManagementPlugin extends Plugin {
 		// 清理 ReferenceManager 的事件监听器
 		if (this.referenceManager) {
 			this.referenceManager.cleanup();
+		}
+		
+		// 清理 LockListManager 的资源
+		if (this.lockListManager) {
+			this.lockListManager.cleanup();
+		}
+		
+		// 清理 TrashManager 的缓存
+		if (this.trashManager) {
+			this.trashManager.invalidateCache();
+		}
+		
+		// 记录插件卸载日志
+		if (this.logger) {
+			this.logger.info(OperationType.PLUGIN_UNLOAD, '插件已卸载');
 		}
 	}
 
@@ -847,8 +876,8 @@ export default class ImageManagementPlugin extends Plugin {
 			return;
 		}
 		
-		// 只处理图片文件
-		if (!file || !file.extension) {
+		// 只处理图片文件，确保 file.name 存在
+		if (!file || !file.extension || !file.name) {
 			return;
 		}
 
@@ -861,20 +890,27 @@ export default class ImageManagementPlugin extends Plugin {
 		if (file.path.startsWith('.trash/')) {
 			return;
 		}
+		
+		// 保存文件信息（防止异步操作期间文件被删除）
+		const filePath = file.path;
+		const fileName = file.name;
+		const fileSize = file.stat?.size;
+		const fileCtime = file.stat?.ctime;
+		const fileMtime = file.stat?.mtime;
 
 		try {
 			// 获取图片的 MD5 哈希值
-			const imageHash = await this.getImageHash(file.path);
+			const imageHash = await this.getImageHash(filePath);
 
 			// 查找引用（等待一小段时间，确保metadataCache已更新）
 			await new Promise(resolve => setTimeout(resolve, 300));
-			const references = await this.referenceManager.findImageReferences(file.path, file.name);
+			const references = await this.referenceManager.findImageReferences(filePath, fileName);
 			const referencedFiles = references.map(ref => ref.filePath);
 
 			// 构建日志消息
-			let logMessage = `导入/添加图片: ${file.name}`;
-			if (file.stat.size) {
-				const sizeKB = (file.stat.size / 1024).toFixed(2);
+			let logMessage = `导入/添加图片: ${fileName}`;
+			if (fileSize) {
+				const sizeKB = (fileSize / 1024).toFixed(2);
 				logMessage += ` (${sizeKB} KB)`;
 			}
 
@@ -890,12 +926,12 @@ export default class ImageManagementPlugin extends Plugin {
 					logMessage,
 					{
 						imageHash: imageHash,
-						imagePath: file.path,
-						imageName: file.name,
+						imagePath: filePath,
+						imageName: fileName,
 						details: {
-							size: file.stat.size,
-							created: file.stat.ctime,
-							modified: file.stat.mtime,
+							size: fileSize,
+							created: fileCtime,
+							modified: fileMtime,
 							referencedFiles: referencedFiles
 						}
 					}
@@ -904,16 +940,16 @@ export default class ImageManagementPlugin extends Plugin {
 
 			// 更新引用缓存
 			if (referencedFiles.length > 0) {
-				this.referenceCache.set(file.path, new Set(referencedFiles));
+				this.referenceCache.set(filePath, new Set(referencedFiles));
 			} else {
 				// 如果没有引用，确保缓存中没有该图片的记录
-				this.referenceCache.delete(file.path);
+				this.referenceCache.delete(filePath);
 			}
 		} catch (error) {
 			if (this.logger) {
 				await this.logger.error(OperationType.PLUGIN_ERROR, '检测图片创建失败', {
 					error: error as Error,
-					imagePath: file.path
+					imagePath: filePath
 				});
 			}
 		}
@@ -923,8 +959,8 @@ export default class ImageManagementPlugin extends Plugin {
 	 * 检测图片文件重命名
 	 */
 	private async detectImageRename(file: TFile, oldPath: string) {
-		// 只处理图片文件
-		if (!file || !file.extension) {
+		// 只处理图片文件，确保 file.name 存在
+		if (!file || !file.extension || !file.name) {
 			return;
 		}
 
@@ -932,12 +968,14 @@ export default class ImageManagementPlugin extends Plugin {
 		if (!imageExtensions.includes(file.extension.toLowerCase())) {
 			return;
 		}
+		
+		// 保存文件信息（防止异步操作期间文件被删除）
+		const newFileName = file.name;
+		const newPath = file.path;
 
 		try {
-			// 提取旧文件名和新文件名
+			// 提取旧文件名
 			const oldFileName = oldPath.split('/').pop() || oldPath;
-			const newFileName = file.name;
-			const newPath = file.path;
 
 			// 在操作开始时就设置标记，确保引用检测能正确过滤（即使引用检测在操作完成前触发）
 			// 这样即使引用检测在重命名操作完成之前触发，也能被过滤掉
@@ -1164,8 +1202,8 @@ export default class ImageManagementPlugin extends Plugin {
 	 * 建议用户使用插件内的删除功能（图片详情页或批量删除）来利用回收站功能
 	 */
 	private async handleFileDelete(file: TFile) {
-		// 只处理图片文件
-		if (!file || !file.extension) {
+		// 只处理图片文件，确保 file.name 存在
+		if (!file || !file.extension || !file.name) {
 			return;
 		}
 
@@ -1178,15 +1216,20 @@ export default class ImageManagementPlugin extends Plugin {
 		if (file.path.startsWith('.trash/')) {
 			return;
 		}
+		
+		// 保存文件信息（防止异步操作期间文件状态变化）
+		const filePath = file.path;
+		const fileName = file.name;
+		const fileSize = file.stat?.size;
 
 		// 获取图片的 MD5 哈希值（在文件删除前尝试获取）
 		let imageHash: string | undefined;
 		try {
-			imageHash = await this.getImageHash(file.path);
+			imageHash = await this.getImageHash(filePath);
 		} catch (error) {
 			// 如果获取失败，尝试从已扫描的图片中查找
 			if (this.data.images) {
-				const image = this.data.images.find(img => img.path === file.path);
+				const image = this.data.images.find(img => img.path === filePath);
 				if (image?.md5) {
 					imageHash = image.md5;
 				}
@@ -1199,13 +1242,13 @@ export default class ImageManagementPlugin extends Plugin {
 		if (this.logger) {
 			await this.logger.warn(
 				OperationType.DELETE,
-				`文件已被删除: ${file.name}（在文件管理器中删除，无法移动到回收站）`,
+				`文件已被删除: ${fileName}（在文件管理器中删除，无法移动到回收站）`,
 				{
 					imageHash: imageHash,
-					imagePath: file.path,
-					imageName: file.name,
+					imagePath: filePath,
+					imageName: fileName,
 					details: {
-						size: file.stat.size,
+						size: fileSize,
 						note: '文件已在删除事件触发前被删除。提示：使用插件内的删除功能（图片详情页或批量删除）可以自动移动到回收站。'
 					}
 				}
@@ -1213,7 +1256,7 @@ export default class ImageManagementPlugin extends Plugin {
 		}
 
 		// 清理引用缓存
-		this.referenceCache.delete(file.path);
+		this.referenceCache.delete(filePath);
 	}
 
 	/**
@@ -1258,6 +1301,16 @@ export default class ImageManagementPlugin extends Plugin {
 
 	/**
 	 * 检测引用/取消引用变化
+	 * 
+	 * 当笔记文件的元数据缓存更新时调用，用于：
+	 * 1. 检测新增的图片引用
+	 * 2. 检测取消的图片引用
+	 * 3. 更新引用缓存（referenceCache）
+	 * 4. 更新图片信息缓存（data.images 和 imageScanCache）
+	 * 5. 记录引用变化日志
+	 * 
+	 * @param file 发生变化的笔记文件
+	 * @param cache 笔记的元数据缓存
 	 */
 	private async detectReferenceChanges(file: TFile, cache: any) {
 		// 如果插件正在初始化，不检测变化
@@ -1265,8 +1318,8 @@ export default class ImageManagementPlugin extends Plugin {
 			return;
 		}
 		
-		// 只处理 Markdown 文件
-		if (!file || file.extension !== 'md') {
+		// 只处理 Markdown 文件，并确保 file.name 存在
+		if (!file || !file.name || file.extension !== 'md') {
 			return;
 		}
 
@@ -1274,6 +1327,10 @@ export default class ImageManagementPlugin extends Plugin {
 		if (!this.referenceCacheInitialized) {
 			return;
 		}
+		
+		// 保存文件信息（防止异步操作期间文件被删除）
+		const filePath = file.path;
+		const fileName = file.name;
 
 		try {
 			// 获取当前缓存中的 embeds
@@ -1283,7 +1340,7 @@ export default class ImageManagementPlugin extends Plugin {
 			// 收集当前引用的所有图片路径
 			for (const embed of currentEmbeds) {
 				try {
-					const resolvedPath = this.app.metadataCache.getFirstLinkpathDest(embed.link, file.path);
+					const resolvedPath = this.app.metadataCache.getFirstLinkpathDest(embed.link, filePath);
 					if (resolvedPath) {
 						const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'];
 						if (imageExtensions.includes(resolvedPath.extension?.toLowerCase() || '')) {
@@ -1298,7 +1355,7 @@ export default class ImageManagementPlugin extends Plugin {
 			// 获取之前的引用状态（从缓存中查找该文件引用的所有图片）
 			const previouslyReferencedImages = new Set<string>();
 			for (const [imagePath, refSet] of this.referenceCache.entries()) {
-				if (refSet.has(file.path)) {
+				if (refSet.has(filePath)) {
 					previouslyReferencedImages.add(imagePath);
 				}
 			}
@@ -1318,26 +1375,32 @@ export default class ImageManagementPlugin extends Plugin {
 								refSet = new Set();
 								this.referenceCache.set(imagePath, refSet);
 							}
-							refSet.add(file.path);
+							refSet.add(filePath);
 							continue; // 跳过记录日志
 						}
 					}
 
 					// 新增引用
 					const imageFile = this.app.vault.getAbstractFileByPath(imagePath) as TFile;
-					if (imageFile) {
+					// 确保文件存在且有 name 属性
+					if (imageFile && imageFile.name) {
 						const imageHash = await this.getImageHash(imagePath);
 						if (this.logger) {
 							// 查找引用位置和显示文本
 							await new Promise(resolve => setTimeout(resolve, 200)); // 等待metadataCache更新
-							const references = await this.referenceManager.findImageReferences(imagePath, imageFile.name);
-							const ref = references.find(r => r.filePath === file.path);
+							// 再次检查文件是否存在（异步操作期间可能被删除）
+							const currentImageFile = this.app.vault.getAbstractFileByPath(imagePath) as TFile;
+							if (!currentImageFile || !currentImageFile.name) {
+								continue; // 文件已被删除，跳过
+							}
+							const references = await this.referenceManager.findImageReferences(imagePath, currentImageFile.name);
+							const ref = references.find(r => r.filePath === filePath);
 							const displayText = ref?.displayText || '';
 							const lineNumber = ref?.lineNumber;
 
 							// 构建美化的日志消息
-							let logMessage = `新增引用: ${imageFile.name}`;
-							logMessage += `\n引用笔记: ${file.path}`;
+							let logMessage = `新增引用: ${currentImageFile.name}`;
+							logMessage += `\n引用笔记: ${filePath}`;
 							if (lineNumber) {
 								logMessage += ` (第${lineNumber}行)`;
 							}
@@ -1357,10 +1420,10 @@ export default class ImageManagementPlugin extends Plugin {
 								{
 									imageHash: imageHash,
 									imagePath: imagePath,
-									imageName: imageFile.name,
+									imageName: currentImageFile.name,
 									details: {
-										referencingFile: file.path,
-										referencingFileName: file.name,
+										referencingFile: filePath,
+										referencingFileName: fileName,
 										displayText: displayText,
 										lineNumber: lineNumber,
 										linkFormat: linkFormat,
@@ -1376,7 +1439,10 @@ export default class ImageManagementPlugin extends Plugin {
 							refSet = new Set();
 							this.referenceCache.set(imagePath, refSet);
 						}
-						refSet.add(file.path);
+						refSet.add(filePath);
+						
+						// 更新 data.images 中的引用信息
+						await this.updateImageReferences(imagePath);
 					}
 				}
 			}
@@ -1386,11 +1452,12 @@ export default class ImageManagementPlugin extends Plugin {
 				if (!currentImagePaths.has(imagePath)) {
 					// 取消引用
 					const imageFile = this.app.vault.getAbstractFileByPath(imagePath) as TFile;
-					if (imageFile) {
+					// 确保文件存在且有 name 属性
+					if (imageFile && imageFile.name) {
 						const imageHash = await this.getImageHash(imagePath);
 						if (this.logger) {
 							// 构建美化的日志消息
-							const logMessage = `移除引用: ${imageFile.name}\n来源笔记: ${file.path}`;
+							const logMessage = `移除引用: ${imageFile.name}\n来源笔记: ${filePath}`;
 
 							await this.logger.info(
 								OperationType.UNREFERENCE,
@@ -1400,8 +1467,8 @@ export default class ImageManagementPlugin extends Plugin {
 									imagePath: imagePath,
 									imageName: imageFile.name,
 									details: {
-										referencingFile: file.path,
-										referencingFileName: file.name
+										referencingFile: filePath,
+										referencingFileName: fileName
 									}
 								}
 							);
@@ -1410,7 +1477,19 @@ export default class ImageManagementPlugin extends Plugin {
 						// 更新缓存
 						const refSet = this.referenceCache.get(imagePath);
 						if (refSet) {
-							refSet.delete(file.path);
+							refSet.delete(filePath);
+							if (refSet.size === 0) {
+								this.referenceCache.delete(imagePath);
+							}
+						}
+						
+						// 更新 data.images 中的引用信息
+						await this.updateImageReferences(imagePath);
+					} else {
+						// 文件已被删除，仅更新缓存
+						const refSet = this.referenceCache.get(imagePath);
+						if (refSet) {
+							refSet.delete(filePath);
 							if (refSet.size === 0) {
 								this.referenceCache.delete(imagePath);
 							}
@@ -1418,15 +1497,61 @@ export default class ImageManagementPlugin extends Plugin {
 					}
 				}
 			}
+			
+			// 延迟保存数据（避免频繁写入）
+			this.debouncedSaveData();
 		} catch (error) {
 			if (this.logger) {
 				await this.logger.error(OperationType.PLUGIN_ERROR, '检测引用变化失败', {
 					error: error as Error,
 					details: {
-						filePath: file.path
+						filePath: filePath
 					}
 				});
 			}
+		}
+	}
+	
+	/**
+	 * 更新指定图片的引用信息
+	 * 
+	 * 当图片的引用关系发生变化时调用，用于：
+	 * 1. 使用 referenceManager 获取最新的引用信息
+	 * 2. 更新 data.images 中对应图片的引用数据
+	 * 3. 更新 imageScanCache 中的缓存数据
+	 * 
+	 * 更新后的数据会通过 debouncedSaveData 延迟保存到本地，
+	 * 确保下次打开图片详情页时可以立即显示引用信息。
+	 * 
+	 * @param imagePath 图片路径
+	 */
+	private async updateImageReferences(imagePath: string): Promise<void> {
+		try {
+			// 获取图片文件
+			const imageFile = this.app.vault.getAbstractFileByPath(imagePath) as TFile;
+			if (!imageFile || !imageFile.name) return;
+			
+			// 使用 referenceManager 获取最新的引用信息
+			const references = await this.referenceManager.findImageReferences(imagePath, imageFile.name);
+			
+			// 更新 data.images 中的引用信息
+			if (this.data.images) {
+				const imageInfo = this.data.images.find((img: any) => img.path === imagePath);
+				if (imageInfo) {
+					imageInfo.references = references;
+					imageInfo.referenceCount = references.length;
+					imageInfo.referencesUpdatedAt = Date.now();
+				}
+			}
+			
+			// 更新 imageScanCache 中的引用信息
+			if (this.data.imageScanCache && this.data.imageScanCache[imagePath]) {
+				this.data.imageScanCache[imagePath].references = references;
+				this.data.imageScanCache[imagePath].referenceCount = references.length;
+				this.data.imageScanCache[imagePath].referencesUpdatedAt = Date.now();
+			}
+		} catch (error) {
+			// 静默失败，不影响主流程
 		}
 	}
 }

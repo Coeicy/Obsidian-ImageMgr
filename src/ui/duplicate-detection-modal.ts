@@ -1,3 +1,10 @@
+/**
+ * 重复图片检测模态框模块
+ * 
+ * 提供重复图片检测和管理功能的用户界面。
+ * 基于 MD5 哈希值识别重复图片。
+ */
+
 import { Modal, Notice, TFile } from 'obsidian';
 import { ImageInfo } from '../types';
 import { calculateFileHash } from '../utils/image-hash';
@@ -7,11 +14,25 @@ import ImageManagementPlugin from '../main';
 import { OperationType } from '../utils/logger';
 import { makeModalResizable } from '../utils/resizable-modal';
 
+/**
+ * 重复图片分组接口
+ */
 interface DuplicateGroup {
+	/** MD5 哈希值 */
 	hash: string;
+	/** 具有相同哈希值的图片列表 */
 	images: ImageInfo[];
 }
 
+/**
+ * 重复图片检测模态框类
+ * 
+ * 功能：
+ * - 检测具有相同 MD5 哈希值的重复图片
+ * - 显示重复图片分组
+ * - 支持删除重复图片（保留一个）
+ * - 显示每组重复图片的详细信息
+ */
 export class DuplicateDetectionModal extends Modal {
 	images: ImageInfo[];
 	app: any;

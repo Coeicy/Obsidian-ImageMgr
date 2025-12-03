@@ -1,9 +1,25 @@
+/**
+ * 图片统计信息模态框模块
+ * 
+ * 提供图片库的统计信息展示。
+ */
+
 import { App, Modal } from 'obsidian';
 import { ImageInfo } from '../types';
 import { ImageProcessor } from '../utils/image-processor';
 import { makeModalResizable } from '../utils/resizable-modal';
 
+/**
+ * 图片统计信息模态框类
+ * 
+ * 功能：
+ * - 显示图片总数、总大小、平均大小
+ * - 显示最大/最小文件
+ * - 按文件类型统计（PNG、JPG 等）
+ * - 按文件夹统计
+ */
 export class StatsModal extends Modal {
+	/** 图片列表 */
 	images: ImageInfo[];
 
 	constructor(app: App, images: ImageInfo[]) {

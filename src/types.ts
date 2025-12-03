@@ -1,4 +1,62 @@
 /**
+ * 图片引用信息接口
+ * 
+ * 代表一个引用该图片的笔记信息
+ */
+export interface ImageReferenceInfo {
+	/** 引用该图片的笔记路径 */
+	filePath: string;
+	/** 引用所在的行号 */
+	lineNumber: number;
+	/** 显示文本（Wiki 链接中的别名） */
+	displayText?: string;
+	/** 完整的引用行内容 */
+	fullLine?: string;
+	/** 链接格式类型（wiki/wiki-with-text/markdown/html 等） */
+	matchType?: string;
+	/** 链接路径格式（shortest/relative/absolute） */
+	linkPathFormat?: 'shortest' | 'relative' | 'absolute';
+}
+
+/**
+ * 空链接信息接口
+ * 
+ * 代表一个指向不存在图片的链接
+ */
+export interface BrokenLinkInfo {
+	/** 包含空链接的笔记路径 */
+	filePath: string;
+	/** 空链接所在的行号 */
+	lineNumber: number;
+	/** 原始链接文本 */
+	linkText: string;
+	/** 从链接中提取的图片路径 */
+	extractedPath?: string;
+}
+
+/**
+ * 链接格式统计接口
+ * 
+ * 统计各种链接格式的数量
+ */
+export interface LinkFormatStats {
+	/** Wiki 格式链接数量 ![[...]] */
+	wiki: number;
+	/** Markdown 格式链接数量 ![...](...) */
+	markdown: number;
+	/** HTML 格式链接数量 <img ...> */
+	html: number;
+	/** 最短路径格式数量 */
+	shortest: number;
+	/** 相对路径格式数量 */
+	relative: number;
+	/** 绝对路径格式数量 */
+	absolute: number;
+	/** 总链接数量 */
+	total: number;
+}
+
+/**
  * 图片信息接口
  * 
  * 代表一张图片的基本信息，包括路径、尺寸、哈希值等
@@ -23,6 +81,12 @@ export interface ImageInfo {
 	md5?: string;
 	/** 分组名称（可选，用于自定义分组） */
 	group?: string;
+	/** 引用该图片的笔记列表（缓存） */
+	references?: ImageReferenceInfo[];
+	/** 引用数量（快速访问） */
+	referenceCount?: number;
+	/** 引用信息最后更新时间戳 */
+	referencesUpdatedAt?: number;
 }
 
 /**
@@ -131,76 +195,199 @@ export interface PluginData {
 	 * 扫描到的所有图片信息数组
 	 */
 	images?: any[];
+	
+	/** 图片扫描缓存
+	 * 用于增量扫描，存储上次扫描的图片信息
+	 * 结构：{ 图片路径: { mtime: 修改时间, size: 文件大小, ...其他信息 } }
+	 */
+	imageScanCache?: { 
+		[path: string]: {
+			/** 文件修改时间戳 */
+			mtime: number;
+			/** 文件大小（字节） */
+			size: number;
+			/** 图片宽度（像素） */
+			width?: number;
+			/** 图片高度（像素） */
+			height?: number;
+			/** MD5 哈希值 */
+			md5?: string;
+			/** 引用该图片的笔记列表（缓存） */
+			references?: ImageReferenceInfo[];
+			/** 引用数量 */
+			referenceCount?: number;
+			/** 引用信息最后更新时间戳 */
+			referencesUpdatedAt?: number;
+		};
+	};
+	
+	/** 上次扫描时间戳
+	 * 用于判断缓存是否过期
+	 */
+	lastScanTime?: number;
+	
+	/** 空链接缓存
+	 * 存储检测到的所有空链接（指向不存在图片的链接）
+	 */
+	brokenLinks?: BrokenLinkInfo[];
+	
+	/** 空链接最后更新时间戳 */
+	brokenLinksUpdatedAt?: number;
+	
+	/** 链接格式统计缓存
+	 * 存储各种链接格式的数量统计
+	 */
+	linkFormatStats?: LinkFormatStats;
+	
+	/** 链接格式统计最后更新时间戳 */
+	linkFormatStatsUpdatedAt?: number;
 }
 
+/**
+ * 插件设置接口
+ * 
+ * 定义插件的所有可配置选项，这些设置会显示在设置页面中，
+ * 并持久化存储在 Obsidian 的插件配置文件中。
+ * 
+ * 设置分类：
+ * - 基础设置：扫描、文件夹、去重等
+ * - 显示设置：布局、卡片样式、信息显示等
+ * - 性能设置：懒加载、缓存等
+ * - 删除设置：确认、回收站等
+ * - 搜索设置：大小写、延迟等
+ * - 批量操作：限制、确认阈值等
+ * - 日志设置：级别、输出等
+ * - 快捷键：自定义快捷键
+ */
 export interface ImageManagerSettings {
+	// ==================== 基础设置 ====================
+	/** 是否自动扫描图片（打开视图时） */
 	autoScan: boolean;
+	/** 默认图片文件夹路径 */
 	defaultImageFolder: string;
+	/** 是否包含子文件夹 */
 	includeSubfolders: boolean;
-	imagesPerRow: number; // 每行显示的图片数量
-	defaultSortBy: 'name' | 'size' | 'date' | 'dimensions'; // 默认排序方式
-	defaultSortOrder: 'asc' | 'desc'; // 默认排序顺序
-	defaultFilterType: 'all' | 'png' | 'jpg' | 'gif' | 'webp' | 'svg' | 'bmp'; // 默认筛选类型
-	enableDeduplication: boolean; // 启用MD5去重
-	autoGenerateNames: boolean; // 自动生成文件名
-	keepModalOpen: boolean; // 前往笔记时是否保持详情页打开
-	showReferenceTime: boolean; // 是否显示引用时间
-	pathNamingDepth: number; // 路径命名深度（1-5级）
-	duplicateNameHandling: 'prompt' | 'skip-silent' | 'use-newest' | 'use-oldest'; // 重名处理方式：提示并跳过、安静跳过、使用最新、使用最旧
-	multipleReferencesHandling: 'first' | 'latest' | 'prompt' | 'all'; // 多笔记引用处理：使用第一个、使用最新修改、提示选择、全部重命名
-	saveBatchRenameLog: boolean; // 保存批量命名日志
-	ignoredFiles: string; // 忽略的文件列表（按行分隔）
-	ignoredHashes: string; // 忽略的哈希值列表（按行分隔）
-	showIgnoredFilePath?: boolean; // 在锁定列表中显示文件位置信息
-	ignoredHashMetadata?: Record<string, { fileName: string; filePath: string; addedTime: number }>; // 哈希值锁定的元数据（文件名和位置）
-	defaultWheelMode: 'scroll' | 'zoom'; // 鼠标滚轮默认模式：scroll-切换图片、zoom-缩放图片
-	showImageName: boolean; // 显示图片名称
-	showImageSize: boolean; // 显示图片大小
-	showImageDimensions: boolean; // 显示图片尺寸
-	showLockIcon: boolean; // 显示锁定图标
-	imageNameWrap: boolean; // 图片名称是否换行
-	adaptiveImageSize: boolean; // 自适应图片大小（类似 Notion 效果）
-	pureGallery: boolean; // 纯净画廊模式（只显示图片，隐藏所有信息）
+	/** 是否启用 MD5 去重功能 */
+	enableDeduplication: boolean;
 	
-	// 性能设置
-	enableLazyLoading: boolean; // 启用懒加载
-	lazyLoadDelay: number; // 懒加载延迟（毫秒）
-	maxCacheSize: number; // 最大缓存数量
+	// ==================== 显示设置 ====================
+	/** 每行显示的图片数量（1-10） */
+	imagesPerRow: number;
+	/** 默认排序方式 */
+	defaultSortBy: 'name' | 'size' | 'date' | 'dimensions';
+	/** 默认排序顺序 */
+	defaultSortOrder: 'asc' | 'desc';
+	/** 默认筛选类型 */
+	defaultFilterType: 'all' | 'png' | 'jpg' | 'gif' | 'webp' | 'svg' | 'bmp';
+	/** 是否显示图片名称 */
+	showImageName: boolean;
+	/** 是否显示图片大小 */
+	showImageSize: boolean;
+	/** 是否显示图片尺寸 */
+	showImageDimensions: boolean;
+	/** 是否显示锁定图标 */
+	showLockIcon: boolean;
+	/** 图片名称是否换行显示 */
+	imageNameWrap: boolean;
+	/** 是否启用自适应图片大小（类似 Notion 效果） */
+	adaptiveImageSize: boolean;
+	/** 是否启用纯净画廊模式（只显示图片，隐藏所有信息） */
+	pureGallery: boolean;
 	
-	// UI/主题设置
-	cardBorderRadius: number; // 卡片圆角大小（像素）
-	cardSpacing: number; // 卡片间距（像素）
-	fixedImageHeight: number; // 固定图片高度（像素，当不使用自适应时）
-	enableHoverEffect: boolean; // 启用悬停效果
-	showImageIndex: boolean; // 显示图片序号
-	uniformCardHeight: boolean; // 统一卡片高度（同一行的卡片高度一致）
+	// ==================== 重命名设置 ====================
+	/** 是否自动生成文件名（基于引用笔记） */
+	autoGenerateNames: boolean;
+	/** 路径命名深度（1-5 级目录） */
+	pathNamingDepth: number;
+	/** 重名处理方式 */
+	duplicateNameHandling: 'prompt' | 'skip-silent' | 'use-newest' | 'use-oldest';
+	/** 多笔记引用时的处理方式 */
+	multipleReferencesHandling: 'first' | 'latest' | 'prompt' | 'all';
+	/** 是否保存批量重命名日志 */
+	saveBatchRenameLog: boolean;
 	
-	// 删除设置
-	confirmBeforeDelete: boolean; // 删除前确认
-	moveToSystemTrash: boolean; // 移到系统回收站（否则永久删除）
-	enablePluginTrash: boolean; // 启用插件回收站（移动到 .trash 文件夹）
-	trashRestorePath: string; // 恢复路径（空字符串表示根目录，否则使用指定路径）
+	// ==================== 引用与预览设置 ====================
+	/** 前往笔记时是否保持详情页打开 */
+	keepModalOpen: boolean;
+	/** 是否显示引用时间 */
+	showReferenceTime: boolean;
+	/** 鼠标滚轮默认模式：scroll-切换图片、zoom-缩放图片 */
+	defaultWheelMode: 'scroll' | 'zoom';
 	
-	// 搜索设置
-	searchCaseSensitive: boolean; // 搜索大小写敏感
-	liveSearchDelay: number; // 实时搜索延迟（毫秒）
-	searchInPath: boolean; // 搜索时包含路径
+	// ==================== 文件锁定设置 ====================
+	/** 忽略的文件列表（按行分隔的文件名） */
+	ignoredFiles: string;
+	/** 忽略的哈希值列表（按行分隔的 MD5 值） */
+	ignoredHashes: string;
+	/** 是否在锁定列表中显示文件位置信息 */
+	showIgnoredFilePath?: boolean;
+	/** 哈希值锁定的元数据（文件名、位置、添加时间） */
+	ignoredHashMetadata?: Record<string, { fileName: string; filePath: string; addedTime: number }>;
 	
-	// 批量操作设置
-	maxBatchOperations: number; // 批量操作最大数量限制
-	batchConfirmThreshold: number; // 批量操作确认阈值（超过此数量需要确认）
-	showBatchProgress: boolean; // 显示批量操作进度
+	// ==================== 性能设置 ====================
+	/** 是否启用懒加载 */
+	enableLazyLoading: boolean;
+	/** 懒加载延迟时间（毫秒） */
+	lazyLoadDelay: number;
+	/** 最大缓存数量 */
+	maxCacheSize: number;
 	
-	// 统计信息
-	showStatistics: boolean; // 显示统计信息面板
-	statisticsPosition: 'top' | 'bottom'; // 统计信息位置
+	// ==================== UI/主题设置 ====================
+	/** 卡片圆角大小（像素） */
+	cardBorderRadius: number;
+	/** 卡片间距（像素） */
+	cardSpacing: number;
+	/** 固定图片高度（像素，当不使用自适应时） */
+	fixedImageHeight: number;
+	/** 是否启用悬停效果 */
+	enableHoverEffect: boolean;
+	/** 是否显示图片序号 */
+	showImageIndex: boolean;
+	/** 是否统一卡片高度（同一行的卡片高度一致） */
+	uniformCardHeight: boolean;
 	
-	// 日志设置
-	logLevel?: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'; // 日志级别
-	enableConsoleLog?: boolean; // 是否输出到控制台
-	enableDebugLog?: boolean; // 是否启用DEBUG日志
+	// ==================== 删除设置 ====================
+	/** 删除前是否需要确认 */
+	confirmBeforeDelete: boolean;
+	/** 是否移到系统回收站（否则永久删除） */
+	moveToSystemTrash: boolean;
+	/** 是否启用插件回收站（移动到 .trash 文件夹） */
+	enablePluginTrash: boolean;
+	/** 从回收站恢复时的目标路径（空字符串表示根目录） */
+	trashRestorePath: string;
 	
-	// 快捷键设置
-	keyboardShortcuts?: Record<string, string>; // 快捷键自定义配置（key: 快捷键ID, value: 快捷键字符串）
+	// ==================== 搜索设置 ====================
+	/** 搜索是否区分大小写 */
+	searchCaseSensitive: boolean;
+	/** 实时搜索延迟时间（毫秒） */
+	liveSearchDelay: number;
+	/** 搜索时是否包含路径 */
+	searchInPath: boolean;
+	
+	// ==================== 批量操作设置 ====================
+	/** 批量操作最大数量限制 */
+	maxBatchOperations: number;
+	/** 批量操作确认阈值（超过此数量需要确认） */
+	batchConfirmThreshold: number;
+	/** 是否显示批量操作进度 */
+	showBatchProgress: boolean;
+	
+	// ==================== 统计信息设置 ====================
+	/** 是否显示统计信息面板 */
+	showStatistics: boolean;
+	/** 统计信息显示位置 */
+	statisticsPosition: 'top' | 'bottom';
+	
+	// ==================== 日志设置 ====================
+	/** 日志级别 */
+	logLevel?: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
+	/** 是否输出日志到控制台 */
+	enableConsoleLog?: boolean;
+	/** 是否启用 DEBUG 级别日志 */
+	enableDebugLog?: boolean;
+	
+	// ==================== 快捷键设置 ====================
+	/** 自定义快捷键配置（快捷键ID -> 快捷键字符串） */
+	keyboardShortcuts?: Record<string, string>;
 }
 
