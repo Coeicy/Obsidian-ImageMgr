@@ -346,6 +346,26 @@ export interface ImageManagerSettings {
 	/** 是否统一卡片高度（同一行的卡片高度一致） */
 	uniformCardHeight: boolean;
 	
+	// ==================== 移动端适配设置 ====================
+	/** 移动端每行图片数量（1-5，默认根据屏幕宽度自动调整） */
+	mobileImagesPerRow?: number;
+	/** 是否启用紧凑工具栏（移动端优化） */
+	enableCompactToolbar?: boolean;
+	/** 移动端是否隐藏非必要信息（尺寸、锁定图标等） */
+	hideNonEssentialInfo?: boolean;
+	/** 平板端每行图片数量（1-5，默认3） */
+	tabletImagesPerRow?: number;
+	/** 手机横屏每行图片数量（1-5，默认2） */
+	phoneLandscapeImagesPerRow?: number;
+	/** 手机竖屏每行图片数量（1-2，默认1） */
+	phonePortraitImagesPerRow?: number;
+	
+	// ==================== 移动端隐私设置 ====================
+	/** 是否创建 .nomedia 文件（防止手机相册扫描图片） */
+	createNomediaFile?: boolean;
+	/** .nomedia 文件的目标路径（相对路径，空表示根目录） */
+	nomediaPath?: string;
+	
 	// ==================== 删除设置 ====================
 	/** 删除前是否需要确认 */
 	confirmBeforeDelete: boolean;
@@ -390,4 +410,3 @@ export interface ImageManagerSettings {
 	/** 自定义快捷键配置（快捷键ID -> 快捷键字符串） */
 	keyboardShortcuts?: Record<string, string>;
 }
-

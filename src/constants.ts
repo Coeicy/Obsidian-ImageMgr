@@ -227,3 +227,35 @@ export function shouldLoadMore(
 	return scrollTop + clientHeight >= scrollHeight * ratio;
 }
 
+/**
+ * 根据屏幕宽度计算每行显示的图片数量（移动端适配）
+ * @param screenWidth 屏幕宽度（px）
+ * @param settings 插件设置
+ * @param defaultImagesPerRow 默认每行数量（桌面端）
+ * @returns 每行显示的图片数量
+ */
+export function calculateImagesPerRowForScreen(
+	screenWidth: number,
+	settings: any,
+	defaultImagesPerRow: number = 5
+): number {
+	// 如果用户自定义了移动端每行数量，优先使用
+	if (settings.mobileImagesPerRow && settings.mobileImagesPerRow > 0) {
+		return Math.min(Math.max(settings.mobileImagesPerRow, 1), 10);
+	}
+	
+	// 根据屏幕宽度自动计算
+	if (screenWidth >= 1200) {
+		// 桌面端：使用默认值
+		return defaultImagesPerRow;
+	} else if (screenWidth >= 768) {
+		// 平板端：使用设置值或默认 3
+		return settings.tabletImagesPerRow || 3;
+	} else if (screenWidth >= 480) {
+		// 手机横屏：使用设置值或默认 2
+		return settings.phoneLandscapeImagesPerRow || 2;
+	} else {
+		// 手机竖屏：使用设置值或默认 1
+		return settings.phonePortraitImagesPerRow || 1;
+	}
+}

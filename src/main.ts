@@ -1554,4 +1554,202 @@ export default class ImageManagementPlugin extends Plugin {
 			// 静默失败，不影响主流程
 		}
 	}
+
+	/**
+	 * 创建 .nomedia 文件
+	 * 
+	 * .nomedia 文件用于防止 Android 媒体扫描器扫描该目录下的图片，
+	 * 从而避免这些图片出现在手机相册中。
+	 * 
+	 * 功能说明：
+	 * - 直接在笔记库根目录创建 .nomedia 文件
+	 * - 文件为空文件，仅用于指示媒体扫描器忽略该目录
+	 * - 创建后，Android 相册应用将不会显示此目录下的图片
+	 * - 此功能仅对 Android 设备有效，iOS 不使用 .nomedia 机制
+	 * 
+	 * @returns 操作结果 { success: boolean, message: string }
+	 */
+	async createNomediaFile(): Promise<{ success: boolean; message: string }> {
+		try {
+			const fullPath = '.nomedia';
+
+			// 记录操作开始
+			if (this.logger) {
+				await this.logger.info(
+					OperationType.PLUGIN_LOAD,
+					`开始创建 .nomedia 文件：${fullPath}`,
+					{
+						details: {
+							action: '创建 .nomedia 文件',
+							path: fullPath,
+							purpose: '防止 Android 相册扫描该目录下的图片'
+						}
+					}
+				);
+			}
+
+			// 检查文件是否已存在
+			const existingFile = this.app.vault.getAbstractFileByPath(fullPath) as TFile;
+			if (existingFile) {
+				if (this.logger) {
+					await this.logger.info(
+						OperationType.PLUGIN_LOAD,
+						`Android 相册隐藏已开启`,
+						{ details: { path: fullPath } }
+					);
+				}
+
+				return {
+					success: true,
+					message: `✅ 已开启`
+				};
+			}
+
+			// 创建 .nomedia 文件（空文件）
+			await this.app.vault.create(fullPath, '');
+			
+			// 记录创建成功
+			if (this.logger) {
+				await this.logger.info(
+					OperationType.PLUGIN_LOAD,
+					`Android 相册隐藏已开启`,
+					{ details: { path: fullPath } }
+				);
+			}
+
+			return {
+				success: true,
+				message: `✅ 已开启`
+			};
+		} catch (error) {
+			const errorMsg = (error as Error).message;
+			
+			// 如果错误是"文件已存在"，返回成功
+			if (errorMsg.includes('already exists') || errorMsg.includes('已存在')) {
+				if (this.logger) {
+					await this.logger.info(
+						OperationType.PLUGIN_LOAD,
+						`Android 相册隐藏已开启`,
+						{ details: { path: '.nomedia' } }
+					);
+				}
+
+				return {
+					success: true,
+					message: `✅ 已开启`
+				};
+			}
+			
+			const errorMessage = `❌ 开启失败：${errorMsg}`;
+			
+			// 记录错误
+			if (this.logger) {
+				await this.logger.error(
+					OperationType.PLUGIN_ERROR,
+					errorMessage,
+					{
+						error: error as Error,
+						details: {
+							action: '创建 .nomedia 文件',
+							path: '.nomedia',
+							platform: 'Android 仅支持',
+							suggestion: '请检查文件权限或磁盘空间'
+						}
+					}
+				);
+			}
+
+			return {
+				success: false,
+				message: errorMessage
+			};
+		}
+	}
+
+	/**
+	 * 删除 .nomedia 文件
+	 * 
+	 * 删除后，Android 相册将能够扫描并显示该目录下的图片。
+	 * 
+	 * 功能说明：
+	 * - 直接删除笔记库根目录的 .nomedia 文件
+	 * - 删除后，Android 相册应用将重新扫描并显示此目录下的图片
+	 * - 此功能仅对 Android 设备有效，iOS 不使用 .nomedia 机制
+	 * 
+	 * @returns 操作结果 { success: boolean; message: string }
+	 */
+	async deleteNomediaFile(): Promise<{ success: boolean; message: string }> {
+		try {
+			const fullPath = '.nomedia';
+
+			// 先尝试通过 vault API 删除
+			const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
+			if (existingFile && existingFile instanceof TFile) {
+				await this.app.vault.delete(existingFile);
+				
+				if (this.logger) {
+					await this.logger.info(
+						OperationType.PLUGIN_LOAD,
+						`Android 相册隐藏已关闭`,
+						{ details: { path: fullPath } }
+					);
+				}
+
+				return {
+					success: true,
+					message: `✅ 已关闭`
+				};
+			}
+
+			// 如果 vault API 找不到，尝试用 adapter 直接删除
+			const fileExists = await this.app.vault.adapter.exists(fullPath);
+			if (fileExists) {
+				await this.app.vault.adapter.remove(fullPath);
+				
+				if (this.logger) {
+					await this.logger.info(
+						OperationType.PLUGIN_LOAD,
+						`Android 相册隐藏已关闭`,
+						{ details: { path: fullPath } }
+					);
+				}
+
+				return {
+					success: true,
+					message: `✅ 已关闭`
+				};
+			}
+
+			// 文件不存在，也算关闭成功
+			return {
+				success: true,
+				message: `✅ 已关闭`
+			};
+		} catch (error) {
+			const errorMessage = `❌ 关闭失败：${(error as Error).message}`;
+			
+			// 记录错误
+			if (this.logger) {
+				await this.logger.error(
+					OperationType.PLUGIN_ERROR,
+					errorMessage,
+					{
+						error: error as Error,
+						details: {
+							action: '删除 .nomedia 文件',
+							path: '.nomedia',
+							errorDetails: (error as Error).stack,
+							platform: 'Android 仅支持',
+							suggestion: '请检查文件权限或文件是否被其他程序占用'
+						}
+					}
+				);
+			}
+
+			return {
+				success: false,
+				message: errorMessage
+			};
+		}
+	}
 }

@@ -105,6 +105,26 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	/** 是否统一卡片高度 - 所有卡片保持相同高度 */
 	uniformCardHeight: false,
 
+	// ==================== 移动端适配设置 ====================
+	/** 移动端每行图片数量（1-5，默认根据屏幕宽度自动调整） */
+	mobileImagesPerRow: undefined,
+	/** 是否启用紧凑工具栏（移动端优化） */
+	enableCompactToolbar: false,
+	/** 移动端是否隐藏非必要信息（尺寸、锁定图标等） */
+	hideNonEssentialInfo: true,
+	/** 平板端每行图片数量（1-5，默认3） */
+	tabletImagesPerRow: 3,
+	/** 手机横屏每行图片数量（1-5，默认2） */
+	phoneLandscapeImagesPerRow: 2,
+	/** 手机竖屏每行图片数量（1-2，默认1） */
+	phonePortraitImagesPerRow: 1,
+
+	// ==================== 移动端隐私设置 ====================
+	/** 是否创建 .nomedia 文件（防止手机相册扫描图片） */
+	createNomediaFile: false,
+	/** .nomedia 文件的目标路径（相对路径，空表示根目录） */
+	nomediaPath: '',
+
 	// ==================== 删除设置 ====================
 	/** 删除前确认 - 删除图片时是否弹出确认对话框 */
 	confirmBeforeDelete: true,

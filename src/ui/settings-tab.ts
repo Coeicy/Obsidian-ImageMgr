@@ -775,6 +775,119 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
+		// 11. 移动端适配
+		const mobileSection = this.createCollapsibleSection(containerEl, '📱 移动端适配', 'mobile', false);
+
+		// 移动端适配说明
+		const mobileIntro = mobileSection.contentEl.createDiv();
+		mobileIntro.style.color = 'var(--text-muted)';
+		mobileIntro.style.marginBottom = '16px';
+		mobileIntro.style.padding = '12px';
+		mobileIntro.style.backgroundColor = 'var(--background-secondary)';
+		mobileIntro.style.borderRadius = '6px';
+		mobileIntro.style.fontSize = '0.9em';
+		mobileIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+		mobileIntro.innerHTML = `
+			<p style="margin: 0 0 8px 0; font-weight: 600;">📱 移动端适配说明</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+				<li><strong>响应式布局</strong>：根据屏幕尺寸自动调整每行显示的图片数量</li>
+				<li><strong>分设备优化</strong>：为平板、手机横屏、手机竖屏分别设置显示参数</li>
+				<li><strong>界面优化</strong>：支持紧凑工具栏、隐藏非必要信息等移动端专属选项</li>
+			</ul>
+		`;
+
+		new Setting(mobileSection.contentEl)
+			.setName('移动端每行图片数量')
+			.setDesc('自定义移动端显示的图片列数（1-5），留空则根据屏幕宽度自动调整')
+			.addSlider(slider => slider
+				.setLimits(1, 5, 1)
+				.setValue(this.plugin.settings.mobileImagesPerRow || 3)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.mobileImagesPerRow = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(mobileSection.contentEl)
+			.setName('启用紧凑工具栏')
+			.setDesc('在移动端使用更紧凑的工具栏布局，节省空间')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableCompactToolbar || false)
+				.onChange(async (value) => {
+					this.plugin.settings.enableCompactToolbar = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(mobileSection.contentEl)
+			.setName('隐藏非必要信息')
+			.setDesc('在移动端隐藏图片尺寸、锁定图标等次要信息，保持界面简洁')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.hideNonEssentialInfo !== false)
+				.onChange(async (value) => {
+					this.plugin.settings.hideNonEssentialInfo = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(mobileSection.contentEl)
+			.setName('平板端每行图片数量')
+			.setDesc('平板设备（768-1199px）上每行显示的图片数量')
+			.addSlider(slider => slider
+				.setLimits(1, 5, 1)
+				.setValue(this.plugin.settings.tabletImagesPerRow || 3)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.tabletImagesPerRow = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(mobileSection.contentEl)
+			.setName('手机横屏每行图片数量')
+			.setDesc('手机横屏（480-767px）时每行显示的图片数量')
+			.addSlider(slider => slider
+				.setLimits(1, 5, 1)
+				.setValue(this.plugin.settings.phoneLandscapeImagesPerRow || 2)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.phoneLandscapeImagesPerRow = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(mobileSection.contentEl)
+			.setName('手机竖屏每行图片数量')
+			.setDesc('手机竖屏（< 480px）时每行显示的图片数量')
+			.addSlider(slider => slider
+				.setLimits(1, 2, 1)
+				.setValue(this.plugin.settings.phonePortraitImagesPerRow || 1)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.phonePortraitImagesPerRow = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// 12. 扩展功能
+		const extensionSection = this.createCollapsibleSection(containerEl, '🧩 扩展功能', 'extension', false);
+
+		// 12.1 在Android相册中隐藏Obsidian图片
+		new Setting(extensionSection.contentEl)
+			.setName('🛡️ 在 Android 相册中隐藏图片')
+			.setDesc('开启后在笔记库根目录创建 .nomedia 文件，Android 相册将不再扫描此目录（仅对 Android 有效）')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.createNomediaFile || false)
+				.onChange(async (value) => {
+					this.plugin.settings.createNomediaFile = value;
+					await this.plugin.saveSettings();
+					
+					if (value) {
+						// 创建 .nomedia 文件
+						const result = await this.plugin.createNomediaFile();
+						new Notice(result.message);
+					} else {
+						// 删除 .nomedia 文件
+						const result = await this.plugin.deleteNomediaFile();
+						new Notice(result.message);
+					}
+				}));
+
 		// 10. 锁定文件
 		const ignoredFilesSection = this.createCollapsibleSection(containerEl, '🔒 锁定文件', 'ignored-files', false);
 
