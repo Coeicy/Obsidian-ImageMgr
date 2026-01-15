@@ -43,10 +43,23 @@ ImageMgr 是一个功能丰富的 Obsidian 图片管理插件，帮助您轻松�
 
 ## 📦 安装
 
-1. 下载 `main.js`、`manifest.json`、`styles.css` 三个文件
-2. 在 Obsidian 仓库中创建 `.obsidian/plugins/imagemgr/` 目录
-3. 将下载的文件复制到该目录
-4. 重启 Obsidian，在 **设置 → 社区插件** 中启用 ImageMgr
+### 方式一：BRAT 安装（推荐）
+
+1. 安装 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 插件
+2. 打开 BRAT 设置，点击 **Add Beta plugin**
+3. 输入仓库地址：`Coeicy/Obsidian-ImageMgr`
+4. 点击 **Add Plugin**，等待安装完成
+5. 在 **设置 → 社区插件** 中启用 ImageMgr
+
+> BRAT 支持自动更新，无需手动下载文件
+
+### 方式二：手动安装
+
+1. 前往 [Releases](https://github.com/Coeicy/Obsidian-ImageMgr/releases) 下载最新版本
+2. 下载 `main.js`、`manifest.json`、`styles.css` 三个文件
+3. 在 Obsidian 仓库中创建 `.obsidian/plugins/imagemgr/` 目录
+4. 将下载的文件复制到该目录
+5. 重启 Obsidian，在 **设置 → 社区插件** 中启用 ImageMgr
 
 ## 🚀 快速开始
 
