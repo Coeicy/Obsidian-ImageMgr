@@ -20,6 +20,7 @@ import { isFileIgnored } from '../utils/file-filter';
 import { PathValidator } from '../utils/path-validator';
 import { matchesShortcut, isInputElement, SHORTCUT_DEFINITIONS } from '../utils/keyboard-shortcut-manager';
 import { DragSelectManager } from '../utils/drag-select-manager';
+import { LinkFormatModal } from './link-format-modal';
 
 /** 图片管理视图的类型标识符 */
 export const IMAGE_MANAGER_VIEW_TYPE = 'image-manager-view';
@@ -154,6 +155,12 @@ export class ImageManagerView extends ItemView {
 		brokenLinksBtn.setAttribute('id', 'broken-links-btn');
 		this.updateButtonIndicator(brokenLinksBtn, 'broken-links');
 		brokenLinksBtn.addEventListener('click', () => this.showBrokenLinks());
+
+		// 链接转换按钮
+		const linkFormatBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
+		linkFormatBtn.setAttribute('id', 'link-format-btn');
+		this.updateButtonIndicator(linkFormatBtn, 'link-format');
+		linkFormatBtn.addEventListener('click', () => this.showLinkFormatModal());
 
 		// 库统计按钮
 		const statsBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
@@ -295,7 +302,7 @@ export class ImageManagerView extends ItemView {
 	}
 
 	// 更新按钮提示
-	updateButtonIndicator(btn: HTMLElement, type: 'search' | 'sort' | 'filter' | 'rename' | 'group' | 'path-rename' | 'duplicate' | 'broken-links' | 'stats' | 'settings' | 'clear-selection' | 'clear-search') {
+	updateButtonIndicator(btn: HTMLElement, type: 'search' | 'sort' | 'filter' | 'rename' | 'group' | 'path-rename' | 'duplicate' | 'broken-links' | 'link-format' | 'stats' | 'settings' | 'clear-selection' | 'clear-search') {
 		let hasActiveFilter = false;
 		
         if (type === 'search') {
@@ -347,6 +354,7 @@ export class ImageManagerView extends ItemView {
 			'path-rename': { icon: '🔠', text: '智能重命名' },
 			'duplicate': { icon: '🔍', text: '重复检测' },
 			'broken-links': { icon: '🈳', text: '空链接' },
+			'link-format': { icon: '🔗', text: '链接转换' },
 			'stats': { icon: '📊', text: '库统计' },
 			'settings': { icon: '⚙️', text: '设置' },
 			'clear-selection': { icon: '🧹', text: '清除选择' },
@@ -4001,5 +4009,13 @@ export class ImageManagerView extends ItemView {
 		this.updateClearButtonState();
 		
 		new Notice('已清除所有分组');
+	}
+
+	/**
+	 * 显示链接格式转换模态框
+	 */
+	showLinkFormatModal() {
+		const modal = new LinkFormatModal(this.app, this.plugin);
+		modal.open();
 	}
 }
