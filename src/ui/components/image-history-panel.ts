@@ -167,7 +167,7 @@ export class ImageHistoryPanel {
 		// 构建文本内容（按三行格式）
 		const lines: string[] = [];
 		const timeStr = new Date(log.timestamp).toLocaleString('zh-CN');
-		const operationTypeStr = OperationTypeLabels[log.operation] || log.operation;
+		const operationTypeStr = OperationTypeLabels[log.operation as OperationType] || log.operation;
 			
 			// 行1：时间
 			lines.push(`${timeStr}`);

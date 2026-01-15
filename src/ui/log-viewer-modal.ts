@@ -250,7 +250,9 @@ export class LogViewerModal extends Modal {
 		}
 
 		this.currentFilter = filter;
-		this.refreshLogs(this.logContainerRef);
+		if (this.logContainerRef) {
+			this.refreshLogs(this.logContainerRef);
+		}
 	}
 
 	/**

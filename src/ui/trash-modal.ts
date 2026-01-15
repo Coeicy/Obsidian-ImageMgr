@@ -158,6 +158,12 @@ export class TrashModal extends Modal {
 	onClose() {
 		// 移除键盘事件监听器
 		this.modalEl.removeEventListener('keydown', this.handleKeyPress);
+		
+		// 清理拖拽框选管理器
+		if (this.dragSelectManager) {
+			this.dragSelectManager.cleanup();
+			this.dragSelectManager = null;
+		}
 	}
 	
 	/**
@@ -1169,14 +1175,4 @@ export class TrashModal extends Modal {
 		);
 	}
 
-	/**
-	 * 清理资源
-	 */
-	onClose() {
-		// 清理拖拽框选管理器
-		if (this.dragSelectManager) {
-			this.dragSelectManager.cleanup();
-			this.dragSelectManager = null;
-		}
-	}
 }

@@ -136,14 +136,14 @@ export const SHORTCUT_DEFINITIONS: Record<string, ShortcutDefinition> = {
 		id: 'manager-filter',
 		name: '打开筛选',
 		description: '打开筛选对话框',
-		defaultKey: 'Ctrl+Shift+F',
+		defaultKey: 'Ctrl+Shift+E',
 		category: 'view'
 	},
 	'manager-group': {
 		id: 'manager-group',
 		name: '打开分组',
 		description: '打开分组对话框',
-		defaultKey: 'Ctrl+G',
+		defaultKey: 'Ctrl+Shift+G',
 		category: 'view'
 	},
 	'manager-open-detail': {
@@ -187,7 +187,7 @@ export const SHORTCUT_DEFINITIONS: Record<string, ShortcutDefinition> = {
 		id: 'manager-batch-copy',
 		name: '批量复制',
 		description: '批量复制选中的图片',
-		defaultKey: 'Ctrl+D',
+		defaultKey: 'Ctrl+Shift+C',
 		category: 'batch'
 	},
 	'manager-smart-rename': {
@@ -201,7 +201,7 @@ export const SHORTCUT_DEFINITIONS: Record<string, ShortcutDefinition> = {
 		id: 'manager-toggle-lock',
 		name: '切换锁定',
 		description: '锁定或解锁选中的图片',
-		defaultKey: 'Ctrl+L',
+		defaultKey: 'Ctrl+Shift+L',
 		category: 'batch'
 	}
 };
