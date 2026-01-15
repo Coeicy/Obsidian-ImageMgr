@@ -9,6 +9,11 @@
  * - 更新笔记中的图片引用（重命名后自动更新）
  * - 监听文件重命名事件
  * 
+ * 智能识别特性：
+ * - 自动排除代码块（```）和行内代码（`）中的链接
+ * - 只识别图片链接，排除笔记链接（检查图片扩展名）
+ * - 实时更新：直接读取文件内容，确保识别最新添加的链接
+ * 
  * 支持的链接格式：
  * - Wiki 链接：`![[image.png]]`、`![[image.png|显示文本]]`、`![[image.png|100x200]]`
  * - Markdown 链接：`![alt](image.png)`
@@ -736,9 +741,8 @@ export class ReferenceManager {
 		// 使用官方 API 获取所有包含此图片引用的文件
 		const allFiles = this.app.vault.getMarkdownFiles();
 
-		// 优化：只等待必要的缓存刷新时间，而不是固定延迟
-		// 实际上，metadataCache 应该是实时更新的，所以可以减少延迟
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		// 不使用延迟，直接读取文件内容以确保实时性
+		// metadataCache 可能有缓存延迟，直接读取文件更可靠
 
 		// 首先收集所有需要读取的文件（基于 metadataCache）
 		const filesToRead = new Set<string>();
@@ -1161,19 +1165,44 @@ export class ReferenceManager {
 					// 首先收集所有图片引用的位置，按行号排序
 					const allImageRefs: Array<{line: number, path: string, type: string}> = [];
 					
-					// Wiki 格式: ![[path]] 或 [[path]]
-					const wikiPattern = /!?\[\[([^\]]+)\]\]/g;
+					// 图片扩展名列表
+					const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'];
+					
+					// Wiki 格式: ![[path]] - 只匹配带!的图片嵌入
+					const wikiPattern = /!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
 					let match;
 					const lines = content.split('\n');
 					
+					// 跟踪代码块状态
+					let inCodeBlock = false;
+					
 					for (let i = 0; i < lines.length; i++) {
 						const line = lines[i];
+						
+						// 检测代码块边界
+						if (line.trim().startsWith('```')) {
+							inCodeBlock = !inCodeBlock;
+							continue;
+						}
+						
+						// 跳过代码块内容
+						if (inCodeBlock) continue;
+						
 						wikiPattern.lastIndex = 0;
 						
 						while ((match = wikiPattern.exec(line)) !== null) {
+							// 检查是否在行内代码中
+							const beforeMatch = line.substring(0, match.index);
+							const backtickCount = (beforeMatch.match(/`/g) || []).length;
+							if (backtickCount % 2 === 1) continue; // 在行内代码中
+							
 							const refPath = match[1].split('|')[0]; // 移除显示文本
 							if (refPath) {
-								allImageRefs.push({ line: i, path: refPath, type: 'wiki' });
+								// 检查是否是图片文件
+								const ext = refPath.split('.').pop()?.toLowerCase() || '';
+								if (imageExtensions.includes(ext)) {
+									allImageRefs.push({ line: i, path: refPath, type: 'wiki' });
+								}
 							}
 						}
 						
@@ -1181,9 +1210,17 @@ export class ReferenceManager {
 						const markdownPattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
 						markdownPattern.lastIndex = 0;
 						while ((match = markdownPattern.exec(line)) !== null) {
+							// 检查是否在行内代码中
+							const beforeMatch = line.substring(0, match.index);
+							const backtickCount = (beforeMatch.match(/`/g) || []).length;
+							if (backtickCount % 2 === 1) continue;
+							
 							const refPath = match[2].split('?')[0]; // 移除查询参数
 							if (refPath) {
-								allImageRefs.push({ line: i, path: refPath, type: 'markdown' });
+								const ext = refPath.split('.').pop()?.toLowerCase() || '';
+								if (imageExtensions.includes(ext)) {
+									allImageRefs.push({ line: i, path: refPath, type: 'markdown' });
+								}
 							}
 						}
 						
@@ -1191,9 +1228,17 @@ export class ReferenceManager {
 						const htmlPattern = /<img[^>]+src\s*=\s*["']([^"']+)["'][^>]*>/gi;
 						htmlPattern.lastIndex = 0;
 						while ((match = htmlPattern.exec(line)) !== null) {
+							// 检查是否在行内代码中
+							const beforeMatch = line.substring(0, match.index);
+							const backtickCount = (beforeMatch.match(/`/g) || []).length;
+							if (backtickCount % 2 === 1) continue;
+							
 							const refPath = match[1].split('?')[0]; // 移除查询参数
 							if (refPath) {
-								allImageRefs.push({ line: i, path: refPath, type: 'html' });
+								const ext = refPath.split('.').pop()?.toLowerCase() || '';
+								if (imageExtensions.includes(ext)) {
+									allImageRefs.push({ line: i, path: refPath, type: 'html' });
+								}
 							}
 						}
 					}
