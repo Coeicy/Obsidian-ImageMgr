@@ -3,8 +3,8 @@
 	"name": "ImageMgr",
 	"version": "0.2.0",
 	"minAppVersion": "0.15.0",
-	"description": "强大的 Obsidian 图片管理插件。支持智能扫描、批量重命名、MD5 去重、引用追踪、链接格式转换、空链接检测、回收站等功能。",
-	"author": "Coeicy",
+	"description": "强大的 Obsidian 图片管理插件。支持智能扫描、批量重命名、MD5 去重、引用追踪、云端图片管理、链接格式转换、空链接检测、回收站、操作日志、移动端适配等功能。",
+	"author": "Coeris",
 	"authorUrl": "https://github.com/Coeicy",
 	"fundingUrl": "https://github.com/Coeicy/Obsidian-ImageMgr",
 	"isDesktopOnly": false

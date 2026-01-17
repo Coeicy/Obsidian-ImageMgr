@@ -12,7 +12,7 @@
  * - 拖拽框选
  */
 
-import { ItemView, Notice, TFile, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Notice, TFile, WorkspaceLeaf, requestUrl, arrayBufferToBase64 } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { ImageInfo } from '../types';
 import { ImageProcessor } from '../utils/image-processor';
@@ -23,13 +23,12 @@ import { SearchModal } from './search-modal';
 import { StatsModal } from './stats-modal';
 import { ImageDetailModal } from './image-detail-modal';
 import { BrokenLinksModal } from './broken-links-modal';
-// import { calculateFileHash } from '../utils/image-hash'; // 已迁移到 ImageScanner
 import { ConfirmModal } from './confirm-modal';
 import { GroupModal } from './group-modal';
 import { DuplicateDetectionModal } from './duplicate-detection-modal';
 import { ReferenceManager } from '../utils/reference-manager';
 import { OperationType } from '../utils/logger';
-import { UI_SIZE, TIMING, LIMITS, STYLES, calculateItemWidth, shouldLoadMore } from '../constants';
+import { UI_SIZE, TIMING, LIMITS, STYLES, calculateItemWidth } from '../constants';
 import { isFileIgnored } from '../utils/file-filter';
 import { PathValidator } from '../utils/path-validator';
 import { matchesShortcut, isInputElement, SHORTCUT_DEFINITIONS } from '../utils/keyboard-shortcut-manager';
@@ -88,6 +87,8 @@ export class ImageManagerView extends ItemView {
 	private operationHistory: Array<'search' | 'sort' | 'filter' | 'group'> = [];
 	/** 清除按钮元素引用 */
 	private clearBtnElement: HTMLElement | null = null;
+	/** 图片懒加载观察器 */
+	private imageObserver: IntersectionObserver | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: ImageManagementPlugin) {
 		super(leaf);
@@ -114,16 +115,187 @@ export class ImageManagerView extends ItemView {
 		return 'image';
 	}
 
+	private initImageObserver() {
+		if (this.imageObserver) return;
+
+		// 使用列表容器作为滚动根元素
+		// 注意：在 renderImageList 中，滚动容器被认为是 this.contentEl.parentElement
+		// 但 this.contentEl 是 listContainer ('image-manager-list')
+		// 实际上滚动条通常在 listContainer 上，或者它的父级
+		// 我们这里使用 this.contentEl.parentElement 作为 root，或者 null (视口)
+		// 为了更精确的控制，我们尝试使用 contentEl 本身如果它是滚动容器，或者是 parent
+		// 在 Obsidian 中，通常 View 的 containerEl 或者 contentEl 是滚动的
+		
+		const options = {
+			root: this.contentEl.parentElement || this.contentEl, 
+			rootMargin: '800px 0px', // 预加载上下 800px
+			threshold: 0
+		};
+
+		this.imageObserver = new IntersectionObserver((entries) => {
+			entries.forEach(entry => {
+				const target = entry.target as HTMLElement;
+				if (entry.isIntersecting) {
+					this.loadImage(target);
+				} else {
+					this.unloadImage(target);
+				}
+			});
+		}, options);
+	}
+
+	private loadImage(previewEl: HTMLElement) {
+		const src = previewEl.dataset.src;
+		if (!src || previewEl.classList.contains('loaded')) return;
+
+		const img = new Image();
+		img.referrerPolicy = 'no-referrer'; // 添加防盗链策略
+
+		img.onload = () => {
+			if (this.plugin.settings.adaptiveImageSize) {
+				previewEl.style.backgroundImage = `url('${img.src}')`; // 使用加载成功的 src
+				previewEl.style.backgroundSize = 'contain';
+				previewEl.style.backgroundPosition = 'center';
+				previewEl.style.backgroundRepeat = 'no-repeat';
+				// 根据图片实际比例设置高度，防止塌陷
+				if (img.naturalWidth && img.naturalHeight) {
+					const aspectRatio = img.naturalWidth / img.naturalHeight;
+					previewEl.style.setProperty('aspect-ratio', `${aspectRatio}`);
+					// 更新界面上的尺寸显示
+					const itemEl = previewEl.closest('.image-gallery-item');
+					if (itemEl) {
+						const dimEl = itemEl.querySelector('.image-dimensions');
+						if (dimEl) {
+							dimEl.textContent = `${img.naturalWidth}x${img.naturalHeight}`;
+						}
+					}
+				}
+			} else {
+				previewEl.style.backgroundImage = `url('${img.src}')`; // 使用加载成功的 src
+				previewEl.style.backgroundSize = 'cover';
+				previewEl.style.backgroundPosition = 'center';
+			}
+			previewEl.classList.add('loaded');
+			// 清除错误提示（如果有）
+			if (previewEl.textContent === '图片加载失败') {
+				previewEl.textContent = '';
+			}
+		};
+		
+		img.onerror = async () => {
+			// 检查是否是网络图片且尚未完成所有重试
+			if (src.startsWith('http')) {
+				const retryCount = parseInt(previewEl.dataset.retryCount || '0');
+				const isRetried = previewEl.dataset.retried === 'true';
+				
+				// Level 1: Obsidian Proxy
+				if (retryCount === 0 && !isRetried) {
+					previewEl.dataset.retryCount = '1';
+					if (this.plugin?.logger) {
+						await this.plugin.logger.debug(OperationType.VIEW, `Level 1 - 代理加载: ${src}`, {
+							imagePath: src
+						});
+					}
+					try {
+						const response = await requestUrl({ 
+							url: src,
+							headers: {
+								'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+								'Referer': ''
+							}
+						});
+						
+						if (response.status < 400) {
+							const base64 = arrayBufferToBase64(response.arrayBuffer);
+							const contentType = response.headers['content-type'] || 'image/jpeg';
+							img.src = `data:${contentType};base64,${base64}`;
+							return;
+						}
+					} catch (e: any) {
+						const errorMsg = e?.message || String(e);
+						const isDnsError = errorMsg.includes('ERR_NAME_NOT_RESOLVED') || 
+						                   errorMsg.includes('ENOTFOUND') ||
+						                   errorMsg.includes('getaddrinfo');
+						
+						if (this.plugin?.logger) {
+							await this.plugin.logger.warn(OperationType.VIEW, `Level 1 代理失败: ${errorMsg}`, {
+								imagePath: src,
+								error: e,
+								details: { isDnsError }
+							});
+							
+							if (isDnsError) {
+								await this.plugin.logger.warn(OperationType.VIEW, `DNS 解析失败，域名可能无法访问: ${src}`, {
+									imagePath: src
+								});
+							}
+						}
+						
+						// 直接进入 Level 2，不触发 onerror
+						previewEl.dataset.retryCount = '2';
+						previewEl.dataset.retried = 'true';
+						if (this.plugin?.logger) {
+							await this.plugin.logger.debug(OperationType.VIEW, `Level 2 - 公共代理加载: ${src}`, {
+								imagePath: src
+							});
+						}
+						const cleanUrl = src.replace(/^https?:\/\//, '');
+						// 移除 default=error 参数，避免产生错误 URL
+						img.src = `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}`;
+						return;
+					}
+				}
+				
+				// Level 2: Weserv Proxy (仅在 Level 1 失败且尚未尝试 Level 2 时)
+				if (retryCount === 1 && !isRetried) {
+					previewEl.dataset.retryCount = '2';
+					previewEl.dataset.retried = 'true'; // 标记已完成所有重试
+					if (this.plugin?.logger) {
+						await this.plugin.logger.debug(OperationType.VIEW, `Level 2 - 公共代理加载: ${src}`, {
+							imagePath: src
+						});
+					}
+					const cleanUrl = src.replace(/^https?:\/\//, '');
+					// 移除 default=error 参数，避免产生错误 URL
+					img.src = `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}`;
+					return;
+				}
+			}
+
+			// 所有重试都失败，显示错误提示
+			if (this.plugin?.logger) {
+				await this.plugin.logger.warn(OperationType.VIEW, `图片加载最终失败: ${src}`, {
+					imagePath: src
+				});
+			}
+			previewEl.style.backgroundImage = 'none';
+			previewEl.style.display = 'flex';
+			previewEl.style.alignItems = 'center';
+			previewEl.style.justifyContent = 'center';
+			previewEl.style.color = 'var(--text-muted)';
+			previewEl.style.fontSize = '0.9em';
+			previewEl.textContent = '图片加载失败';
+			previewEl.dataset.retried = 'true'; // 确保标记为已重试，避免无限循环
+		};
+		
+		img.src = src;
+	}
+
+	private unloadImage(previewEl: HTMLElement) {
+		// 释放资源，防止内存占用过多
+		// 只有当图片已加载时才释放
+		if (previewEl.classList.contains('loaded')) {
+			previewEl.style.backgroundImage = '';
+			previewEl.classList.remove('loaded');
+		}
+	}
+
 	async onOpen() {
 		const { containerEl } = this;
 		containerEl.empty();
 		
 		// 重置临时显示数量（恢复为设置中的默认值）
 		this.tempImagesPerRow = null;
-
-		// 创建标题栏
-		const headerEl = containerEl.createDiv('image-manager-header');
-		headerEl.createEl('h2', { text: '图片管理' });
 
 		// 创建工具栏
 		const toolbarEl = containerEl.createDiv('image-manager-toolbar');
@@ -203,7 +375,7 @@ export class ImageManagerView extends ItemView {
 		refreshBtn.title = '刷新显示（智能检测变化，只刷新有变化的内容）';
 		const view = this;
 		refreshBtn.addEventListener('click', async () => {
-			await view.smartRefresh();
+			await view.smartRefresh(true);
 		});
 
 		// 合并的清除按钮（初始隐藏）
@@ -219,6 +391,9 @@ export class ImageManagerView extends ItemView {
 
 		// 初始化时扫描图片
 		await this.scanImages();
+		
+		// 注册拖拽上传事件
+		this.setupDragDropUpload(containerEl);
 		
 		// 注册文件变化监听器，自动刷新
 		this.setupFileWatcher();
@@ -245,6 +420,144 @@ export class ImageManagerView extends ItemView {
 		
 		// 更新清除按钮状态（检查是否有分组、筛选、排序等）
 		this.updateClearButtonState();
+
+		// 初始化图片懒加载观察器
+		this.initImageObserver();
+	}
+
+	/**
+	 * 设置拖拽上传功能
+	 * 允许用户直接将图片文件拖入插件视图进行上传
+	 */
+	setupDragDropUpload(containerEl: HTMLElement) {
+		// 创建拖拽覆盖层
+		const overlay = containerEl.createDiv('drag-upload-overlay');
+		overlay.style.cssText = `
+			position: absolute;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background-color: rgba(var(--interactive-accent-rgb), 0.2);
+			border: 4px dashed var(--interactive-accent);
+			z-index: 1000;
+			display: none;
+			justify-content: center;
+			align-items: center;
+			pointer-events: none;
+		`;
+		
+		const message = overlay.createDiv('drag-upload-message');
+		message.style.cssText = `
+			font-size: 24px;
+			font-weight: bold;
+			color: var(--text-normal);
+			background-color: var(--background-primary);
+			padding: 20px 40px;
+			border-radius: 8px;
+			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+		`;
+		message.setText('释放以上传图片');
+
+		// 监听拖拽事件
+		containerEl.addEventListener('dragenter', (e) => {
+			if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+				e.preventDefault();
+				overlay.style.display = 'flex';
+			}
+		});
+
+		containerEl.addEventListener('dragover', (e) => {
+			if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+				e.preventDefault();
+			}
+		});
+
+		containerEl.addEventListener('dragleave', (e) => {
+			if (e.target === overlay) {
+				e.preventDefault();
+				overlay.style.display = 'none';
+			}
+		});
+
+		containerEl.addEventListener('drop', async (e) => {
+			if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+				e.preventDefault();
+				overlay.style.display = 'none';
+				
+				const files = Array.from(e.dataTransfer.files);
+				const imageFiles = files.filter(file => {
+					const ext = file.name.split('.').pop()?.toLowerCase();
+					return ext && ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext);
+				});
+
+				if (imageFiles.length > 0) {
+					await this.handleImageUpload(imageFiles);
+				} else {
+					new Notice('未检测到有效的图片文件');
+				}
+			}
+		});
+	}
+
+	/**
+	 * 处理图片上传
+	 */
+	async handleImageUpload(files: File[]) {
+		const uploadFolder = this.plugin.settings.defaultImageFolder || '';
+		
+		// 确保目标文件夹存在
+		if (uploadFolder && !(await this.app.vault.adapter.exists(uploadFolder))) {
+			try {
+				await this.app.vault.createFolder(uploadFolder);
+			} catch (error) {
+				new Notice(`无法创建文件夹: ${uploadFolder}`);
+				return;
+			}
+		}
+
+		let successCount = 0;
+		let failCount = 0;
+
+		for (const file of files) {
+			try {
+				const buffer = await file.arrayBuffer();
+				const fileName = file.name;
+				const targetPath = uploadFolder ? `${uploadFolder}/${fileName}` : fileName;
+
+				// 检查文件是否存在，如果存在则自动重命名
+				let finalPath = targetPath;
+				let counter = 1;
+				while (await this.app.vault.adapter.exists(finalPath)) {
+					const nameParts = fileName.split('.');
+					const ext = nameParts.pop();
+					const name = nameParts.join('.');
+					finalPath = uploadFolder ? `${uploadFolder}/${name} (${counter}).${ext}` : `${name} (${counter}).${ext}`;
+					counter++;
+				}
+
+				await this.app.vault.createBinary(finalPath, buffer);
+				successCount++;
+			} catch (error) {
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.CREATE, `上传失败: ${file.name}`, {
+						imageName: file.name,
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
+				failCount++;
+			}
+		}
+
+		if (successCount > 0) {
+			new Notice(`成功上传 ${successCount} 张图片`);
+			// 刷新图片列表
+			await this.scanImages();
+		}
+		
+		if (failCount > 0) {
+			new Notice(`${failCount} 张图片上传失败`);
+		}
 	}
 	
 	// 设置文件监听器
@@ -317,6 +630,7 @@ export class ImageManagerView extends ItemView {
 			hasActiveFilter = this.filterOptions.filterType !== defaultFilterType ||
 							  this.filterOptions.lockFilter !== undefined ||
 							  this.filterOptions.referenceFilter !== undefined ||
+							  this.filterOptions.locationFilter !== undefined ||
 							  hasSizeFilter ||
 							  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
 							  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
@@ -371,7 +685,7 @@ export class ImageManagerView extends ItemView {
 		}, delay);
 	}
 
-	async scanImages() {
+	async scanImages(force: boolean = false) {
 		// 如果正在扫描，直接返回
 		if (this.isScanning) {
 			return;
@@ -456,7 +770,8 @@ export class ImageManagerView extends ItemView {
 			// 执行扫描
 			const result = await scanner.scanImages(
 				updateProgress,
-				this.plugin.settings.enableDeduplication
+				this.plugin.settings.enableDeduplication,
+				force
 			);
 
 			this.images = result.images;
@@ -538,10 +853,17 @@ export class ImageManagerView extends ItemView {
 	 * - 减少 UI 重绘开销
 	 * - 提供更精确的用户反馈
 	 */
-	async smartRefresh() {
+	async smartRefresh(force: boolean = false) {
 		// 如果正在扫描，直接返回
 		if (this.isScanning) {
 			new Notice('正在扫描中，请稍候...');
+			return;
+		}
+
+		// 如果强制刷新，跳过检测直接扫描
+		if (force) {
+			await this.scanImages(true);
+			new Notice('已刷新图片列表和引用信息');
 			return;
 		}
 		
@@ -736,6 +1058,17 @@ export class ImageManagerView extends ItemView {
 					return false;
 				}
 				if (this.filterOptions.referenceFilter === 'unreferenced' && isReferenced) {
+					return false;
+				}
+			}
+			
+			// 按位置类型筛选（云端/本地）
+			if (this.filterOptions.locationFilter && this.filterOptions.locationFilter !== 'all') {
+				const isRemote = image.isRemote === true;
+				if (this.filterOptions.locationFilter === 'remote' && !isRemote) {
+					return false;
+				}
+				if (this.filterOptions.locationFilter === 'local' && isRemote) {
 					return false;
 				}
 			}
@@ -1281,15 +1614,17 @@ export class ImageManagerView extends ItemView {
 			previewEl.style.transition = 'transform 0.2s ease, box-shadow 0.2s ease';
 			previewEl.style.marginBottom = '0';
 			
-			// 添加悬停效果（Notion 风格）
-			itemEl.addEventListener('mouseenter', () => {
-				previewEl.style.transform = 'translateY(-2px)';
-				previewEl.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-			});
-			itemEl.addEventListener('mouseleave', () => {
-				previewEl.style.transform = 'translateY(0)';
-				previewEl.style.boxShadow = 'none';
-			});
+			// 添加悬停效果（Notion 风格）- 根据设置决定是否启用
+			if (this.plugin.settings.enableHoverEffect) {
+				itemEl.addEventListener('mouseenter', () => {
+					previewEl.style.transform = 'translateY(-2px)';
+					previewEl.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+				});
+				itemEl.addEventListener('mouseleave', () => {
+					previewEl.style.transform = 'translateY(0)';
+					previewEl.style.boxShadow = 'none';
+				});
+			}
 
 			// 选择复选框（右上角）
 			const selectCheckbox = previewEl.createEl('input');
@@ -1352,49 +1687,36 @@ export class ImageManagerView extends ItemView {
 				previewEl.style.height = UI_SIZE.IMAGE_PREVIEW.FIXED_HEIGHT;
 			}
 			
-			// 延迟加载图片
-			const abstractFile = this.app.vault.getAbstractFileByPath(image.path);
-			const imgFile = abstractFile instanceof TFile ? abstractFile : null;
-			if (imgFile) {
-				const imageUrl = this.app.vault.getResourcePath(imgFile);
-				if (imageUrl) {
-					const img = new Image();
-					img.onload = () => {
-						if (this.plugin.settings.adaptiveImageSize) {
-							// 自适应模式：使用 contain 保持完整图片
-							previewEl.style.backgroundImage = `url(${imageUrl})`;
-							previewEl.style.backgroundSize = 'contain';
-							previewEl.style.backgroundPosition = 'center';
-							previewEl.style.backgroundRepeat = 'no-repeat';
-							
-							// 根据实际图片尺寸计算合适的宽高比
-							if (image.width && image.height) {
-								const aspectRatio = image.width / image.height;
-								previewEl.style.setProperty('aspect-ratio', `${aspectRatio}`);
-								previewEl.style.minHeight = '0'; // 移除最小高度限制，完全根据宽高比自适应
-							} else {
-								// 如果没有尺寸信息，使用默认宽高比，但保持 minHeight 为 0
-								previewEl.style.minHeight = '0';
-							}
-						} else {
-							// 固定高度模式：使用 cover 填充
-							previewEl.style.backgroundImage = `url(${imageUrl})`;
-							previewEl.style.backgroundSize = 'cover';
-							previewEl.style.backgroundPosition = 'center';
-						}
-					};
-					img.onerror = () => {
-						// 图片加载失败时显示错误提示
-						previewEl.style.backgroundImage = 'none';
-						previewEl.style.display = 'flex';
-						previewEl.style.alignItems = 'center';
-						previewEl.style.justifyContent = 'center';
-						previewEl.style.color = 'var(--text-muted)';
-						previewEl.style.fontSize = '0.9em';
-						previewEl.textContent = '图片加载失败';
-						previewEl.title = `无法加载图片: ${image.name}`;
-					};
-					img.src = imageUrl;
+			// 延迟加载图片 - 使用 IntersectionObserver 懒加载 + 预加载
+			let imageUrl: string | null = null;
+			
+			if (image.isRemote) {
+				imageUrl = image.path;
+			} else {
+				const abstractFile = this.app.vault.getAbstractFileByPath(image.path);
+				const imgFile = abstractFile instanceof TFile ? abstractFile : null;
+				if (imgFile) {
+					imageUrl = this.app.vault.getResourcePath(imgFile);
+				}
+			}
+
+			if (imageUrl) {
+				// 将 URL 存储在 data-src 中
+				previewEl.dataset.src = imageUrl;
+				
+				// 如果有尺寸信息，预先设置宽高比，防止布局抖动
+				if (this.plugin.settings.adaptiveImageSize && image.width && image.height) {
+					const aspectRatio = image.width / image.height;
+					previewEl.style.setProperty('aspect-ratio', `${aspectRatio}`);
+					previewEl.style.minHeight = '0';
+				}
+				
+				// 加入观察列表
+				if (this.imageObserver) {
+					this.imageObserver.observe(previewEl);
+				} else {
+					// 如果 Observer 未初始化（异常情况），回退到直接加载
+					this.loadImage(previewEl);
 				}
 			}
 
@@ -1495,29 +1817,36 @@ export class ImageManagerView extends ItemView {
 					});
 				}
 				
+				// 网络图片标识 (放在锁图标后面)
+				if (image.isRemote) {
+					const remoteIcon = metaRow.createSpan('remote-icon');
+					remoteIcon.textContent = '🌩️';
+					remoteIcon.style.fontSize = '12px';
+					remoteIcon.title = '网络图片';
+					remoteIcon.style.cursor = 'help';
+				}
+				
 				// 分组标签不再显示（分组标题已经显示了分组名称）
 
-				// 文件大小
-				if (this.plugin.settings.showImageSize) {
+				// 文件大小 (网络图片不显示大小)
+				if (this.plugin.settings.showImageSize && !image.isRemote) {
 					const sizeEl = metaRow.createSpan('image-size');
 					sizeEl.textContent = ImageProcessor.formatFileSize(image.size);
 				}
 				
 				// 图片尺寸（完善显示）
 				if (this.plugin.settings.showImageDimensions) {
+					// 即使尺寸未知也创建一个元素，以便加载完成后更新
+					const dimEl = metaRow.createSpan('image-dimensions');
 					if (image.width && image.height) {
-						const dimEl = metaRow.createSpan('image-dimensions');
-						// 显示格式：宽度×高度（像素）
-						dimEl.textContent = `${image.width}×${image.height}`;
-						dimEl.title = `图片尺寸: ${image.width} × ${image.height} 像素`;
+						dimEl.textContent = `${image.width}x${image.height}`;
+						dimEl.title = `图片尺寸: ${image.width} x ${image.height} 像素`;
 					} else {
-						// 尺寸信息缺失时显示提示
-						const dimEl = metaRow.createSpan('image-dimensions');
-						dimEl.textContent = '尺寸未知';
+						// 网络图片初始显示加载中，本地图片显示尺寸未知
+						dimEl.textContent = image.isRemote ? '加载中...' : '尺寸未知';
 						dimEl.style.opacity = '0.6';
-						dimEl.style.fontStyle = 'italic';
-						dimEl.title = '图片尺寸信息不可用';
 					}
+					dimEl.style.fontSize = '0.9em';
 				}
 			}
 			
@@ -1743,19 +2072,22 @@ export class ImageManagerView extends ItemView {
         };
         
         // 获取当前的分组模式
-        let currentGroupMode: 'folder' | 'type' | 'reference' | 'lock' | 'custom' | null = null;
+        let currentGroupMode: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom' | null = null;
         
         // 优先检查是否有其他分组（静态分组）
         if (this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0) {
             // 从第一个分组的元数据获取类型
             const firstGroupName = Object.keys(this.plugin.data.imageGroups)[0];
             const groupType = this.plugin.data.groupMeta?.[firstGroupName]?.type;
-            if (groupType === 'folder' || groupType === 'type' || groupType === 'reference' || groupType === 'custom') {
+            if (groupType === 'folder' || groupType === 'type' || groupType === 'reference' || groupType === 'location' || groupType === 'custom') {
                 currentGroupMode = groupType;
             }
         } else if (this.plugin.data.groupMeta?.['_lock_group']?.type === 'lock') {
             // 只有当没有其他分组时，才检查锁定分组
             currentGroupMode = 'lock';
+        } else if (this.plugin.data.groupMeta?.['_location_group']?.type === 'location') {
+            // 检查位置分组（动态分组）
+            currentGroupMode = 'location';
         }
         
         const modal = new GroupModal(this.app, counts, async (options: any) => {
@@ -1853,6 +2185,14 @@ export class ImageManagerView extends ItemView {
                 if (!this.plugin.data.groupMeta) this.plugin.data.groupMeta = {};
                 this.plugin.data.groupMeta['_lock_group'] = { type: 'lock' };
                 notice = '已启用按锁定状态分组（动态）';
+            } else if (options.mode === 'location') {
+                // 位置分组不保存到 imageGroups，只标记为 'location' 类型
+                // 在渲染时动态从 isRemote 属性获取
+                // 清空 imageGroups，因为位置分组是动态的
+                this.plugin.data.imageGroups = {};
+                if (!this.plugin.data.groupMeta) this.plugin.data.groupMeta = {};
+                this.plugin.data.groupMeta['_location_group'] = { type: 'location' };
+                notice = '已启用按位置类型分组（云端/本地）';
             } else if (options.mode === 'custom') {
                 const name = options.name as string;
                 // 仅添加未分组的图片
@@ -1892,7 +2232,7 @@ export class ImageManagerView extends ItemView {
         // 应用分组到图片（排除回收站中的图片）
         this.images.forEach(img => { img.group = undefined; });
         
-        // 检查是否有其他分组（不包括锁定分组）
+        // 检查是否有其他分组（不包括锁定分组和位置分组）
         const hasOtherGroups = this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0;
         
         // 如果有其他分组，应用它们
@@ -1920,6 +2260,17 @@ export class ImageManagerView extends ItemView {
                     ? this.plugin.lockListManager.isFileLockedByNameOrHash(img.name, img.md5, img.path)
                     : this.isIgnoredFile(img.name, img.md5, img.path);
                 img.group = isLocked ? '已锁定' : '未锁定';
+            });
+        } else if (this.plugin.data.groupMeta?.['_location_group']?.type === 'location') {
+            // 只有当没有其他分组和锁定分组时，才应用位置分组（动态分组）
+            this.images.forEach(img => {
+                // 不对回收站中的图片应用分组
+                if (img.path.startsWith('.trash')) {
+                    return;
+                }
+                
+                // 根据 isRemote 属性分组
+                img.group = img.isRemote === true ? '🌩️ 云端图片' : '💾 本地图片';
             });
         }
     }
@@ -2474,7 +2825,7 @@ export class ImageManagerView extends ItemView {
 
 	showImageInfo() {
 		// 显示整个笔记库的统计信息
-		const modal = new StatsModal(this.app, this.images);
+		const modal = new StatsModal(this.app, this.images, this.plugin.data.linkFormatStats);
 		modal.open();
 	}
 
@@ -3291,6 +3642,12 @@ export class ImageManagerView extends ItemView {
 
 
 	async onClose() {
+		// 清理图片懒加载观察器
+		if (this.imageObserver) {
+			this.imageObserver.disconnect();
+			this.imageObserver = null;
+		}
+
 		// 清理键盘事件监听器
 		if (this.keyboardHandler) {
 			window.removeEventListener('keydown', this.keyboardHandler);
@@ -3997,6 +4354,7 @@ export class ImageManagerView extends ItemView {
 		const hasFilter = this.filterOptions.filterType !== this.plugin.settings.defaultFilterType ||
 						  this.filterOptions.lockFilter !== undefined ||
 						  this.filterOptions.referenceFilter !== undefined ||
+						  this.filterOptions.locationFilter !== undefined ||
 						  (this.filterOptions.sizeFilter && 
 						   (this.filterOptions.sizeFilter.min !== undefined || 
 							this.filterOptions.sizeFilter.max !== undefined)) ||

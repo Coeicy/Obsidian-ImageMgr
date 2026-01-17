@@ -28,19 +28,22 @@ ImageMgr is a feature-rich image management plugin for Obsidian that helps you e
 
 | Feature | Description |
 |---------|-------------|
-| 📸 **Smart Scan** | Auto-scan all images in vault (PNG, JPG, GIF, WEBP, SVG, BMP) |
-| 🔍 **Search & Filter** | Real-time search, multiple sort options, filter by type, reverse-order clear |
-| 📁 **Smart Grouping** | Group by folder, type, reference status, custom group management |
-| 🏷️ **Batch Rename** | Support `{index}`, `{name}` placeholders, smart rename |
-| 🔗 **Reference Tracking** | Auto-find image references in notes (Markdown/Wiki/HTML) |
+| 📸 **Smart Scan** | Auto-scan all images in vault (PNG, JPG, GIF, WEBP, SVG, BMP), supports incremental scan and cache optimization |
+| 🌩️ **Cloud Images** | Scan and manage network image links, supports proxy loading and cloud image badges |
+| 🔍 **Search & Filter** | Real-time search, multiple sort options, filter by type/location/lock/reference, reverse-order clear |
+| 📁 **Smart Grouping** | Group by folder, type, reference status, lock status, location type, custom group management |
+| 🏷️ **Batch Rename** | Support `{index}`, `{name}` placeholders, smart rename based on note references |
+| 🔗 **Reference Tracking** | Auto-find image references in notes (Markdown/Wiki/HTML), supports reference updates |
 | 🔄 **MD5 Dedup** | Detect duplicate images via hash to avoid redundant storage |
-| 🗑️ **Recycle Bin** | Safe deletion with restore, permanent delete, batch operations |
-| 📜 **Operation Log** | Track all operation history based on MD5 hash |
+| 🗑️ **Recycle Bin** | Safe deletion with restore, permanent delete, batch operations, plugin-level trash |
+| 📜 **Operation Log** | Track all operation history based on MD5 hash, supports filtering, search and export |
 | 🈳 **Broken Link Detection** | Detect image links pointing to non-existent files |
-| 🔗 **Link Format Conversion** | Batch convert image link formats (shortest/relative/absolute) |
+| 🔗 **Link Format Conversion** | Batch convert image link formats (shortest/relative/absolute), supports single conversion or Ctrl+click |
 | 🔒 **File Protection** | Lock important files to prevent accidental operations |
 | 🖱️ **Drag Select** | Drag mouse to batch select images like in file explorer |
-| ⚡ **Performance** | Lazy loading, incremental scan cache for smooth handling of large image sets |
+| ⚙️ **Settings Management** | Rich settings options, supports settings search, import, export and reset |
+| 📱 **Mobile Adaptation** | Responsive layout, supports phones and tablets, optimized touch interactions |
+| ⚡ **Performance** | Lazy loading, incremental scan cache, link info pre-calculation for smooth handling of large image sets |
 
 ## 📦 Installation
 
@@ -121,6 +124,9 @@ ImageMgr is a feature-rich image management plugin for Obsidian that helps you e
 - **Real-time Search**: Quick search for image names and paths
 - **Flexible Sort**: Sort by name, size, date, dimensions, reference count, etc.
 - **Type Filter**: Filter by image type (PNG, JPG, GIF, etc.)
+- **Location Filter**: Filter by location type (🌩️ Remote / 💾 Local)
+- **Lock Filter**: Filter by lock status (Locked / Unlocked)
+- **Reference Filter**: Filter by reference status (Referenced / Unreferenced)
 - **Multi-level Sort**: Support combining multiple sort conditions
 - **Reverse-order Clear**: Clear search, sort, filter, group in reverse operation order
 
@@ -130,6 +136,7 @@ Flexible image grouping management:
 - **By Type**: Group by image format (PNG, JPG, etc.)
 - **By Reference**: Distinguish referenced and unreferenced images
 - **By Lock Status**: Group by file protection status
+- **By Location Type**: Distinguish 🌩️ remote images and 💾 local images
 - **Custom Groups**: Manually create and manage groups
 
 #### Image Preview
@@ -270,6 +277,9 @@ Below is the complete feature list and implementation status of the plugin.
 - ✅ **Real-time Search** - Quick search and filter images
 - ✅ **Flexible Sort** - Sort by name, size, date, dimensions, etc.
 - ✅ **Type Filter** - Filter by image type (PNG, JPG, GIF, etc.)
+- ✅ **Location Filter** - Filter by location type (Remote/Local)
+- ✅ **Lock Filter** - Filter by lock status
+- ✅ **Reference Filter** - Filter by reference status
 - ✅ **Detailed Info** - View complete image information
 - ✅ **Image Preview** - Beautiful grid layout preview interface
 - ✅ **Performance Optimization** - Lazy loading mechanism, support large image sets
@@ -321,6 +331,7 @@ Below is the complete feature list and implementation status of the plugin.
 - ✅ **Group by Type** - Group by image format
 - ✅ **Group by Reference** - Group by reference status
 - ✅ **Group by Lock** - Group by file protection status
+- ✅ **Group by Location Type** - Group by remote/local images
 - ✅ **Custom Groups** - Support multiple grouping methods
 
 #### File Protection
@@ -641,7 +652,6 @@ src/
 - Press `Ctrl+Shift+I` in Obsidian to open developer tools
 - Check browser console output and network requests
 
-For more development documentation, see [开发者文档.md](./开发者文档.md)
 
 ## 🤝 Contributing
 
@@ -655,4 +665,4 @@ Issues and Pull Requests are welcome!
 
 ## 📄 License
 
-[MIT License](LICENSE) © 2025 Coeicy
+[MIT License](LICENSE) © 2025 Coeris

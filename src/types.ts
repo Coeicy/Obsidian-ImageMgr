@@ -52,6 +52,10 @@ export interface LinkFormatStats {
 	relative: number;
 	/** 绝对路径格式数量 */
 	absolute: number;
+	/** 网络图片链接数量 */
+	remote: number;
+	/** 网络图片链接列表 */
+	remoteLinks?: string[];
 	/** 总链接数量 */
 	total: number;
 }
@@ -87,6 +91,8 @@ export interface ImageInfo {
 	referenceCount?: number;
 	/** 引用信息最后更新时间戳 */
 	referencesUpdatedAt?: number;
+	/** 是否为网络图片 */
+	isRemote?: boolean;
 }
 
 /**
@@ -214,7 +220,7 @@ export interface PluginData {
 			md5?: string;
 			/** 引用该图片的笔记列表（缓存） */
 			references?: ImageReferenceInfo[];
-			/** 引用数量 */
+			/** 引用数量（快速访问） */
 			referenceCount?: number;
 			/** 引用信息最后更新时间戳 */
 			referencesUpdatedAt?: number;
@@ -409,4 +415,36 @@ export interface ImageManagerSettings {
 	// ==================== 快捷键设置 ====================
 	/** 自定义快捷键配置（快捷键ID -> 快捷键字符串） */
 	keyboardShortcuts?: Record<string, string>;
+	
+	// ==================== 云端图片设置 ====================
+	/** 是否扫描网络图片 - 扫描 Markdown 文件中的网络图片链接 */
+	scanRemoteImages?: boolean;
+	/** 网络图片代理服务 - 当直接加载失败时使用的代理服务 */
+	remoteImageProxy?: 'none' | 'obsidian' | 'weserv' | 'both';
+	/** 是否在列表中显示云端图片标识 */
+	showRemoteImageBadge?: boolean;
+	/** 云端图片加载超时时间（毫秒） */
+	remoteImageTimeout?: number;
+	/** 是否自动尝试代理加载失败的云端图片 */
+	autoRetryRemoteImage?: boolean;
+	
+	// ==================== 图床上传设置 ====================
+	/** 图床配置 */
+	uploadConfig?: {
+		type: 'qiniu' | 'aliyun' | 'custom';
+		qiniu?: {
+			accessKey: string;
+			secretKey: string;
+			bucket: string;
+			domain: string;
+			region: string;
+		};
+		aliyun?: {
+			accessKeyId: string;
+			accessKeySecret: string;
+			bucket: string;
+			region: string;
+			customDomain?: string;
+		};
+	};
 }

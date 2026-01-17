@@ -474,7 +474,11 @@ export class TrashManager {
 
 			if (!trashFolder) {
 				// 无法通过 API 访问回收站文件夹，使用 adapter 直接操作
-				console.log('[TrashManager] 使用 adapter 直接操作回收站');
+				if (this.plugin?.logger) {
+					await this.plugin.logger.debug(OperationType.TRASH, '使用 adapter 直接操作回收站', {
+						imagePath: file.path
+					});
+				}
 				
 				// 确保回收站文件夹存在（使用 adapter）
 				const trashFolderPath = this.getTrashFolderPath();
@@ -482,9 +486,18 @@ export class TrashManager {
 				if (!folderExists) {
 					try {
 						await this.vault.adapter.mkdir(trashFolderPath);
-						console.log('[TrashManager] 通过 adapter 创建回收站文件夹');
+						if (this.plugin?.logger) {
+							await this.plugin.logger.debug(OperationType.TRASH, '通过 adapter 创建回收站文件夹', {
+								imagePath: file.path
+							});
+						}
 					} catch (mkdirError) {
-						console.error('[TrashManager] 创建回收站文件夹失败:', mkdirError);
+						if (this.plugin?.logger) {
+							await this.plugin.logger.error(OperationType.TRASH, '创建回收站文件夹失败', {
+								imagePath: file.path,
+								error: mkdirError instanceof Error ? mkdirError : new Error(String(mkdirError))
+							});
+						}
 						if (this.plugin?.logger) {
 							await this.plugin.logger.warn(
 								OperationType.TRASH,
@@ -504,7 +517,11 @@ export class TrashManager {
 				
 				// 使用 adapter 创建文件
 				await this.vault.adapter.writeBinary(trashPath, fileContent);
-				console.log('[TrashManager] 通过 adapter 创建回收站文件:', trashPath);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.debug(OperationType.TRASH, `通过 adapter 创建回收站文件: ${trashPath}`, {
+						imagePath: file.path
+					});
+				}
 			} else {
 				// 使用正常 API 创建文件
 				await this.vault.createBinary(trashPath, fileContent);
@@ -673,11 +690,15 @@ export class TrashManager {
 				);
 			}
 			
-			console.error('[ImageMgr] 获取回收站文件列表失败:', {
-				error: errorMessage,
-				stack: errorStack,
-				trashFolderPath: this.getTrashFolderPath()
-			});
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, '获取回收站文件列表失败', {
+					error: new Error(errorMessage),
+					details: {
+						stack: errorStack,
+						trashFolderPath: this.getTrashFolderPath()
+					}
+				});
+			}
 			
 			return [];
 		}
@@ -713,7 +734,11 @@ export class TrashManager {
 				const exists = await this.vault.adapter.exists(item.path);
 				
 				if (!exists) {
-					console.error('[TrashManager] 找不到回收站文件:', item.path);
+					if (this.plugin?.logger) {
+						await this.plugin.logger.error(OperationType.RESTORE, `找不到回收站文件: ${item.path}`, {
+							imagePath: item.path
+						});
+					}
 					return false;
 				}
 				

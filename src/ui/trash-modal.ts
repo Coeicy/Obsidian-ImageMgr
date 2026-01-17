@@ -8,6 +8,7 @@ import { calculateBufferHash } from '../utils/image-hash';
 import { UI_SIZE } from '../constants';
 import { makeModalResizable } from '../utils/resizable-modal';
 import { DragSelectManager } from '../utils/drag-select-manager';
+import { OperationType } from '../utils/logger';
 
 /**
  * 回收站模态框类
@@ -667,9 +668,14 @@ export class TrashModal extends Modal {
 							// 不清空 innerHTML，保留复选框
 						};
 						
-						img.onerror = (error) => {
+						img.onerror = async (error) => {
 							// 图片加载失败，使用正方形占位
-							console.error('Failed to load trash image:', filePath, error);
+							if (this.plugin?.logger) {
+								await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, `Failed to load trash image: ${filePath}`, {
+									imagePath: filePath,
+									error: error instanceof Error ? error : new Error(String(error))
+								});
+							}
 							URL.revokeObjectURL(imageUrl); // 清理 URL
 							previewContainer.style.aspectRatio = '1';
 							// 创建占位符，不覆盖复选框
@@ -681,7 +687,12 @@ export class TrashModal extends Modal {
 						// 开始加载
 						img.src = imageUrl;
 					} catch (error) {
-						console.error('Error loading trash image:', item.path, error);
+						if (this.plugin?.logger) {
+							await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, `Error loading trash image: ${item.path}`, {
+								imagePath: item.path,
+								error: error instanceof Error ? error : new Error(String(error))
+							});
+						}
 						previewContainer.style.aspectRatio = '1';
 						// 创建占位符，不覆盖复选框
 						const placeholder = previewContainer.createDiv();
@@ -1054,7 +1065,12 @@ export class TrashModal extends Modal {
 						await this.plugin.saveData(this.plugin.data);
 					}
 				} catch (error) {
-					console.error('Failed to calculate MD5 for trash file:', error);
+					if (this.plugin?.logger) {
+						await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to calculate MD5 for trash file', {
+							imagePath: item.path,
+							error: error instanceof Error ? error : new Error(String(error))
+						});
+					}
 					md5Hash = ''; // 明确设置为空字符串
 				}
 			}
@@ -1112,7 +1128,11 @@ export class TrashModal extends Modal {
 			);
 			detailModal.open();
 		} catch (error) {
-			console.error('Failed to open image detail:', error);
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.VIEW, 'Failed to open image detail', {
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
 			new Notice('无法打开图片详情');
 		}
 	}

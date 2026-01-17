@@ -30,6 +30,10 @@ export class ImagePreviewPanel {
 	private dragStartTranslateY: number = 0;
 	public lockBtn?: HTMLElement; // 锁定按钮引用（public以便外部控制显示/隐藏）
 
+	private logger?: (message: string, error?: any) => void;
+
+	private isRemoteImage: boolean = false;
+
 	constructor(
 		container: HTMLElement,
 		private image: ImageInfo,
@@ -43,9 +47,13 @@ export class ImagePreviewPanel {
 		private getTranslate?: () => { x: number; y: number },
 		private getScale?: () => number,
 		private isTrashFile: boolean = false,
-		private onImageLoaded?: (img: HTMLImageElement) => void
+		private onImageLoaded?: (img: HTMLImageElement) => void,
+		logger?: (message: string, error?: any) => void
 	) {
 		this.container = container;
+		this.logger = logger;
+		// 判断是否为云端图片
+		this.isRemoteImage = image.isRemote === true || image.path.startsWith('http://') || image.path.startsWith('https://');
 		this.render();
 	}
 
@@ -64,8 +72,8 @@ export class ImagePreviewPanel {
 		// 优化长条形图片的滚动体验
 		this.container.style.scrollBehavior = 'smooth';
 
-		// 锁定/解锁按钮（回收站文件不显示）
-		if (!this.isTrashFile) {
+		// 锁定/解锁按钮（回收站文件和云端图片不显示）
+		if (!this.isTrashFile && !this.isRemoteImage) {
 			const lockBtn = this.container.createEl('button', {
 				text: this.isIgnored ? '🔒' : '🔓',
 				cls: 'lock-btn'
@@ -90,7 +98,71 @@ export class ImagePreviewPanel {
 		}
 
 		// 加载图片
-		if (this.isTrashFile) {
+		if (this.isRemoteImage) {
+			// 云端图片：直接使用 URL 加载
+			(async () => {
+				try {
+					const imgEl = this.container.createEl('img', {
+						attr: { src: this.image.path }
+					});
+					imgEl.referrerPolicy = 'no-referrer'; // 添加防盗链策略
+					imgEl.classList.add('detail-image');
+					this.imageElement = imgEl;
+					
+					// 添加滚轮事件处理
+					this.wheelHandler = (e: WheelEvent) => {
+						e.preventDefault();
+						this.onWheel(e);
+					};
+					imgEl.addEventListener('wheel', this.wheelHandler);
+
+					// 添加拖拽事件处理
+					this.setupDragHandlers(imgEl);
+					
+					// 通知外部图片已加载
+					if (this.onImageLoaded) {
+						this.onImageLoaded(imgEl);
+					}
+					
+					// 错误处理：如果直接加载失败，尝试代理加载
+					imgEl.onerror = async () => {
+						// 尝试使用代理加载（类似 image-manager-view.ts 中的逻辑）
+						try {
+							const { requestUrl, arrayBufferToBase64 } = await import('obsidian');
+							const response = await requestUrl({ 
+								url: this.image.path,
+								headers: {
+									'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+									'Referer': ''
+								}
+							});
+							
+							if (response.status < 400) {
+								const base64 = arrayBufferToBase64(response.arrayBuffer);
+								const contentType = response.headers['content-type'] || 'image/jpeg';
+								imgEl.src = `data:${contentType};base64,${base64}`;
+							}
+						} catch (proxyError) {
+							if (this.logger) {
+								this.logger(`Failed to load remote image via proxy: ${this.image.path}`, proxyError);
+							}
+							// 显示错误占位符
+							const placeholder = this.container.createDiv();
+							placeholder.style.cssText = 'text-align: center; font-size: 48px; opacity: 0.5; color: var(--text-muted);';
+							placeholder.innerHTML = '📷<br><span style="font-size: 12px;">加载失败</span>';
+						}
+					};
+				} catch (error) {
+					if (this.logger) {
+						this.logger(`Failed to load remote image: ${this.image.path}`, error);
+					}
+					// 显示错误占位符
+					const placeholder = this.container.createDiv();
+					placeholder.style.cssText = 'text-align: center; font-size: 48px; opacity: 0.5; color: var(--text-muted);';
+					placeholder.innerHTML = '📷<br><span style="font-size: 12px;">加载失败</span>';
+				}
+			})();
+		} else if (this.isTrashFile) {
 			// 回收站文件：使用 adapter 直接读取
 			(async () => {
 				try {
@@ -119,7 +191,11 @@ export class ImagePreviewPanel {
 						this.onImageLoaded(imgEl);
 					}
 				} catch (error) {
-					console.error('Failed to load trash image:', this.image.path, error);
+					if (this.logger) {
+						this.logger(`Failed to load trash image: ${this.image.path}`, error);
+					} else {
+						console.error('Failed to load trash image:', this.image.path, error);
+					}
 					// 显示错误占位符
 					const placeholder = this.container.createDiv();
 					placeholder.style.cssText = 'text-align: center; font-size: 48px; opacity: 0.5; color: var(--text-muted);';
@@ -266,7 +342,28 @@ export class ImagePreviewPanel {
 		}
 
 		// 预加载新图片，加载完成后再切换，避免闪烁
-		if (this.isTrashFile) {
+		if (this.isRemoteImage) {
+			// 云端图片：直接使用 URL
+			if (this.imageElement) {
+				this.imageElement.src = this.image.path;
+				this.imageElement.referrerPolicy = 'no-referrer';
+				// 通知外部图片已更新
+				if (this.onImageLoaded && this.imageElement) {
+					this.onImageLoaded(this.imageElement);
+				}
+			} else {
+				const imgEl = this.container.createEl('img', { attr: { src: this.image.path } });
+				imgEl.referrerPolicy = 'no-referrer';
+				imgEl.classList.add('detail-image');
+				this.imageElement = imgEl;
+				this.wheelHandler = (e: WheelEvent) => { e.preventDefault(); this.onWheel(e); };
+				imgEl.addEventListener('wheel', this.wheelHandler);
+				this.setupDragHandlers(imgEl);
+				if (this.onImageLoaded) {
+					this.onImageLoaded(imgEl);
+				}
+			}
+		} else if (this.isTrashFile) {
 			// 回收站文件：使用 adapter 加载
 			(async () => {
 				try {
@@ -301,7 +398,11 @@ export class ImagePreviewPanel {
 						preloader.src = imageUrl;
 					}
 				} catch (error) {
-					console.error('Failed to update trash image:', this.image.path, error);
+					if (this.logger) {
+						this.logger(`Failed to update trash image: ${this.image.path}`, error);
+					} else {
+						console.error('Failed to update trash image:', this.image.path, error);
+					}
 				}
 			})();
 		} else {

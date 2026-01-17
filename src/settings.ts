@@ -170,5 +170,35 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	 * 格式：{ 快捷键ID: 快捷键字符串 }
 	 * 例如：{ 'open-image-manager': 'Ctrl+Shift+I' }
 	 */
-	keyboardShortcuts: {}
+	keyboardShortcuts: {},
+
+	// ==================== 云端图片设置 ====================
+	/** 是否扫描网络图片 - 扫描 Markdown 文件中的网络图片链接 */
+	scanRemoteImages: true,
+	/** 网络图片代理服务 - 当直接加载失败时使用的代理服务 */
+	remoteImageProxy: 'both', // 'none' | 'obsidian' | 'weserv' | 'both'
+	/** 是否在列表中显示云端图片标识 */
+	showRemoteImageBadge: true,
+	/** 云端图片加载超时时间（毫秒） */
+	remoteImageTimeout: 10000,
+	/** 是否自动尝试代理加载失败的云端图片 */
+	autoRetryRemoteImage: true,
+	
+	// ==================== 图床上传设置 ====================
+	uploadConfig: {
+		type: 'qiniu',
+		qiniu: {
+			accessKey: '',
+			secretKey: '',
+			bucket: '',
+			domain: '',
+			region: 'z0'
+		},
+		aliyun: {
+			accessKeyId: '',
+			accessKeySecret: '',
+			bucket: '',
+			region: 'oss-cn-hangzhou'
+		}
+	}
 }

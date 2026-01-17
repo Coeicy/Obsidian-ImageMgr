@@ -146,7 +146,12 @@ export class LockListManager {
 					lockedFile.exists = true;
 				}
 			} catch (error) {
-				console.error(`[LockListManager] 更新文件状态失败: ${lockedFile.filePath}`, error);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, `更新文件状态失败: ${lockedFile.filePath}`, {
+						imagePath: lockedFile.filePath,
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 				// 出错时也保持 exists: true，避免数据丢失
 				lockedFile.exists = true;
 			}
@@ -178,7 +183,12 @@ export class LockListManager {
 					lockedFile.exists = false;
 				}
 			} catch (error) {
-				console.error(`[LockListManager] 验证文件失败: ${lockedFile.filePath}`, error);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, `验证文件失败: ${lockedFile.filePath}`, {
+						imagePath: lockedFile.filePath,
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 				lockedFile.exists = false;
 			}
 		}

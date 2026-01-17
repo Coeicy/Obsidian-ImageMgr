@@ -14,6 +14,8 @@ export type FilterType = 'all' | 'png' | 'jpg' | 'gif' | 'webp' | 'svg' | 'bmp';
 export type LockFilter = 'all' | 'locked' | 'unlocked';
 /** 引用状态筛选 - 显示所有、仅被引用或仅未被引用的文件 */
 export type ReferenceFilter = 'all' | 'referenced' | 'unreferenced';
+/** 位置筛选 - 显示所有、仅云端或仅本地的文件 */
+export type LocationFilter = 'all' | 'remote' | 'local';
 
 /**
  * 文件大小范围
@@ -37,6 +39,8 @@ export interface FilterOptions {
 	lockFilter?: LockFilter;
 	/** 引用状态筛选 */
 	referenceFilter?: ReferenceFilter;
+	/** 位置筛选（云端/本地） */
+	locationFilter?: LocationFilter;
 	/** 文件大小范围筛选 */
 	sizeFilter?: SizeRange;
 	/** 文件名搜索筛选 */
@@ -118,6 +122,18 @@ export class FilterModal extends Modal {
 				.setValue(this.options.referenceFilter || 'all')
 				.onChange((value: ReferenceFilter) => {
 					this.options.referenceFilter = value;
+				}));
+
+		new Setting(contentEl)
+			.setName('🌐 位置类型')
+			.setDesc('选择要显示的图片位置类型')
+			.addDropdown(dropdown => dropdown
+				.addOption('all', '全部')
+				.addOption('remote', '🌩️ 云端图片')
+				.addOption('local', '💾 本地图片')
+				.setValue(this.options.locationFilter || 'all')
+				.onChange((value: LocationFilter) => {
+					this.options.locationFilter = value;
 				}));
 
 		// 图片大小筛选 - 使用两个输入框
@@ -438,6 +454,7 @@ export class FilterModal extends Modal {
 				filterType: 'all',
 				lockFilter: undefined,
 				referenceFilter: undefined,
+				locationFilter: undefined,
 				sizeFilter: undefined,
 				nameFilter: undefined,
 				folderFilter: undefined

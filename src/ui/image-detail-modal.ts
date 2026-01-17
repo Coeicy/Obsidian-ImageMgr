@@ -123,6 +123,9 @@ export class ImageDetailModal extends Modal {
 	
 	// 是否是回收站文件（回收站文件禁用某些功能）
 	private isTrashFile: boolean = false;
+	
+	// 是否是云端/网络图片（云端图片禁用文件操作和编辑功能）
+	private isRemoteImage: boolean = false;
 
 	constructor(app: App, image: ImageInfo, vault: Vault, allImages: ImageInfo[] = [], currentIndex: number = 0, plugin?: ImageManagementPlugin, isTrashFile: boolean = false) {
 		super(app);
@@ -132,6 +135,8 @@ export class ImageDetailModal extends Modal {
 		this.currentIndex = currentIndex;
 		this.plugin = plugin;
 		this.isTrashFile = isTrashFile;
+		// 判断是否为云端图片
+		this.isRemoteImage = image.isRemote === true || image.path.startsWith('http://') || image.path.startsWith('https://');
 		
 		// 初始化管理器 - 使用 plugin 中已有的实例，避免重复注册事件监听器
 		if (plugin) {
@@ -164,6 +169,7 @@ export class ImageDetailModal extends Modal {
 		this.originalPath = this.image.path;
 		
 		// 初始化保存的文件名（在后续代码中会重新计算，这里只是初始化）
+		// 对于云端图片，name 已经从 URL 中提取好了，直接使用即可
 		const initFileNameParts = this.image.name.split('.');
 		const initBaseFileName = initFileNameParts.length > 1 ? initFileNameParts.slice(0, -1).join('.') : this.image.name;
 		this.lastSavedFileName = initBaseFileName;
@@ -310,6 +316,15 @@ export class ImageDetailModal extends Modal {
 			(imgEl: HTMLImageElement) => {
 				// 图片加载完成后的回调（用于回收站文件）
 				this.imgElement = imgEl;
+			},
+			async (message: string, error?: any) => {
+				// Logger 回调
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, message, {
+						imagePath: this.image.path,
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 			}
 		);
 		
@@ -334,7 +349,8 @@ export class ImageDetailModal extends Modal {
 			() => this.deleteImage(),
 			() => this.updateScrollModeIndicator(),
 			() => this.updateViewMode(),
-			this.isTrashFile // 传递 isTrashFile 参数
+			this.isTrashFile, // 传递 isTrashFile 参数
+			this.isRemoteImage // 传递 isRemoteImage 参数
 		);
 		
 		// 确保按钮初始状态正确显示（默认缩放模式）
@@ -381,6 +397,7 @@ export class ImageDetailModal extends Modal {
 		`;
 		
 		// 分离文件名和扩展名
+		// 对于云端图片，name 已经从 URL 中提取好了，直接使用即可
 		const fileNameParts = this.image.name.split('.');
 		const fileExtension = fileNameParts.length > 1 ? '.' + fileNameParts[fileNameParts.length - 1] : '';
 		const baseFileName = fileNameParts.length > 1 ? fileNameParts.slice(0, -1).join('.') : this.image.name;
@@ -411,13 +428,39 @@ export class ImageDetailModal extends Modal {
 		fileNameLabel.style.paddingTop = '0'; /* 移除上边距，使用居中对齐 */
 		/* 宽度自适应，不设置固定宽度 */
 		
-		// 回收站文件：使用纯文本显示
-		if (this.isTrashFile) {
+		// 回收站文件或云端图片：使用纯文本显示
+		if (this.isTrashFile || this.isRemoteImage) {
 			const fileNameValue = fileNameLi.createSpan('info-value');
+			// 显示文件名（云端图片的 name 已从 URL 中提取）
 			fileNameValue.textContent = this.image.name;
 			fileNameValue.style.fontSize = '0.9em';
 			fileNameValue.style.wordBreak = 'break-word';
 			fileNameValue.style.flex = '1';
+			// 如果是云端图片，添加标识和 URL 信息
+			if (this.isRemoteImage) {
+				const cloudBadge = fileNameLi.createSpan('cloud-badge');
+				cloudBadge.textContent = '🌩️ 云端图片';
+				cloudBadge.style.cssText = `
+					font-size: 0.85em;
+					color: var(--text-accent);
+					margin-left: 8px;
+					padding: 2px 6px;
+					background-color: var(--background-modifier-border);
+					border-radius: 4px;
+					flex-shrink: 0;
+				`;
+				// 添加 URL 显示（在文件名下方或作为提示）
+				const urlInfo = fileNameLi.createDiv('url-info');
+				urlInfo.textContent = this.image.path;
+				urlInfo.style.cssText = `
+					font-size: 0.75em;
+					color: var(--text-muted);
+					word-break: break-all;
+					margin-top: 4px;
+					width: 100%;
+				`;
+				urlInfo.title = '图片 URL';
+			}
 			// 保存引用（用于切换图片时更新）
 			this.fileNameInput = null;
 		} else {
@@ -501,8 +544,8 @@ export class ImageDetailModal extends Modal {
 		this.resizeHandler = resizeHandler;
 		window.addEventListener('resize', resizeHandler);
 		
-		// 智能重命名按钮（回收站文件不创建）
-		if (!this.isTrashFile) {
+		// 智能重命名按钮（回收站文件和云端图片不创建）
+		if (!this.isTrashFile && !this.isRemoteImage) {
 			const pathRenameBtn = fileNameButtons.createEl('button', {
 				text: '🔠',
 				cls: 'path-rename-btn'
@@ -753,15 +796,25 @@ export class ImageDetailModal extends Modal {
 		/* 宽度自适应，不设置固定宽度 */
 		
 		// 提取文件夹路径（不包含文件名）
-		const initialDir = this.image.path.includes('/')
-			? this.image.path.substring(0, this.image.path.lastIndexOf('/'))
-			: '';
+		// 对于云端图片，路径就是完整的 URL
+		let initialDir: string;
+		let displayPath: string;
 		
-		// 如果在根目录，显示"根目录"
-		const displayPath = initialDir || '.trash';
+		if (this.isRemoteImage) {
+			// 云端图片：显示完整 URL
+			initialDir = this.image.path;
+			displayPath = this.image.path;
+		} else {
+			// 本地图片：提取文件夹路径
+			initialDir = this.image.path.includes('/')
+				? this.image.path.substring(0, this.image.path.lastIndexOf('/'))
+				: '';
+			// 如果在根目录，显示"根目录"
+			displayPath = initialDir || '.trash';
+		}
 		
-		// 回收站文件：使用纯文本显示
-		if (this.isTrashFile) {
+		// 回收站文件或云端图片：使用纯文本显示
+		if (this.isTrashFile || this.isRemoteImage) {
 			const pathValue = pathLi.createSpan('info-value');
 			pathValue.textContent = displayPath;
 			pathValue.style.fontSize = '0.9em';
@@ -862,8 +915,8 @@ export class ImageDetailModal extends Modal {
 		const suggestionsList = this.contentEl.createDiv('path-suggestions');
 		suggestionsList.style.display = 'none';
 		
-		// 添加定位按钮 📍 - 放在按钮容器中（回收站文件不创建）
-		if (!this.isTrashFile) {
+		// 添加定位按钮 📍 - 放在按钮容器中（回收站文件和云端图片不创建）
+		if (!this.isTrashFile && !this.isRemoteImage) {
 			// 如果按钮已存在，先移除
 			if (this.locateBtn && this.locateBtn.parentElement) {
 				this.locateBtn.remove();
@@ -1036,6 +1089,7 @@ export class ImageDetailModal extends Modal {
 				this.createdDir = newPath.trim() || '';
 				
 					// 获取当前文件名（不修改文件名）
+					// 对于云端图片，name 已经从 URL 中提取好了，直接使用即可
 					const currentFileNameParts = this.image.name.split('.');
 					const currentBaseName = currentFileNameParts.length > 1 
 						? currentFileNameParts.slice(0, -1).join('.') 
@@ -1520,7 +1574,12 @@ export class ImageDetailModal extends Modal {
 						}
 					}
 				} catch (error) {
-					console.error('Failed to calculate MD5 for trash file:', error);
+					if (this.plugin?.logger) {
+						await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to calculate MD5 for trash file', {
+							imagePath: this.image.path,
+							error: error instanceof Error ? error : new Error(String(error))
+						});
+					}
 					if (hashValue) {
 						hashValue.textContent = '计算失败';
 						hashValue.style.color = 'var(--text-error)';
@@ -2109,8 +2168,8 @@ export class ImageDetailModal extends Modal {
 			this.historyPanel.updateImage(this.image);
 		}
 		
-		// 更新文件名和路径输入框
-		if (this.fileNameInput) {
+		// 更新文件名和路径输入框（仅对本地图片，云端图片的输入框是只读的）
+		if (this.fileNameInput && !this.isRemoteImage) {
 			const fileNameParts = this.image.name.split('.');
 			const baseFileName = fileNameParts.length > 1 
 				? fileNameParts.slice(0, -1).join('.') 
@@ -2144,7 +2203,7 @@ export class ImageDetailModal extends Modal {
 		}
 		
 		// 更新基本信息显示
-		// 更新格式
+		// 更新格式（对于云端图片，name 已经从 URL 中提取好了，直接使用即可）
 		if (this.formatValue) {
 			const fileNameParts = this.image.name.split('.');
 			const fileExtension = fileNameParts.length > 1 ? '.' + fileNameParts[fileNameParts.length - 1] : '';
@@ -2219,7 +2278,12 @@ export class ImageDetailModal extends Modal {
 							}
 						}
 					} catch (error) {
-						console.error('Failed to calculate MD5 for trash file:', error);
+						if (this.plugin?.logger) {
+							await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to calculate MD5 for trash file', {
+								imagePath: this.image.path,
+								error: error instanceof Error ? error : new Error(String(error))
+							});
+						}
 						if (this.hashValue) {
 							this.hashValue.textContent = '计算失败';
 							this.hashValue.style.color = 'var(--text-error)';
@@ -2332,6 +2396,12 @@ export class ImageDetailModal extends Modal {
 
 	// 智能重命名（基于引用笔记的路径）
 	async applyPathNaming() {
+		// 检查是否为云端图片
+		if (this.isRemoteImage) {
+			new Notice('🌩️ 云端图片无法使用智能重命名\n云端图片不在本地文件系统中');
+			return;
+		}
+		
 		if (!this.plugin) {
 			new Notice('插件实例不存在');
 			return;
@@ -2408,7 +2478,7 @@ export class ImageDetailModal extends Modal {
 		// 获取图片在笔记中的序号
 		const imageIndex = selectedNote.index + 1; // 从1开始
 		
-		// 获取文件扩展名
+		// 获取文件扩展名（本地图片，不需要处理云端图片，因为方法开头已检查）
 		const fileNameParts = this.image.name.split('.');
 		const fileExtension = fileNameParts.length > 1 ? '.' + fileNameParts[fileNameParts.length - 1] : '';
 		
@@ -2569,6 +2639,12 @@ export class ImageDetailModal extends Modal {
 
 	async saveChanges(newBaseName: string, fileExtension: string, newPath: string, reloadView: boolean = true) {
 		try {
+			// 检查是否为云端图片
+			if (this.isRemoteImage) {
+				new Notice('🌩️ 云端图片无法保存\n云端图片不在本地文件系统中，无法进行重命名或移动操作');
+				return;
+			}
+			
 			// 检查是否是锁定的文件
 			const isIgnored = this.isIgnoredFile(this.image.name);
 			if (isIgnored) {
@@ -2776,6 +2852,12 @@ export class ImageDetailModal extends Modal {
 	}
 
 	async deleteImage() {
+		// 检查是否为云端图片
+		if (this.isRemoteImage) {
+			new Notice('🌩️ 云端图片无法删除\n云端图片不在本地文件系统中');
+			return;
+		}
+		
 		// 检查是否为锁定文件
 		if (this.isIgnoredFile(this.image.name)) {
 			new Notice('🔒 此文件已被锁定，无法删除\n请先解除锁定后重试');
@@ -5007,7 +5089,11 @@ export class ImageDetailModal extends Modal {
 			}
 		} catch (e) {
 			// 如果刷新失败，静默处理
-			console.error('刷新首页视图失败:', e);
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, '刷新首页视图失败', {
+					error: e instanceof Error ? e : new Error(String(e))
+				});
+			}
 		}
 	}
 

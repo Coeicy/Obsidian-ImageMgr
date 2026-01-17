@@ -151,11 +151,6 @@ export const LIMITS = {
 		IMAGE_GAP: 12,
 	},
 	
-	/** 滚动加载配置 - 用于无限滚动功能 */
-	SCROLL: {
-		/** 滚动触发比例 - 0.8，当滚动到 80% 时触发加载更多 */
-		TRIGGER_RATIO: 0.8,
-	},
 } as const;
 
 // ==================== 样式常量 ====================
@@ -210,52 +205,3 @@ export function calculateItemWidth(
 	return `calc((100% - ${(imagesPerRow - 1) * gap}px) / ${imagesPerRow})`;
 }
 
-/**
- * 检查是否需要加载更多（滚动加载）
- * @param scrollTop 当前滚动位置
- * @param scrollHeight 总滚动高度
- * @param clientHeight 可见高度
- * @param ratio 触发比例（默认 0.8）
- * @returns 是否应该加载更多
- */
-export function shouldLoadMore(
-	scrollTop: number,
-	scrollHeight: number,
-	clientHeight: number,
-	ratio: number = LIMITS.SCROLL.TRIGGER_RATIO
-): boolean {
-	return scrollTop + clientHeight >= scrollHeight * ratio;
-}
-
-/**
- * 根据屏幕宽度计算每行显示的图片数量（移动端适配）
- * @param screenWidth 屏幕宽度（px）
- * @param settings 插件设置
- * @param defaultImagesPerRow 默认每行数量（桌面端）
- * @returns 每行显示的图片数量
- */
-export function calculateImagesPerRowForScreen(
-	screenWidth: number,
-	settings: any,
-	defaultImagesPerRow: number = 5
-): number {
-	// 如果用户自定义了移动端每行数量，优先使用
-	if (settings.mobileImagesPerRow && settings.mobileImagesPerRow > 0) {
-		return Math.min(Math.max(settings.mobileImagesPerRow, 1), 10);
-	}
-	
-	// 根据屏幕宽度自动计算
-	if (screenWidth >= 1200) {
-		// 桌面端：使用默认值
-		return defaultImagesPerRow;
-	} else if (screenWidth >= 768) {
-		// 平板端：使用设置值或默认 3
-		return settings.tabletImagesPerRow || 3;
-	} else if (screenWidth >= 480) {
-		// 手机横屏：使用设置值或默认 2
-		return settings.phoneLandscapeImagesPerRow || 2;
-	} else {
-		// 手机竖屏：使用设置值或默认 1
-		return settings.phonePortraitImagesPerRow || 1;
-	}
-}

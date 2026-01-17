@@ -569,7 +569,11 @@ export class BrokenLinksModal extends Modal {
 				new Notice('链接内容未变化，可能已被手动修复');
 			}
 		} catch (error) {
-			console.error('恢复链接失败:', error);
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.FIX_BROKEN_LINK, '恢复链接失败', {
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
 			new Notice(`恢复失败: ${error}`);
 		}
 
@@ -682,7 +686,12 @@ export class BrokenLinksModal extends Modal {
 					await this.app.vault.modify(file, lines.join('\n'));
 				}
 			} catch (error) {
-				console.error(`恢复文件 ${filePath} 中的链接失败:`, error);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.FIX_BROKEN_LINK, `恢复文件 ${filePath} 中的链接失败`, {
+						filePath,
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 				failCount += links.length;
 			}
 		}

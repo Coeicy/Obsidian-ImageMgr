@@ -39,7 +39,8 @@ export class ImageControlsPanel {
 		private onDelete: () => void,
 		private onUpdateScrollModeIndicator?: () => void,
 		private onUpdateViewMode?: () => void,
-		private isTrashFile: boolean = false
+		private isTrashFile: boolean = false,
+		private isRemoteImage: boolean = false
 	) {
 		this.container = container;
 		this.render();
@@ -90,21 +91,25 @@ export class ImageControlsPanel {
 		zoomOutBtn.title = '缩小';
 		zoomOutBtn.addEventListener('click', () => this.onZoomOut());
 
-		// 3. 逆时针旋转按钮
-		const rotateLeftBtn = this.row.createEl('button', { 
-			text: '↺',
-			cls: 'control-btn'
-		});
-		rotateLeftBtn.title = '预览：逆时针旋转90°';
-		rotateLeftBtn.addEventListener('click', () => this.onRotateLeft());
+		// 3. 逆时针旋转按钮（云端图片禁用）
+		if (!this.isRemoteImage) {
+			const rotateLeftBtn = this.row.createEl('button', { 
+				text: '↺',
+				cls: 'control-btn'
+			});
+			rotateLeftBtn.title = '预览：逆时针旋转90°';
+			rotateLeftBtn.addEventListener('click', () => this.onRotateLeft());
+		}
 
-		// 4. 顺时针旋转按钮
-		const rotateRightBtn = this.row.createEl('button', { 
-			text: '↻',
-			cls: 'control-btn'
-		});
-		rotateRightBtn.title = '预览：顺时针旋转90°';
-		rotateRightBtn.addEventListener('click', () => this.onRotateRight());
+		// 4. 顺时针旋转按钮（云端图片禁用）
+		if (!this.isRemoteImage) {
+			const rotateRightBtn = this.row.createEl('button', { 
+				text: '↻',
+				cls: 'control-btn'
+			});
+			rotateRightBtn.title = '预览：顺时针旋转90°';
+			rotateRightBtn.addEventListener('click', () => this.onRotateRight());
+		}
 
 		// 5. 滚轮模式按钮
 		const scrollModeBtn = this.row.createEl('button', { 
@@ -141,8 +146,8 @@ export class ImageControlsPanel {
 			nextBtn.addEventListener('click', () => this.onShowNext());
 		}
 
-		// 8. 删除按钮（回收站文件不创建）
-		if (!this.isTrashFile) {
+		// 8. 删除按钮（回收站文件和云端图片不创建）
+		if (!this.isTrashFile && !this.isRemoteImage) {
 			this.deleteBtn = this.row.createEl('button', { 
 				text: '🗑️',
 				cls: 'control-btn delete-btn'

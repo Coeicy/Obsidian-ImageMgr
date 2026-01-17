@@ -17,7 +17,7 @@ import { ImageManagementSettings } from '../settings';
 import { LogViewerModal } from './log-viewer-modal';
 import { ConfirmModal } from './confirm-modal';
 import { SHORTCUT_DEFINITIONS, formatShortcut, parseShortcut } from '../utils/keyboard-shortcut-manager';
-import { LogLevel } from '../utils/logger';
+import { LogLevel, OperationType } from '../utils/logger';
 
 /** 视图类型标识符 */
 export const VIEW_TYPE = 'image-manager-view';
@@ -34,6 +34,7 @@ export const VIEW_TYPE = 'image-manager-view';
  */
 export class ImageManagementSettingTab extends PluginSettingTab {
 	plugin: ImageManagementPlugin;
+	private containerEl: HTMLElement;
 
 	constructor(app: App, plugin: ImageManagementPlugin) {
 		super(app, plugin);
@@ -59,11 +60,110 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 	display(): void {
 		const {containerEl} = this;
+		this.containerEl = containerEl; // 保存引用用于搜索功能
 
 		containerEl.empty();
 
 		// 清空折叠状态集合，确保所有分组默认折叠
 		this.collapsedSections.clear();
+
+		// ========== 设置管理工具栏 ==========
+		const settingsToolbar = containerEl.createDiv('settings-toolbar');
+		settingsToolbar.style.cssText = `
+			display: flex;
+			gap: 8px;
+			margin-bottom: 20px;
+			padding: 12px;
+			background-color: var(--background-secondary);
+			border-radius: 8px;
+			border: 1px solid var(--background-modifier-border);
+			flex-wrap: wrap;
+			align-items: center;
+		`;
+
+		// 设置搜索框
+		const searchContainer = settingsToolbar.createDiv('settings-search-container');
+		searchContainer.style.cssText = `
+			flex: 1;
+			min-width: 200px;
+			max-width: 400px;
+		`;
+		const searchInput = searchContainer.createEl('input', {
+			type: 'text',
+			placeholder: '🔍 搜索设置...',
+			cls: 'settings-search-input'
+		});
+		searchInput.style.cssText = `
+			width: 100%;
+			padding: 6px 12px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 4px;
+			background-color: var(--background-primary);
+			color: var(--text-normal);
+			font-size: 0.9em;
+		`;
+
+		// 设置搜索功能
+		let searchTimeout: NodeJS.Timeout | null = null;
+		searchInput.addEventListener('input', (e) => {
+			const query = (e.target as HTMLInputElement).value.toLowerCase().trim();
+			
+			// 防抖搜索
+			if (searchTimeout) {
+				clearTimeout(searchTimeout);
+			}
+			
+			searchTimeout = setTimeout(() => {
+				this.filterSettings(query);
+			}, 300);
+		});
+
+		// 设置管理按钮组
+		const buttonGroup = settingsToolbar.createDiv('settings-button-group');
+		buttonGroup.style.cssText = `
+			display: flex;
+			gap: 8px;
+			flex-shrink: 0;
+		`;
+
+		// 导出设置按钮
+		const exportBtn = buttonGroup.createEl('button', { text: '📥 导出设置' });
+		exportBtn.style.cssText = `
+			padding: 6px 12px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 4px;
+			background-color: var(--background-primary);
+			color: var(--text-normal);
+			cursor: pointer;
+			font-size: 0.9em;
+		`;
+		exportBtn.addEventListener('click', () => this.exportSettings());
+
+		// 导入设置按钮
+		const importBtn = buttonGroup.createEl('button', { text: '📤 导入设置' });
+		importBtn.style.cssText = `
+			padding: 6px 12px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 4px;
+			background-color: var(--background-primary);
+			color: var(--text-normal);
+			cursor: pointer;
+			font-size: 0.9em;
+		`;
+		importBtn.addEventListener('click', () => this.importSettings());
+
+		// 重置设置按钮
+		const resetBtn = buttonGroup.createEl('button', { text: '🔄 重置为默认' });
+		resetBtn.style.cssText = `
+			padding: 6px 12px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 4px;
+			background-color: var(--background-primary);
+			color: var(--text-error);
+			cursor: pointer;
+			font-size: 0.9em;
+		`;
+		resetBtn.addEventListener('click', () => this.resetSettings());
 
 		// ========== 所有设置（默认全部折叠） ==========
 
@@ -82,12 +182,17 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(basicSection.contentEl)
 			.setName('默认图片文件夹')
-			.setDesc('设置扫描图片的默认路径（留空则扫描整个笔记库）')
+			.setDesc('设置扫描图片的默认路径（留空则扫描整个笔记库）。支持相对路径，如：images/ 或 attachments/')
 			.addText(text => text
 				.setPlaceholder('例如: images/')
 				.setValue(this.plugin.settings.defaultImageFolder)
 				.onChange(async (value) => {
-					this.plugin.settings.defaultImageFolder = value;
+					// 验证路径格式
+					const trimmedValue = value.trim();
+					if (trimmedValue && !/^[^\/].*[^\/]$/.test(trimmedValue) && trimmedValue !== trimmedValue.replace(/\/$/, '')) {
+						// 路径格式可能有问题，但允许用户输入
+					}
+					this.plugin.settings.defaultImageFolder = trimmedValue;
 					await this.plugin.saveSettings();
 				}));
 
@@ -108,6 +213,92 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.enableDeduplication)
 				.onChange(async (value) => {
 					this.plugin.settings.enableDeduplication = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// 1.5. 云端图片设置
+		const remoteImageSection = this.createCollapsibleSection(containerEl, '🌩️ 云端图片设置', 'remote-image', false);
+
+		// 云端图片设置说明
+		const remoteImageIntro = remoteImageSection.contentEl.createDiv();
+		remoteImageIntro.style.color = 'var(--text-muted)';
+		remoteImageIntro.style.marginBottom = '16px';
+		remoteImageIntro.style.padding = '12px';
+		remoteImageIntro.style.backgroundColor = 'var(--background-secondary)';
+		remoteImageIntro.style.borderRadius = '6px';
+		remoteImageIntro.style.fontSize = '0.9em';
+		remoteImageIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+		remoteImageIntro.innerHTML = `
+			<p style="margin: 0 0 8px 0; font-weight: 600;">🌩️ 云端图片功能说明</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+				<li><strong>网络图片扫描</strong>：自动扫描 Markdown 文件中的网络图片链接（http://、https://）</li>
+				<li><strong>代理加载</strong>：当直接加载失败时，自动尝试通过代理服务加载图片</li>
+				<li><strong>云端标识</strong>：在图片列表中显示云端图片标识，便于区分本地和云端图片</li>
+			</ul>
+			<p style="margin: 8px 0 0 0; font-size: 0.85em;">💡 提示：云端图片无法进行重命名、移动、删除等文件操作，但可以查看和复制链接。</p>
+		`;
+
+		new Setting(remoteImageSection.contentEl)
+			.setName('扫描网络图片')
+			.setDesc('扫描 Markdown 文件中的网络图片链接（http://、https://），并在列表中显示')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.scanRemoteImages ?? true)
+				.onChange(async (value) => {
+					this.plugin.settings.scanRemoteImages = value;
+					await this.plugin.saveSettings();
+					// 如果启用，提示需要重新扫描
+					if (value) {
+						new Notice('✅ 已启用网络图片扫描，请重新扫描以查看网络图片');
+					}
+				}));
+
+		new Setting(remoteImageSection.contentEl)
+			.setName('网络图片代理服务')
+			.setDesc('当直接加载失败时使用的代理服务（Obsidian 代理、公共代理或两者都尝试）')
+			.addDropdown(dropdown => dropdown
+				.addOption('none', '不使用代理')
+				.addOption('obsidian', '仅 Obsidian 代理')
+				.addOption('weserv', '仅公共代理（weserv.nl）')
+				.addOption('both', '两者都尝试（推荐）')
+				.setValue(this.plugin.settings.remoteImageProxy ?? 'both')
+				.onChange(async (value) => {
+					this.plugin.settings.remoteImageProxy = value as 'none' | 'obsidian' | 'weserv' | 'both';
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(remoteImageSection.contentEl)
+			.setName('显示云端图片标识')
+			.setDesc('在图片列表中显示 🌩️ 标识，便于区分本地和云端图片')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showRemoteImageBadge ?? true)
+				.onChange(async (value) => {
+					this.plugin.settings.showRemoteImageBadge = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(remoteImageSection.contentEl)
+			.setName('云端图片加载超时')
+			.setDesc('云端图片加载的超时时间（毫秒，范围：3000-30000）')
+			.addSlider(slider => slider
+				.setLimits(3000, 30000, 1000)
+				.setValue(this.plugin.settings.remoteImageTimeout ?? 10000)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.remoteImageTimeout = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(remoteImageSection.contentEl)
+			.setName('自动重试代理加载')
+			.setDesc('当直接加载失败时，自动尝试通过代理服务加载图片')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.autoRetryRemoteImage ?? true)
+				.onChange(async (value) => {
+					this.plugin.settings.autoRetryRemoteImage = value;
 					await this.plugin.saveSettings();
 				}));
 
@@ -1039,8 +1230,12 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 保存更新
 	if (needsSave) {
 		this.plugin.settings.ignoredHashMetadata = hashMetadata;
-		this.plugin.saveSettings().catch(err => {
-			console.error('保存设置失败:', err);
+		this.plugin.saveSettings().catch(async (err) => {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '保存设置失败', {
+					error: err instanceof Error ? err : new Error(String(err))
+				});
+			}
 		});
 	}
 
@@ -1402,6 +1597,143 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		}
 	});
 
+		// 12. 图床上传设置
+		const uploadSection = this.createCollapsibleSection(containerEl, '☁️ 图床上传设置', 'upload', false);
+
+		new Setting(uploadSection.contentEl)
+			.setName('图床类型')
+			.setDesc('选择要使用的图床服务')
+			.addDropdown(dropdown => dropdown
+				.addOption('qiniu', '七牛云')
+				.addOption('aliyun', '阿里云 OSS')
+				.setValue(this.plugin.settings.uploadConfig?.type || 'qiniu')
+				.onChange(async (value) => {
+					if (!this.plugin.settings.uploadConfig) {
+						this.plugin.settings.uploadConfig = { type: 'qiniu' };
+					}
+					this.plugin.settings.uploadConfig.type = value as any;
+					await this.plugin.saveSettings();
+					this.display(); // 刷新以显示对应配置
+				}));
+
+		if (this.plugin.settings.uploadConfig?.type === 'qiniu') {
+			const qiniu = this.plugin.settings.uploadConfig.qiniu || { accessKey: '', secretKey: '', bucket: '', domain: '', region: 'z0' };
+			this.plugin.settings.uploadConfig.qiniu = qiniu;
+
+			new Setting(uploadSection.contentEl)
+				.setName('Access Key')
+				.setDesc('七牛云 Access Key')
+				.addText(text => text
+					.setValue(qiniu.accessKey)
+					.onChange(async (value) => {
+						qiniu.accessKey = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('Secret Key')
+				.setDesc('七牛云 Secret Key')
+				.addText(text => text
+					.setValue(qiniu.secretKey)
+					.setPlaceholder('不会明文显示')
+					.onChange(async (value) => {
+						qiniu.secretKey = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('存储空间 (Bucket)')
+				.setDesc('七牛云存储空间名称')
+				.addText(text => text
+					.setValue(qiniu.bucket)
+					.onChange(async (value) => {
+						qiniu.bucket = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('访问域名')
+				.setDesc('七牛云存储空间绑定的域名 (包含 http/https)')
+				.addText(text => text
+					.setValue(qiniu.domain)
+					.setPlaceholder('http://your-domain.com')
+					.onChange(async (value) => {
+						qiniu.domain = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('区域')
+				.setDesc('存储区域 (z0: 华东, z1: 华北, z2: 华南, na0: 北美, as0: 东南亚)')
+				.addDropdown(dropdown => dropdown
+					.addOption('z0', '华东')
+					.addOption('z1', '华北')
+					.addOption('z2', '华南')
+					.addOption('na0', '北美')
+					.addOption('as0', '东南亚')
+					.setValue(qiniu.region)
+					.onChange(async (value) => {
+						qiniu.region = value;
+						await this.plugin.saveSettings();
+					}));
+		} else if (this.plugin.settings.uploadConfig?.type === 'aliyun') {
+			const aliyun = this.plugin.settings.uploadConfig.aliyun || { accessKeyId: '', accessKeySecret: '', bucket: '', region: 'oss-cn-hangzhou' };
+			this.plugin.settings.uploadConfig.aliyun = aliyun;
+
+			new Setting(uploadSection.contentEl)
+				.setName('Access Key ID')
+				.setDesc('阿里云 Access Key ID')
+				.addText(text => text
+					.setValue(aliyun.accessKeyId)
+					.onChange(async (value) => {
+						aliyun.accessKeyId = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('Access Key Secret')
+				.setDesc('阿里云 Access Key Secret')
+				.addText(text => text
+					.setValue(aliyun.accessKeySecret)
+					.setPlaceholder('不会明文显示')
+					.onChange(async (value) => {
+						aliyun.accessKeySecret = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('存储空间 (Bucket)')
+				.setDesc('阿里云 OSS Bucket 名称')
+				.addText(text => text
+					.setValue(aliyun.bucket)
+					.onChange(async (value) => {
+						aliyun.bucket = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('区域 (Region)')
+				.setDesc('OSS 区域 (例如 oss-cn-hangzhou)')
+				.addText(text => text
+					.setValue(aliyun.region)
+					.setPlaceholder('oss-cn-hangzhou')
+					.onChange(async (value) => {
+						aliyun.region = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('自定义域名 (可选)')
+				.setDesc('如果绑定了自定义域名')
+				.addText(text => text
+					.setValue(aliyun.customDomain || '')
+					.setPlaceholder('http://oss.example.com')
+					.onChange(async (value) => {
+						aliyun.customDomain = value;
+						await this.plugin.saveSettings();
+					}));
+		}
+
 		// 13. 操作日志
 		const logsSection = this.createCollapsibleSection(containerEl, '📋 操作日志', 'logs', false);
 
@@ -1752,5 +2084,183 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		});
 		
 		return { headerEl, contentEl };
+	}
+
+	/**
+	 * 过滤设置项（根据搜索关键词）
+	 */
+	private filterSettings(query: string) {
+		const sections = this.containerEl.querySelectorAll('.collapsible-section-container');
+		
+		sections.forEach((section: Element) => {
+			const contentEl = section.querySelector('.collapsible-section-content') as HTMLElement;
+			if (!contentEl) return;
+
+			if (!query) {
+				// 没有搜索关键词，显示所有设置
+				contentEl.style.display = '';
+				return;
+			}
+
+			// 检查标题是否匹配
+			const headerText = section.querySelector('.collapsible-section-header')?.textContent?.toLowerCase() || '';
+			const titleMatch = headerText.includes(query);
+
+			// 检查设置项是否匹配
+			const settings = contentEl.querySelectorAll('.setting-item');
+			let hasMatch = titleMatch;
+
+			settings.forEach((setting: Element) => {
+				const settingText = setting.textContent?.toLowerCase() || '';
+				const matches = settingText.includes(query);
+				(setting as HTMLElement).style.display = matches ? '' : 'none';
+				if (matches) hasMatch = true;
+			});
+
+			// 如果标题或任何设置项匹配，展开并显示该分组
+			if (hasMatch) {
+				contentEl.style.display = 'block';
+				const iconEl = section.querySelector('.collapse-icon') as HTMLElement;
+				if (iconEl) iconEl.textContent = '▼';
+				const sectionId = section.id;
+				this.collapsedSections.delete(sectionId);
+			} else {
+				contentEl.style.display = 'none';
+			}
+		});
+	}
+
+	/**
+	 * 导出设置到 JSON 文件
+	 */
+	private async exportSettings() {
+		try {
+			const settingsJson = JSON.stringify(this.plugin.settings, null, 2);
+			const blob = new Blob([settingsJson], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `imagemgr-settings-${new Date().toISOString().split('T')[0]}.json`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+			new Notice('✅ 设置已导出');
+		} catch (error) {
+			new Notice('❌ 导出设置失败');
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '导出设置失败', {
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
+		}
+	}
+
+	/**
+	 * 从 JSON 文件导入设置
+	 */
+	private async importSettings() {
+		try {
+			// 创建文件输入元素
+			const input = document.createElement('input');
+			input.type = 'file';
+			input.accept = '.json';
+			input.style.display = 'none';
+
+			input.onchange = async (e) => {
+				const file = (e.target as HTMLInputElement).files?.[0];
+				if (!file) return;
+
+				try {
+					const text = await file.text();
+					const importedSettings = JSON.parse(text);
+
+					// 验证设置格式
+					if (typeof importedSettings !== 'object' || importedSettings === null) {
+						new Notice('❌ 无效的设置文件格式');
+						return;
+					}
+
+					// 确认导入
+					const confirmed = await ConfirmModal.show(
+						this.app,
+						'导入设置',
+						'导入设置将覆盖当前所有设置，是否继续？',
+						['导入', '取消']
+					);
+
+					if (confirmed === 'save') {
+						// 合并导入的设置（保留一些关键数据）
+						const currentSettings = { ...this.plugin.settings };
+						this.plugin.settings = { ...currentSettings, ...importedSettings };
+						
+						// 确保关键字段存在
+						if (!this.plugin.settings.uploadConfig) {
+							this.plugin.settings.uploadConfig = currentSettings.uploadConfig || { type: 'qiniu' };
+						}
+						
+						await this.plugin.saveSettings();
+						new Notice('✅ 设置已导入，请刷新页面');
+						this.display(); // 刷新设置页面
+					}
+				} catch (error) {
+					new Notice('❌ 导入设置失败：文件格式错误');
+					if (this.plugin?.logger) {
+						await this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '导入设置失败', {
+							error: error instanceof Error ? error : new Error(String(error))
+						});
+					}
+				}
+
+				document.body.removeChild(input);
+			};
+
+			document.body.appendChild(input);
+			input.click();
+		} catch (error) {
+			new Notice('❌ 导入设置失败');
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '导入设置失败', {
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
+		}
+	}
+
+	/**
+	 * 重置所有设置为默认值
+	 */
+	private async resetSettings() {
+		const confirmed = await ConfirmModal.show(
+			this.app,
+			'重置设置',
+			'确定要将所有设置重置为默认值吗？此操作不可撤销。\n\n注意：快捷键配置不会被重置。',
+			['重置', '取消']
+		);
+
+		if (confirmed === 'save') {
+			try {
+				// 保存快捷键配置
+				const keyboardShortcuts = this.plugin.settings.keyboardShortcuts || {};
+				
+				// 重置所有设置
+				const { DEFAULT_SETTINGS } = await import('../settings');
+				this.plugin.settings = { ...DEFAULT_SETTINGS };
+				
+				// 恢复快捷键配置
+				this.plugin.settings.keyboardShortcuts = keyboardShortcuts;
+				
+				await this.plugin.saveSettings();
+				new Notice('✅ 设置已重置为默认值');
+				this.display(); // 刷新设置页面
+			} catch (error) {
+				new Notice('❌ 重置设置失败');
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '重置设置失败', {
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
+			}
+		}
 	}
 }

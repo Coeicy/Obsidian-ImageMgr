@@ -193,7 +193,12 @@ export class ReferenceManager {
 					await this.handleFileRename(oldPath, file.path);
 				}
 			} catch (err) {
-				console.error('[ReferenceManager] 文件重命名处理错误:', err);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.UPDATE_REFERENCE, '文件重命名处理错误', {
+						error: err instanceof Error ? err : new Error(String(err)),
+						details: { oldPath, newPath: file?.path }
+					});
+				}
 			}
 		};
 		

@@ -116,7 +116,7 @@ export class ImageScanner {
 		// 获取扫描缓存
 		const scanCache = this.plugin.data?.imageScanCache || {};
 		const useCachedData = !forceFullScan && Object.keys(scanCache).length > 0;
-		
+
 		// 第一阶段：扫描文件（增量扫描）
 		onProgress?.({ current: 0, total: files.length, phase: 'scanning', usedCache: useCachedData });
 		
@@ -147,7 +147,10 @@ export class ImageScanner {
 				let imageInfo: ImageInfo;
 				
 				if (useCachedData && fileUnchanged) {
-					// 使用缓存数据（包含引用信息）
+					// 使用缓存数据
+					// 注意：引用信息不使用缓存，因为引用关系取决于 Markdown 文件内容，
+					// 即使图片文件未修改，引用也可能发生变化。
+					// 引用信息将在后续步骤中重新计算。
 					imageInfo = {
 						path: file.path,
 						name: file.name,
@@ -155,10 +158,7 @@ export class ImageScanner {
 						modified: cached.mtime,
 						width: cached.width,
 						height: cached.height,
-						md5: cached.md5,
-						references: cached.references,
-						referenceCount: cached.referenceCount,
-						referencesUpdatedAt: cached.referencesUpdatedAt
+						md5: cached.md5
 					};
 					cacheHits++;
 				} else {
@@ -205,7 +205,7 @@ export class ImageScanner {
 			cacheHits,
 			newScans
 		});
-		
+
 		// 第二阶段：计算哈希值（如果启用去重）
 		const hashMap = new Map<string, ImageInfo[]>();
 		let duplicateCount = 0;
@@ -332,8 +332,13 @@ export class ImageScanner {
 		});
 		
 		// 计算链接格式统计和空链接
-		const { brokenLinks, linkFormatStats } = await this.calculateLinkStats(imageInfos, onProgress, useCachedData, cacheHits, newScans);
+		const { brokenLinks, linkFormatStats, remoteImages } = await this.calculateLinkStats(imageInfos, onProgress, useCachedData, cacheHits, newScans);
 		
+		// 合并网络图片到主列表
+		if (remoteImages && remoteImages.length > 0) {
+			imageInfos.push(...remoteImages);
+		}
+
 		onProgress?.({ 
 			current: imageFiles.length, 
 			total: imageFiles.length, 
@@ -547,29 +552,38 @@ export class ImageScanner {
 	 */
 	private async saveScanCache(imageInfos: ImageInfo[], currentFilePaths: Set<string>): Promise<void> {
 		try {
-			// 构建新的扫描缓存（包含引用信息）
+			// 获取旧的扫描缓存
+			const oldCache = this.plugin.data?.imageScanCache || {};
+			
+			// 构建新的扫描缓存（仅保存文件元数据，不保存引用信息）
+			// 引用信息变化频繁且不依赖于图片文件本身，不适合缓存
 			const newCache: { [path: string]: { 
 				mtime: number; 
 				size: number; 
 				width?: number; 
 				height?: number; 
 				md5?: string;
-				references?: ImageReferenceInfo[];
-				referenceCount?: number;
-				referencesUpdatedAt?: number;
 			} } = {};
 			
+			// 保存当前扫描到的图片信息
 			for (const info of imageInfos) {
 				newCache[info.path] = {
 					mtime: info.modified,
 					size: info.size,
 					width: info.width,
 					height: info.height,
-					md5: info.md5,
-					references: info.references,
-					referenceCount: info.referenceCount,
-					referencesUpdatedAt: info.referencesUpdatedAt
+					md5: info.md5
 				};
+			}
+			
+			// 清理已删除文件的缓存项
+			// 遍历旧缓存，统计需要清理的项（实际清理通过替换 newCache 实现）
+			let cleanedCount = 0;
+			for (const cachedPath in oldCache) {
+				if (!currentFilePaths.has(cachedPath)) {
+					// 文件已删除，统计清理数量
+					cleanedCount++;
+				}
 			}
 			
 			// 更新插件数据
@@ -581,6 +595,21 @@ export class ImageScanner {
 			
 			// 保存到磁盘
 			await this.plugin.saveData(this.plugin.data);
+			
+			// 记录清理日志（仅在清理了缓存项时）
+			if (cleanedCount > 0 && this.plugin?.logger) {
+				await this.plugin.logger.debug(
+					OperationType.SCAN,
+					`扫描缓存清理完成：已清理 ${cleanedCount} 个已删除文件的缓存项`,
+					{
+						details: {
+							cleanedCount,
+							totalCached: Object.keys(oldCache).length,
+							remainingCached: Object.keys(newCache).length
+						}
+					}
+				);
+			}
 		} catch (error) {
 			if (this.plugin?.logger) {
 				await this.plugin.logger.error(OperationType.SCAN, '保存扫描缓存失败', {
@@ -666,8 +695,56 @@ export class ImageScanner {
 	}
 	
 	/**
+	 * 收集网络图片信息并添加到统计中
+	 */
+	private collectRemoteImageInfo(
+		linkPath: string,
+		mdFile: TFile,
+		lineNum: number,
+		line: string,
+		matchType: 'markdown' | 'html',
+		displayText: string | undefined,
+		remoteImageMap: Map<string, ImageInfo>,
+		linkFormatStats: LinkFormatStats
+	) {
+		linkFormatStats.remote++;
+		linkFormatStats.total++;
+		
+		// 收集网络图片信息
+		if (!remoteImageMap.has(linkPath)) {
+			// 从 URL 中提取文件名
+			let name = linkPath.split('/').pop() || 'unknown';
+			if (name.includes('?')) name = name.split('?')[0];
+			if (name.includes('#')) name = name.split('#')[0];
+			
+			remoteImageMap.set(linkPath, {
+				path: linkPath,
+				name: name,
+				size: 0, // 网络图片大小未知
+				modified: 0, // 网络图片修改时间未知
+				references: [],
+				referenceCount: 0,
+				isRemote: true
+			});
+		}
+		
+		// 添加引用信息
+		const imgInfo = remoteImageMap.get(linkPath)!;
+		imgInfo.references!.push({
+			filePath: mdFile.path,
+			lineNumber: lineNum + 1,
+			displayText: displayText,
+			fullLine: line,
+			matchType: matchType,
+			linkPathFormat: 'absolute' // 网络链接视为绝对路径
+		});
+		imgInfo.referenceCount = imgInfo.references!.length;
+		imgInfo.referencesUpdatedAt = Date.now();
+	}
+
+	/**
 	 * 计算链接格式统计和空链接
-	 * 
+	 *
 	 * 扫描所有 Markdown 文件，统计：
 	 * 1. 各种链接格式的数量（Wiki/Markdown/HTML）
 	 * 2. 链接路径格式的数量（最短/相对/绝对）
@@ -683,7 +760,7 @@ export class ImageScanner {
 		useCachedData?: boolean,
 		cacheHits?: number,
 		newScans?: number
-	): Promise<{ brokenLinks: BrokenLinkInfo[]; linkFormatStats: LinkFormatStats }> {
+	): Promise<{ brokenLinks: BrokenLinkInfo[]; linkFormatStats: LinkFormatStats; remoteImages: ImageInfo[] }> {
 		const brokenLinks: BrokenLinkInfo[] = [];
 		const linkFormatStats: LinkFormatStats = {
 			wiki: 0,
@@ -692,8 +769,13 @@ export class ImageScanner {
 			shortest: 0,
 			relative: 0,
 			absolute: 0,
+			remote: 0,
+			remoteLinks: [],
 			total: 0
 		};
+		
+		// 使用 Map 存储网络图片信息 (URL -> ImageInfo)
+		const remoteImageMap = new Map<string, ImageInfo>();
 		
 		// 构建图片路径集合，用于快速检查图片是否存在
 		const imagePathSet = new Set<string>();
@@ -707,6 +789,9 @@ export class ImageScanner {
 		const mdFiles = this.app.vault.getMarkdownFiles();
 		const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'];
 		
+		// 辅助函数：检查是否为网络链接
+		const isRemoteLink = (path: string) => path.startsWith('http://') || path.startsWith('https://');
+
 		// 遍历所有 Markdown 文件
 		for (let i = 0; i < mdFiles.length; i++) {
 			const mdFile = mdFiles[i];
@@ -763,10 +848,50 @@ export class ImageScanner {
 					// 检测 Markdown 格式链接 ![...](...) - 排除行内代码
 					const mdMatches = line.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g);
 					for (const match of mdMatches) {
-						const linkPath = match[2].trim();
+						let linkPath = match[2].trim();
+						// 处理 Markdown 链接中的 Title 部分：[alt](url "title")
+						if (linkPath.includes(' ')) {
+							linkPath = linkPath.split(' ')[0];
+						}
 						
-						// 跳过外部链接
-						if (linkPath.startsWith('http://') || linkPath.startsWith('https://')) continue;
+						// 处理网络图片链接
+						if (isRemoteLink(linkPath)) {
+							linkFormatStats.remote++;
+							linkFormatStats.total++;
+							
+							// 收集网络图片信息
+							if (!remoteImageMap.has(linkPath)) {
+								// 从 URL 中提取文件名
+								let name = linkPath.split('/').pop() || 'unknown';
+								if (name.includes('?')) name = name.split('?')[0];
+								if (name.includes('#')) name = name.split('#')[0];
+								
+								remoteImageMap.set(linkPath, {
+									path: linkPath,
+									name: name,
+									size: 0, // 网络图片大小未知
+									modified: 0, // 网络图片修改时间未知
+									references: [],
+									referenceCount: 0,
+									isRemote: true
+								});
+							}
+							
+							// 添加引用信息
+							const imgInfo = remoteImageMap.get(linkPath)!;
+							imgInfo.references!.push({
+								filePath: mdFile.path,
+								lineNumber: lineNum + 1,
+								displayText: match[1] || undefined,
+								fullLine: line,
+								matchType: 'markdown',
+								linkPathFormat: 'absolute' // 网络链接视为绝对路径
+							});
+							imgInfo.referenceCount = imgInfo.references!.length;
+							imgInfo.referencesUpdatedAt = Date.now();
+							
+							continue;
+						}
 						
 						// 检查是否是图片链接
 						const ext = linkPath.split('.').pop()?.toLowerCase();
@@ -795,8 +920,20 @@ export class ImageScanner {
 					for (const match of htmlMatches) {
 						const linkPath = match[1].trim();
 						
-						// 跳过外部链接
-						if (linkPath.startsWith('http://') || linkPath.startsWith('https://')) continue;
+						// 处理网络图片链接
+						if (isRemoteLink(linkPath)) {
+							this.collectRemoteImageInfo(
+								linkPath,
+								mdFile,
+								lineNum,
+								line,
+								'html',
+								undefined, // HTML 链接通常没有显示文本，或者是 alt 属性
+								remoteImageMap,
+								linkFormatStats
+							);
+							continue;
+						}
 						
 						// 检查是否是图片链接
 						const ext = linkPath.split('.').pop()?.toLowerCase();
@@ -839,7 +976,11 @@ export class ImageScanner {
 			}
 		}
 		
-		return { brokenLinks, linkFormatStats };
+		// 将 Map 转换为数组
+		linkFormatStats.remoteLinks = Array.from(remoteImageMap.keys());
+		const remoteImages = Array.from(remoteImageMap.values());
+		
+		return { brokenLinks, linkFormatStats, remoteImages };
 	}
 	
 	/**

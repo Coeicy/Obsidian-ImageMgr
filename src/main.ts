@@ -1,7 +1,8 @@
-import { Plugin, TFile, debounce } from 'obsidian';
+import { Plugin, TFile, debounce, TFolder } from 'obsidian';
 import { ImageManagementSettings, DEFAULT_SETTINGS } from './settings';
 import { ImageManagementSettingTab } from './ui/settings-tab';
 import { ImageManagerView, IMAGE_MANAGER_VIEW_TYPE } from './ui/image-manager-view';
+import { NetworkImageModal } from './ui/network-image-modal';
 import { Logger, LogLevel, OperationType } from './utils/logger';
 import { ErrorHandler } from './utils/error-handler';
 import { PluginData } from './types';
@@ -151,6 +152,15 @@ export default class ImageManagementPlugin extends Plugin {
 			}
 		});
 
+		// 添加扫描网络图片命令
+		this.addCommand({
+			id: 'scan-network-images',
+			name: '扫描网络图片',
+			callback: () => {
+				new NetworkImageModal(this.app, this).open();
+			}
+		});
+
 		// 添加侧边栏图标
 		this.addRibbonIcon('images', '图片管理', async () => {
 			await this.activateView();
@@ -196,6 +206,26 @@ export default class ImageManagementPlugin extends Plugin {
 					// 确保 file 有效且有 name 属性
 					if (file instanceof TFile && file.name) {
 						await this.handleFileDelete(file);
+					}
+				})
+			);
+
+			// 注册文件菜单事件（右键菜单）
+			this.registerEvent(
+				this.app.workspace.on('file-menu', (menu, file) => {
+					// 只在文件夹或 Markdown 文件上显示
+					const isFolder = file instanceof TFolder;
+					const isMarkdown = file instanceof TFile && file.extension === 'md';
+
+					if (isFolder || isMarkdown) {
+						menu.addItem((item) => {
+							item
+								.setTitle('扫描网络图片')
+								.setIcon('search')
+								.onClick(() => {
+									new NetworkImageModal(this.app, this).open();
+								});
+						});
 					}
 				})
 			);
@@ -305,7 +335,8 @@ export default class ImageManagementPlugin extends Plugin {
 					'ignoredFiles', 'ignoredHashes', 'ignoredHashMetadata', 'showIgnoredFilePath',
 					'pureGallery', 'uniformCardHeight', 'searchCaseSensitive', 'liveSearchDelay',
 					'searchInPath', 'maxBatchOperations', 'batchConfirmThreshold', 'showBatchProgress',
-					'showStatistics', 'statisticsPosition'];
+					'showStatistics', 'statisticsPosition',
+					'scanRemoteImages', 'remoteImageProxy', 'showRemoteImageBadge', 'remoteImageTimeout', 'autoRetryRemoteImage'];
 				
 				for (const key of settingsKeys) {
 					if (key in loadedData) {
@@ -1077,6 +1108,22 @@ export default class ImageManagementPlugin extends Plugin {
 					this.referenceCache.set(newPath, new Set(referencedFiles));
 				}
 
+				// 更新扫描缓存（从旧路径迁移到新路径）
+				if (this.data.imageScanCache && this.data.imageScanCache[oldPath]) {
+					const cachedData = this.data.imageScanCache[oldPath];
+					// 更新文件修改时间（移动可能改变 mtime）
+					const newFile = this.app.vault.getAbstractFileByPath(newPath) as TFile;
+					if (newFile) {
+						cachedData.mtime = newFile.stat.mtime;
+						cachedData.size = newFile.stat.size;
+					}
+					// 迁移到新路径
+					this.data.imageScanCache[newPath] = cachedData;
+					delete this.data.imageScanCache[oldPath];
+					// 延迟保存，避免频繁写入
+					this.debouncedSaveData();
+				}
+
 				return;
 			}
 
@@ -1185,6 +1232,22 @@ export default class ImageManagementPlugin extends Plugin {
 			} else if (referencedFiles.length > 0) {
 				this.referenceCache.set(newPath, new Set(referencedFiles));
 			}
+
+			// 更新扫描缓存（从旧路径迁移到新路径）
+			if (this.data.imageScanCache && this.data.imageScanCache[oldPath]) {
+				const cachedData = this.data.imageScanCache[oldPath];
+				// 更新文件修改时间（重命名/移动可能改变 mtime）
+				const newFile = this.app.vault.getAbstractFileByPath(newPath) as TFile;
+				if (newFile) {
+					cachedData.mtime = newFile.stat.mtime;
+					cachedData.size = newFile.stat.size;
+				}
+				// 迁移到新路径
+				this.data.imageScanCache[newPath] = cachedData;
+				delete this.data.imageScanCache[oldPath];
+				// 延迟保存，避免频繁写入
+				this.debouncedSaveData();
+			}
 		} catch (error) {
 			if (this.logger) {
 				await this.logger.error(OperationType.PLUGIN_ERROR, '检测图片重命名失败', {
@@ -1257,6 +1320,13 @@ export default class ImageManagementPlugin extends Plugin {
 
 		// 清理引用缓存
 		this.referenceCache.delete(filePath);
+		
+		// 清理扫描缓存
+		if (this.data.imageScanCache && this.data.imageScanCache[filePath]) {
+			delete this.data.imageScanCache[filePath];
+			// 延迟保存，避免频繁写入
+			this.debouncedSaveData();
+		}
 	}
 
 	/**

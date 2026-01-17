@@ -5,7 +5,7 @@
  */
 
 import { App, Modal } from 'obsidian';
-import { ImageInfo } from '../types';
+import { ImageInfo, LinkFormatStats } from '../types';
 import { ImageProcessor } from '../utils/image-processor';
 import { makeModalResizable } from '../utils/resizable-modal';
 
@@ -21,10 +21,13 @@ import { makeModalResizable } from '../utils/resizable-modal';
 export class StatsModal extends Modal {
 	/** 图片列表 */
 	images: ImageInfo[];
+	/** 链接统计信息 */
+	linkStats?: LinkFormatStats;
 
-	constructor(app: App, images: ImageInfo[]) {
+	constructor(app: App, images: ImageInfo[], linkStats?: LinkFormatStats) {
 		super(app);
 		this.images = images;
+		this.linkStats = linkStats;
 	}
 
 	onOpen() {
@@ -112,6 +115,52 @@ export class StatsModal extends Modal {
 			dimList.createEl('li', { 
 				text: `最小尺寸: ${stats.minWidth} × ${stats.minHeight} 像素` 
 			});
+		}
+
+		// 显示链接统计
+		if (this.linkStats) {
+			const linkEl = scrollContainer.createDiv('stats-section');
+			linkEl.createEl('h3', { text: '🔗 链接统计' });
+			const linkList = linkEl.createEl('ul', { cls: 'stats-list' });
+			
+			linkList.createEl('li', { text: `链接总数: ${this.linkStats.total}` });
+			linkList.createEl('li', { text: `Wiki 链接: ${this.linkStats.wiki}` });
+			linkList.createEl('li', { text: `Markdown 链接: ${this.linkStats.markdown}` });
+			linkList.createEl('li', { text: `HTML 链接: ${this.linkStats.html}` });
+			
+			if (this.linkStats.remote > 0) {
+				const remoteLi = linkList.createEl('li');
+				remoteLi.createSpan({ text: `🌐 网络图片: ` });
+				const remoteCountSpan = remoteLi.createSpan({ text: `${this.linkStats.remote} 张` });
+				remoteCountSpan.style.color = 'var(--text-accent)';
+				remoteCountSpan.style.fontWeight = 'bold';
+				
+				// 显示去重后的网络链接数量
+				if (this.linkStats.remoteLinks && this.linkStats.remoteLinks.length > 0) {
+					const uniqueLinks = [...new Set(this.linkStats.remoteLinks)];
+					if (uniqueLinks.length < this.linkStats.remote) {
+						remoteLi.createSpan({ text: ` (去重后: ${uniqueLinks.length} 张)` });
+					}
+
+					const remoteDetails = linkEl.createEl('details');
+					remoteDetails.style.marginTop = '8px';
+					const summary = remoteDetails.createEl('summary', { text: '查看网络图片链接列表' });
+					summary.style.cursor = 'pointer';
+					summary.style.color = 'var(--text-muted)';
+					
+					const remoteLinksList = remoteDetails.createEl('ul');
+					remoteLinksList.style.fontSize = '0.9em';
+					remoteLinksList.style.color = 'var(--text-muted)';
+					remoteLinksList.style.maxHeight = '200px';
+					remoteLinksList.style.overflowY = 'auto';
+					
+					uniqueLinks.forEach(link => {
+						const li = remoteLinksList.createEl('li');
+						li.style.wordBreak = 'break-all';
+						li.createEl('a', { text: link, href: link });
+					});
+				}
+			}
 		}
 	}
 

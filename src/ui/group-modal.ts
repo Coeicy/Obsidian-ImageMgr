@@ -13,7 +13,7 @@ import { makeModalResizable } from '../utils/resizable-modal';
  */
 export interface GroupOptions {
     /** 分组方式 */
-    mode: 'folder' | 'type' | 'reference' | 'lock' | 'custom';
+    mode: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom';
     /** 自定义分组名称（当 mode = custom 时必填） */
     name?: string;
     /** 作用范围 */
@@ -38,9 +38,9 @@ export class GroupModal extends Modal {
 	selectedCount: number;
 	filteredCount: number;
 	totalCount: number;
-	currentGroupMode: 'folder' | 'type' | 'reference' | 'lock' | 'custom' | null;
+	currentGroupMode: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom' | null;
 
-    constructor(app: App, counts: { selected: number, filtered: number, total: number }, onSubmit: (options: GroupOptions) => void, currentGroupMode?: 'folder' | 'type' | 'reference' | 'lock' | 'custom') {
+    constructor(app: App, counts: { selected: number, filtered: number, total: number }, onSubmit: (options: GroupOptions) => void, currentGroupMode?: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom') {
 		super(app);
 		this.selectedCount = counts.selected;
 		this.filteredCount = counts.filtered;
@@ -62,7 +62,7 @@ export class GroupModal extends Modal {
         contentEl.createEl('h2', { text: '创建图片分组' });
 
         // 默认为 'folder'，如果有当前分组模式则使用当前模式
-        let groupMode: 'folder' | 'type' | 'reference' | 'lock' | 'custom' = this.currentGroupMode ? this.currentGroupMode : 'folder';
+        let groupMode: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom' = this.currentGroupMode ? this.currentGroupMode : 'folder';
         let groupName = '';
         let scope: 'all' | 'filtered' | 'selected' = 'filtered';
 
@@ -76,6 +76,7 @@ export class GroupModal extends Modal {
                     .addOption('type', '按类型（PNG/JPG/…）')
                     .addOption('reference', '按引用状态（被引用/未引用）')
                     .addOption('lock', '按锁定状态（锁定/未锁定）')
+                    .addOption('location', '按位置类型（云端/本地）')
                     .addOption('custom', '自定义名称')
                     .setValue(groupMode)
                     .onChange(value => {
