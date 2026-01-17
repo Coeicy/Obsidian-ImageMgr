@@ -87,6 +87,8 @@ export class ImageManagerView extends ItemView {
 	private operationHistory: Array<'search' | 'sort' | 'filter' | 'group'> = [];
 	/** 清除按钮元素引用 */
 	private clearBtnElement: HTMLElement | null = null;
+	/** 清除按钮单击处理标志（用于区分单击和双击） */
+	private clearButtonSingleClickHandled: boolean = false;
 	/** 图片懒加载观察器 */
 	private imageObserver: IntersectionObserver | null = null;
 
@@ -382,7 +384,22 @@ export class ImageManagerView extends ItemView {
 		const clearBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
 		clearBtn.setAttribute('id', 'clear-btn');
 		clearBtn.style.display = 'none';
-		clearBtn.addEventListener('click', () => this.handleClearButtonClick());
+		// 单击：按顺序清除一个操作
+		clearBtn.addEventListener('click', () => {
+			this.clearButtonSingleClickHandled = false;
+			// 延迟执行，如果双击则取消
+			setTimeout(() => {
+				if (!this.clearButtonSingleClickHandled) {
+					this.handleClearButtonSingleClick();
+				}
+			}, 250);
+		});
+		// 双击：清除所有操作
+		clearBtn.addEventListener('dblclick', (e) => {
+			e.preventDefault();
+			this.clearButtonSingleClickHandled = true;
+			this.handleClearAll();
+		});
 		this.clearBtnElement = clearBtn;
 
 		// 创建图片列表容器
@@ -4360,7 +4377,11 @@ export class ImageManagerView extends ItemView {
 							this.filterOptions.sizeFilter.max !== undefined)) ||
 						  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
 						  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
-		const hasGroup = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+		// 检查是否有分组：包括自定义分组和动态分组（锁定分组、位置分组）
+		const hasCustomGroups = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+		const hasLockGroup = !!(this.plugin.data?.groupMeta?.['_lock_group']?.type === 'lock');
+		const hasLocationGroup = !!(this.plugin.data?.groupMeta?.['_location_group']?.type === 'location');
+		const hasGroup = hasCustomGroups || hasLockGroup || hasLocationGroup;
 
 		// 从栈顶向下遍历，找到第一个有效的操作
 		for (let i = this.operationHistory.length - 1; i >= 0; i--) {
@@ -4374,10 +4395,10 @@ export class ImageManagerView extends ItemView {
 	}
 
 	/**
-	 * 处理清除按钮点击
+	 * 处理清除按钮单击
 	 * 按操作顺序倒序清除（后操作的先清除）
 	 */
-	private handleClearButtonClick() {
+	private handleClearButtonSingleClick() {
 		const topOperation = this.getTopValidOperation();
 		if (topOperation === 'search') {
 			this.clearSearch();
@@ -4391,6 +4412,60 @@ export class ImageManagerView extends ItemView {
 	}
 
 	/**
+	 * 清除所有操作（搜索、排序、筛选、分组）
+	 * 通过双击清除按钮触发
+	 */
+	private async handleClearAll() {
+		// 检查是否有任何操作需要清除
+		const hasSearch = this.searchQuery.trim() !== '';
+		const hasSort = this.sortOptions.rules.length > 1 || 
+						this.sortOptions.rules[0].sortBy !== this.plugin.settings.defaultSortBy ||
+						this.sortOptions.rules[0].sortOrder !== this.plugin.settings.defaultSortOrder;
+		const hasFilter = this.filterOptions.filterType !== this.plugin.settings.defaultFilterType ||
+						  this.filterOptions.lockFilter !== undefined ||
+						  this.filterOptions.referenceFilter !== undefined ||
+						  this.filterOptions.locationFilter !== undefined ||
+						  (this.filterOptions.sizeFilter && 
+						   (this.filterOptions.sizeFilter.min !== undefined || 
+							this.filterOptions.sizeFilter.max !== undefined)) ||
+						  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
+						  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
+		const hasCustomGroups = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+		const hasLockGroup = !!(this.plugin.data?.groupMeta?.['_lock_group']?.type === 'lock');
+		const hasLocationGroup = !!(this.plugin.data?.groupMeta?.['_location_group']?.type === 'location');
+		const hasGroup = hasCustomGroups || hasLockGroup || hasLocationGroup;
+
+		if (!hasSearch && !hasSort && !hasFilter && !hasGroup) {
+			new Notice('没有需要清除的操作');
+			return;
+		}
+
+		// 清除所有操作（按操作顺序倒序清除）
+		// 从操作历史栈的栈顶开始，依次清除
+		const operationsToClear = [...this.operationHistory].reverse();
+		
+		for (const op of operationsToClear) {
+			if (op === 'search' && hasSearch) {
+				this.clearSearch();
+			} else if (op === 'sort' && hasSort) {
+				this.clearSort();
+			} else if (op === 'filter' && hasFilter) {
+				this.clearFilter();
+			} else if (op === 'group' && hasGroup) {
+				await this.clearGroup();
+			}
+		}
+
+		// 清空操作历史栈
+		this.operationHistory = [];
+
+		// 更新清除按钮状态
+		this.updateClearButtonState();
+
+		new Notice('✅ 已清除所有操作');
+	}
+
+	/**
 	 * 更新清除按钮的状态和文本
 	 */
 	private updateClearButtonState() {
@@ -4401,18 +4476,47 @@ export class ImageManagerView extends ItemView {
 		if (topOperation) {
 			this.clearBtnElement.style.display = '';
 			
+			// 检查是否有多个操作需要清除
+			const hasSearch = this.searchQuery.trim() !== '';
+			const hasSort = this.sortOptions.rules.length > 1 || 
+							this.sortOptions.rules[0].sortBy !== this.plugin.settings.defaultSortBy ||
+							this.sortOptions.rules[0].sortOrder !== this.plugin.settings.defaultSortOrder;
+			const hasFilter = this.filterOptions.filterType !== this.plugin.settings.defaultFilterType ||
+							  this.filterOptions.lockFilter !== undefined ||
+							  this.filterOptions.referenceFilter !== undefined ||
+							  this.filterOptions.locationFilter !== undefined ||
+							  (this.filterOptions.sizeFilter && 
+							   (this.filterOptions.sizeFilter.min !== undefined || 
+								this.filterOptions.sizeFilter.max !== undefined)) ||
+							  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
+							  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
+			const hasCustomGroups = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+			const hasLockGroup = !!(this.plugin.data?.groupMeta?.['_lock_group']?.type === 'lock');
+			const hasLocationGroup = !!(this.plugin.data?.groupMeta?.['_location_group']?.type === 'location');
+			const hasGroup = hasCustomGroups || hasLockGroup || hasLocationGroup;
+			
+			const operationCount = [hasSearch, hasSort, hasFilter, hasGroup].filter(Boolean).length;
+			
 			if (topOperation === 'search') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除搜索</span>';
-				this.clearBtnElement.title = '清除搜索条件';
+				this.clearBtnElement.title = operationCount > 1 
+					? `清除搜索条件（双击清除所有 ${operationCount} 个操作）`
+					: '清除搜索条件';
 			} else if (topOperation === 'sort') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除排序</span>';
-				this.clearBtnElement.title = '清除排序条件';
+				this.clearBtnElement.title = operationCount > 1 
+					? `清除排序条件（双击清除所有 ${operationCount} 个操作）`
+					: '清除排序条件';
 			} else if (topOperation === 'filter') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除筛选</span>';
-				this.clearBtnElement.title = '清除筛选条件';
+				this.clearBtnElement.title = operationCount > 1 
+					? `清除筛选条件（双击清除所有 ${operationCount} 个操作）`
+					: '清除筛选条件';
 			} else if (topOperation === 'group') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除分组</span>';
-				this.clearBtnElement.title = '清除所有分组';
+				this.clearBtnElement.title = operationCount > 1 
+					? `清除所有分组（双击清除所有 ${operationCount} 个操作）`
+					: '清除所有分组';
 			}
 		} else {
 			this.clearBtnElement.style.display = 'none';
@@ -4470,16 +4574,28 @@ export class ImageManagerView extends ItemView {
 
 	/**
 	 * 清除分组
+	 * 清除所有分组，包括自定义分组和动态分组（锁定分组、位置分组等）
 	 */
 	private async clearGroup() {
-		// 清除所有分组
+		// 清除所有图片的分组标记
 		this.images.forEach(img => { img.group = undefined; });
 		this.filteredImages.forEach(img => { img.group = undefined; });
-		if (this.plugin.data.imageGroups) this.plugin.data.imageGroups = {};
 		
-		// 清除锁定分组标记
-		if (this.plugin.data.groupMeta && this.plugin.data.groupMeta['_lock_group']) {
-			delete this.plugin.data.groupMeta['_lock_group'];
+		// 清除自定义分组数据
+		if (this.plugin.data.imageGroups) {
+			this.plugin.data.imageGroups = {};
+		}
+		
+		// 清除所有动态分组标记（锁定分组、位置分组等）
+		if (this.plugin.data.groupMeta) {
+			// 清除锁定分组标记
+			if (this.plugin.data.groupMeta['_lock_group']) {
+				delete this.plugin.data.groupMeta['_lock_group'];
+			}
+			// 清除位置分组标记
+			if (this.plugin.data.groupMeta['_location_group']) {
+				delete this.plugin.data.groupMeta['_location_group'];
+			}
 		}
 		
 		await this.plugin.saveData(this.plugin.data);
