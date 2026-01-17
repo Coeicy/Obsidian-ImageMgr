@@ -324,6 +324,7 @@ export default class ImageManagementPlugin extends Plugin {
 				// 提取所有设置属性（包括锁定列表相关属性）
 				const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
 					'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
+					'enableDuplicateDetection', 'enableBrokenLinksDetection',
 					'autoGenerateNames', 'keepModalOpen', 'showReferenceTime', 'pathNamingDepth',
 					'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
 					'defaultWheelMode', 'showImageName', 'showImageSize', 
@@ -418,6 +419,7 @@ export default class ImageManagementPlugin extends Plugin {
 			// 排除所有设置属性（不包括锁定列表，因为它们通过 saveSettings 单独管理）
 			const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
 				'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
+				'enableDuplicateDetection', 'enableBrokenLinksDetection',
 				'autoGenerateNames', 'keepModalOpen', 'showReferenceTime', 'pathNamingDepth',
 				'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
 				'defaultWheelMode', 'showImageName', 'showImageSize', 

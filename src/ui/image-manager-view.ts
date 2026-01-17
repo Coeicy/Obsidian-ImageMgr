@@ -73,6 +73,10 @@ export class ImageManagerView extends ItemView {
 	private referenceCache: Map<string, boolean> = new Map();
 	/** 是否正在扫描图片的标志 */
 	private isScanning: boolean = false;
+	/** 是否正在检测空链接的标志 */
+	private isDetectingBrokenLinks: boolean = false;
+	/** 是否正在检测重复图片的标志 */
+	private isDetectingDuplicates: boolean = false;
 	/** 键盘事件处理器引用（用于快捷键） */
 	private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 	/** 滚轮事件处理器引用（用于缩放或切换） */
@@ -334,17 +338,21 @@ export class ImageManagerView extends ItemView {
 		this.updateButtonIndicator(pathRenameBtn, 'path-rename');
 		pathRenameBtn.addEventListener('click', () => this.batchPathRename());
 
-		// 重复检测按钮
-		const duplicateBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
-		duplicateBtn.setAttribute('id', 'duplicate-btn');
-		this.updateButtonIndicator(duplicateBtn, 'duplicate');
-		duplicateBtn.addEventListener('click', () => this.showDuplicates());
+		// 重复检测按钮（根据设置显示/隐藏）
+		if (this.plugin.settings.enableDuplicateDetection !== false) {
+			const duplicateBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
+			duplicateBtn.setAttribute('id', 'duplicate-btn');
+			this.updateButtonIndicator(duplicateBtn, 'duplicate');
+			duplicateBtn.addEventListener('click', () => this.showDuplicates());
+		}
 
-		// 空链接按钮
-		const brokenLinksBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
-		brokenLinksBtn.setAttribute('id', 'broken-links-btn');
-		this.updateButtonIndicator(brokenLinksBtn, 'broken-links');
-		brokenLinksBtn.addEventListener('click', () => this.showBrokenLinks());
+		// 空链接按钮（根据设置显示/隐藏）
+		if (this.plugin.settings.enableBrokenLinksDetection !== false) {
+			const brokenLinksBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
+			brokenLinksBtn.setAttribute('id', 'broken-links-btn');
+			this.updateButtonIndicator(brokenLinksBtn, 'broken-links');
+			brokenLinksBtn.addEventListener('click', () => this.showBrokenLinks());
+		}
 
 		// 链接转换按钮
 		const linkFormatBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
@@ -2863,6 +2871,15 @@ export class ImageManagerView extends ItemView {
 	}
 
 	async showDuplicates() {
+		// 检查是否有其他检测正在进行
+		if (this.isDetectingBrokenLinks) {
+			new Notice('空链接检测正在进行中，请稍候...');
+			return;
+		}
+
+		// 标记为正在检测重复图片
+		this.isDetectingDuplicates = true;
+
 		// 打开重复图片检测模态框
 		const modal = new DuplicateDetectionModal(
 			this.app,
@@ -2874,15 +2891,39 @@ export class ImageManagerView extends ItemView {
 			this.plugin,
 			this.duplicateHashMap // 传递预扫描的哈希映射
 		);
+		
+		// 保存原始的 onClose 方法
+		const originalOnClose = modal.onClose.bind(modal);
+		// 重写 onClose，在关闭时清除检测标志
+		modal.onClose = () => {
+			this.isDetectingDuplicates = false;
+			originalOnClose();
+		};
+
 		modal.open();
 	}
 
 	async showBrokenLinks() {
-		// 查找所有找不到链接的图片链接
-		const brokenLinks = await this.findBrokenImageLinks();
+		// 检查是否有其他检测正在进行
+		if (this.isDetectingDuplicates) {
+			new Notice('重复图片检测正在进行中，请稍候...');
+			return;
+		}
+
+		// 标记为正在检测空链接
+		this.isDetectingBrokenLinks = true;
+
+		// 立即打开模态框，在模态框内显示加载提示并检测
+		const modal = new BrokenLinksModal(this.app, undefined, this.plugin, this);
 		
-		// 创建模态框显示错误链接
-		const modal = new BrokenLinksModal(this.app, brokenLinks, this.plugin);
+		// 保存原始的 onClose 方法
+		const originalOnClose = modal.onClose.bind(modal);
+		// 重写 onClose，在关闭时清除检测标志
+		modal.onClose = () => {
+			this.isDetectingBrokenLinks = false;
+			originalOnClose();
+		};
+
 		modal.open();
 	}
 
@@ -2895,32 +2936,154 @@ export class ImageManagerView extends ItemView {
 		this.app.setting.openTabById('imagemgr');
 	}
 
-	async findBrokenImageLinks(): Promise<Array<{filePath: string, lineNumber: number, linkText: string}>> {
-		const brokenLinks: Array<{filePath: string, lineNumber: number, linkText: string}> = [];
+	async findBrokenImageLinks(): Promise<Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string}>> {
+		// 检查是否有其他检测正在进行
+		if (this.isDetectingDuplicates) {
+			throw new Error('重复图片检测正在进行中，请稍候再试');
+		}
+
+		const brokenLinks: Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string}> = [];
 		const allFiles = this.app.vault.getMarkdownFiles();
 		const metadataCache = this.app.metadataCache;
 		
+		// 辅助函数：检查是否为网络链接
+		const isRemoteLink = (path: string) => path.startsWith('http://') || path.startsWith('https://');
+		
+		// 加载网络链接验证结果缓存
+		const CACHE_VALIDITY = 24 * 60 * 60 * 1000; // 24小时缓存有效期
+		const validationCache = this.plugin.data.remoteLinkValidationCache || {};
+		const now = Date.now();
+		
+		// 清理过期的缓存项
+		const validCache: { [url: string]: { valid: boolean; error?: string; timestamp: number } } = {};
+		for (const [url, cached] of Object.entries(validationCache)) {
+			if (now - cached.timestamp < CACHE_VALIDITY) {
+				validCache[url] = cached;
+			}
+		}
+		
+		// 辅助函数：从缓存获取验证结果
+		const getCachedValidation = (url: string): { valid: boolean; error?: string } | null => {
+			const cached = validCache[url];
+			if (cached && (now - cached.timestamp < CACHE_VALIDITY)) {
+				return { valid: cached.valid, error: cached.error };
+			}
+			return null;
+		};
+		
+		// 辅助函数：保存验证结果到缓存
+		const saveToCache = (url: string, result: { valid: boolean; error?: string }) => {
+			validCache[url] = {
+				valid: result.valid,
+				error: result.error,
+				timestamp: now
+			};
+		};
+		
+		// 辅助函数：验证网络链接（带超时和快速失败，优化内存使用）
+		const validateRemoteLink = async (url: string): Promise<{ valid: boolean; error?: string }> => {
+			// 使用 Promise.race 实现超时控制（2秒超时，提升速度）
+			const timeoutPromise = new Promise<{ valid: boolean; error: string }>((resolve) => {
+				setTimeout(() => {
+					resolve({ valid: false, error: 'ERR_TIMED_OUT (连接超时)' });
+				}, 2000); // 2秒超时（从3秒减少到2秒）
+			});
+
+			const requestPromise = (async () => {
+				try {
+					// 使用 requestUrl 验证链接
+					// 注意：requestUrl 会下载完整响应到内存，但我们可以通过检查响应头快速判断
+					// 对于无法解析的域名，会快速失败并抛出 ERR_NAME_NOT_RESOLVED 错误
+					const response = await requestUrl({
+						url: url,
+						headers: {
+							'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+							'Referer': ''
+						},
+						throw: false // 不抛出异常，返回响应对象
+					});
+					
+					// 只检查状态码：< 400 表示链接有效
+					if (response.status >= 400) {
+						return { valid: false, error: `HTTP ${response.status}: ${response.statusText}` };
+					}
+					
+					// 状态码 < 400，链接有效
+					return { valid: true };
+				} catch (error: any) {
+					// 提取错误信息
+					let errorMsg = '网络错误';
+					if (error.message) {
+						errorMsg = error.message;
+					} else if (error.toString) {
+						errorMsg = error.toString();
+					}
+					
+					// 提取常见的错误类型
+					if (errorMsg.includes('ERR_NAME_NOT_RESOLVED')) {
+						errorMsg = 'ERR_NAME_NOT_RESOLVED (域名无法解析)';
+					} else if (errorMsg.includes('ERR_CONNECTION_REFUSED')) {
+						errorMsg = 'ERR_CONNECTION_REFUSED (连接被拒绝)';
+					} else if (errorMsg.includes('ERR_TIMED_OUT')) {
+						errorMsg = 'ERR_TIMED_OUT (连接超时)';
+					} else if (errorMsg.includes('ERR_CERT_AUTHORITY_INVALID')) {
+						errorMsg = 'ERR_CERT_AUTHORITY_INVALID (证书无效)';
+					}
+					
+					return { valid: false, error: errorMsg };
+				}
+			})();
+
+			// 使用 Promise.race 实现超时控制
+			return Promise.race([requestPromise, timeoutPromise]);
+		};
+		
+		// 收集所有需要验证的网络链接（用于并行处理）
+		const remoteLinksToValidate: Array<{
+			filePath: string;
+			lineNumber: number;
+			linkText: string;
+			url: string;
+		}> = [];
+
+		// 第一遍：收集所有网络链接，同时检查本地链接（避免重复扫描）
 		for (const file of allFiles) {
 			try {
+				const content = await this.app.vault.read(file);
+				const lines = content.split('\n');
 				const cache = metadataCache.getFileCache(file);
 				if (!cache) continue;
 				
 				// 检查 embeds（图片嵌入）
 				if (cache.embeds) {
 					for (const embed of cache.embeds) {
-						// 尝试解析链接目标
-						const destFile = metadataCache.getFirstLinkpathDest(embed.link, file.path);
+						const linkPath = embed.link;
+						
+						// 检查是否是网络链接
+						if (isRemoteLink(linkPath)) {
+							const lineIndex = embed.position.start.line;
+							const fullLine = lines[lineIndex];
+							remoteLinksToValidate.push({
+								filePath: file.path,
+								lineNumber: lineIndex + 1,
+								linkText: fullLine,
+								url: linkPath
+							});
+							continue;
+						}
+						
+						// 本地链接：尝试解析链接目标
+						const destFile = metadataCache.getFirstLinkpathDest(linkPath, file.path);
 						if (!destFile) {
 							// 找不到目标文件，记录错误链接
-							const content = await this.app.vault.read(file);
-							const lines = content.split('\n');
 							const lineIndex = embed.position.start.line;
 							const fullLine = lines[lineIndex];
 							
 							brokenLinks.push({
 								filePath: file.path,
 								lineNumber: lineIndex + 1,
-								linkText: fullLine
+								linkText: fullLine,
+								extractedPath: linkPath
 							});
 						}
 					}
@@ -2929,23 +3092,95 @@ export class ImageManagerView extends ItemView {
 				// 检查 links（普通链接，可能包含图片引用）
 				if (cache.links) {
 					for (const link of cache.links) {
-						// 尝试解析链接目标
-						const destFile = metadataCache.getFirstLinkpathDest(link.link, file.path);
+						const linkPath = link.link;
+						
+						// 检查是否是网络链接
+						if (isRemoteLink(linkPath)) {
+							// 收集所有网络链接进行验证
+							const lineIndex = link.position.start.line;
+							const fullLine = lines[lineIndex];
+							remoteLinksToValidate.push({
+								filePath: file.path,
+								lineNumber: lineIndex + 1,
+								linkText: fullLine,
+								url: linkPath
+							});
+							continue;
+						}
+						
+						// 本地链接：尝试解析链接目标
+						const destFile = metadataCache.getFirstLinkpathDest(linkPath, file.path);
 						if (!destFile) {
-							// 只检查图片文件扩展名的链接
-							const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
-							const linkLower = link.link.toLowerCase();
+							// 找不到目标文件，记录错误链接
+							const lineIndex = link.position.start.line;
+							const fullLine = lines[lineIndex];
 							
-							if (imageExtensions.some(ext => linkLower.endsWith(ext))) {
-								const content = await this.app.vault.read(file);
-								const lines = content.split('\n');
-								const lineIndex = link.position.start.line;
-								const fullLine = lines[lineIndex];
-								
+							brokenLinks.push({
+								filePath: file.path,
+								lineNumber: lineIndex + 1,
+								linkText: fullLine,
+								extractedPath: linkPath
+							});
+						}
+					}
+				}
+				
+				// 检查 Markdown 格式的图片链接 ![...](...)
+				for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+					const line = lines[lineNum];
+					const mdMatches = line.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g);
+					
+					for (const match of mdMatches) {
+						let linkPath = match[2].trim();
+						// 处理 Markdown 链接中的 Title 部分：[alt](url "title")
+						if (linkPath.includes(' ')) {
+							linkPath = linkPath.split(' ')[0];
+						}
+						
+						// 检查是否是网络链接
+						if (isRemoteLink(linkPath)) {
+							remoteLinksToValidate.push({
+								filePath: file.path,
+								lineNumber: lineNum + 1,
+								linkText: match[0],
+								url: linkPath
+							});
+						} else {
+							// 本地链接：检查是否存在
+							const destFile = metadataCache.getFirstLinkpathDest(linkPath, file.path);
+							if (!destFile) {
 								brokenLinks.push({
 									filePath: file.path,
-									lineNumber: lineIndex + 1,
-									linkText: fullLine
+									lineNumber: lineNum + 1,
+									linkText: match[0],
+									extractedPath: linkPath
+								});
+							}
+						}
+					}
+					
+					// 检查 HTML 格式的图片链接 <img src="...">
+					const htmlMatches = line.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi);
+					for (const match of htmlMatches) {
+						const linkPath = match[1].trim();
+						
+						// 检查是否是网络链接
+						if (isRemoteLink(linkPath)) {
+							remoteLinksToValidate.push({
+								filePath: file.path,
+								lineNumber: lineNum + 1,
+								linkText: match[0],
+								url: linkPath
+							});
+						} else {
+							// 本地链接：检查是否存在
+							const destFile = metadataCache.getFirstLinkpathDest(linkPath, file.path);
+							if (!destFile) {
+								brokenLinks.push({
+									filePath: file.path,
+									lineNumber: lineNum + 1,
+									linkText: match[0],
+									extractedPath: linkPath
 								});
 							}
 						}
@@ -2957,6 +3192,82 @@ export class ImageManagerView extends ItemView {
 				});
 			}
 		}
+
+		// 使用缓存优化：分离需要验证和已缓存的链接
+		const linksToValidate: typeof remoteLinksToValidate = [];
+		const cachedResults: Map<string, { valid: boolean; error?: string }> = new Map();
+		
+		for (const item of remoteLinksToValidate) {
+			const cached = getCachedValidation(item.url);
+			if (cached) {
+				// 使用缓存结果
+				cachedResults.set(item.url, cached);
+			} else {
+				// 需要验证
+				linksToValidate.push(item);
+			}
+		}
+		
+		// 处理缓存的验证结果
+		for (const item of remoteLinksToValidate) {
+			const cached = cachedResults.get(item.url);
+			if (cached && !cached.valid) {
+				// 缓存显示链接无效，直接添加到错误列表
+				brokenLinks.push({
+					filePath: item.filePath,
+					lineNumber: item.lineNumber,
+					linkText: item.linkText,
+					extractedPath: item.url,
+					isRemoteError: true,
+					remoteError: cached.error
+				});
+			}
+		}
+		
+		// 并行验证需要检测的网络链接（优化批量处理，提升速度）
+		// 注意：requestUrl 会下载完整响应到内存，但我们可以通过增加批次大小和减少延迟来提升速度
+		const BATCH_SIZE = 12; // 从5增加到12，提升并发度（如果内存充足可以进一步增加）
+		const BATCH_DELAY = 50; // 从100ms减少到50ms，减少等待时间
+		
+		if (linksToValidate.length > 0) {
+			for (let i = 0; i < linksToValidate.length; i += BATCH_SIZE) {
+				const batch = linksToValidate.slice(i, i + BATCH_SIZE);
+				const validations = await Promise.all(
+					batch.map(async (item) => {
+						const validation = await validateRemoteLink(item.url);
+						// 保存到缓存
+						saveToCache(item.url, validation);
+						return { ...item, validation };
+					})
+				);
+
+				// 收集验证失败的链接
+				for (const { filePath, lineNumber, linkText, url, validation } of validations) {
+					if (!validation.valid) {
+						brokenLinks.push({
+							filePath,
+							lineNumber,
+							linkText,
+							extractedPath: url,
+							isRemoteError: true,
+							remoteError: validation.error
+						});
+					}
+				}
+
+				// 每批之间稍微延迟，避免过载，并给垃圾回收器时间清理内存
+				if (i + BATCH_SIZE < linksToValidate.length) {
+					await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+				}
+			}
+			
+			// 保存更新后的缓存到插件数据
+			this.plugin.data.remoteLinkValidationCache = validCache;
+			await this.plugin.saveData(this.plugin.data);
+		}
+
+		// 注意：本地链接已在第一遍中检查完成，不需要第二遍扫描
+		// 这样可以避免重复检测，提高性能
 		
 		return brokenLinks;
 	}

@@ -32,6 +32,10 @@ export interface BrokenLinkInfo {
 	linkText: string;
 	/** 从链接中提取的图片路径 */
 	extractedPath?: string;
+	/** 是否为网络链接错误 */
+	isRemoteError?: boolean;
+	/** 网络链接错误信息（如 ERR_NAME_NOT_RESOLVED） */
+	remoteError?: string;
 }
 
 /**
@@ -240,6 +244,19 @@ export interface PluginData {
 	/** 空链接最后更新时间戳 */
 	brokenLinksUpdatedAt?: number;
 	
+	/** 网络链接验证结果缓存
+	 * 存储已验证的网络链接结果，避免重复验证
+	 * 结构：{ URL: { valid: boolean, error?: string, timestamp: number } }
+	 * 缓存有效期：24小时（86400000毫秒）
+	 */
+	remoteLinkValidationCache?: {
+		[url: string]: {
+			valid: boolean;
+			error?: string;
+			timestamp: number;
+		};
+	};
+	
 	/** 链接格式统计缓存
 	 * 存储各种链接格式的数量统计
 	 */
@@ -275,6 +292,10 @@ export interface ImageManagerSettings {
 	includeSubfolders: boolean;
 	/** 是否启用 MD5 去重功能 */
 	enableDeduplication: boolean;
+	/** 是否启用重复图片检测（在首页显示按钮） */
+	enableDuplicateDetection?: boolean;
+	/** 是否启用空链接检测（在首页显示按钮） */
+	enableBrokenLinksDetection?: boolean;
 	
 	// ==================== 显示设置 ====================
 	/** 每行显示的图片数量（1-10） */

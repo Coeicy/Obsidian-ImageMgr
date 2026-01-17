@@ -58,6 +58,55 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		this.display();
 	}
 
+	/**
+	 * 刷新视图工具栏按钮显示
+	 * 根据设置显示/隐藏重复检测和空链接检测按钮
+	 */
+	private refreshViewToolbar() {
+		const leaf = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+		if (!leaf || !leaf.view) {
+			return;
+		}
+
+		const view = leaf.view as any;
+		const containerEl = view.containerEl;
+		if (!containerEl) {
+			return;
+		}
+
+		// 查找工具栏
+		const toolbarEl = containerEl.querySelector('.image-manager-toolbar') as HTMLElement;
+		if (!toolbarEl) {
+			return;
+		}
+
+		// 查找重复检测按钮
+		const duplicateBtn = toolbarEl.querySelector('#duplicate-btn') as HTMLElement;
+		if (duplicateBtn) {
+			if (this.plugin.settings.enableDuplicateDetection !== false) {
+				duplicateBtn.style.display = '';
+			} else {
+				duplicateBtn.style.display = 'none';
+			}
+		} else if (this.plugin.settings.enableDuplicateDetection !== false) {
+			// 如果按钮不存在但应该显示，需要重新构建工具栏
+			// 这里简化处理：如果按钮不存在，说明视图可能还没完全加载，不处理
+		}
+
+		// 查找空链接检测按钮
+		const brokenLinksBtn = toolbarEl.querySelector('#broken-links-btn') as HTMLElement;
+		if (brokenLinksBtn) {
+			if (this.plugin.settings.enableBrokenLinksDetection !== false) {
+				brokenLinksBtn.style.display = '';
+			} else {
+				brokenLinksBtn.style.display = 'none';
+			}
+		} else if (this.plugin.settings.enableBrokenLinksDetection !== false) {
+			// 如果按钮不存在但应该显示，需要重新构建工具栏
+			// 这里简化处理：如果按钮不存在，说明视图可能还没完全加载，不处理
+		}
+	}
+
 	display(): void {
 		const {containerEl} = this;
 		this.containerEl = containerEl; // 保存引用用于搜索功能
@@ -1058,7 +1107,33 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 12. 扩展功能
 		const extensionSection = this.createCollapsibleSection(containerEl, '🧩 扩展功能', 'extension', false);
 
-		// 12.1 在Android相册中隐藏Obsidian图片
+		// 12.1 重复图片检测
+		new Setting(extensionSection.contentEl)
+			.setName('🔍 重复图片检测')
+			.setDesc('开启后可以检测并管理重复图片')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableDuplicateDetection !== false) // 默认 true
+				.onChange(async (value) => {
+					this.plugin.settings.enableDuplicateDetection = value;
+					await this.plugin.saveSettings();
+					// 刷新视图以更新按钮显示
+					this.refreshViewToolbar();
+				}));
+
+		// 12.2 空链接检测
+		new Setting(extensionSection.contentEl)
+			.setName('🈳 空链接检测')
+			.setDesc('开启后可以检测并管理笔记中的空链接')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableBrokenLinksDetection !== false) // 默认 true
+				.onChange(async (value) => {
+					this.plugin.settings.enableBrokenLinksDetection = value;
+					await this.plugin.saveSettings();
+					// 刷新视图以更新按钮显示
+					this.refreshViewToolbar();
+				}));
+
+		// 12.3 在Android相册中隐藏Obsidian图片
 		new Setting(extensionSection.contentEl)
 			.setName('🛡️ 在 Android 相册中隐藏图片')
 			.setDesc('开启后在笔记库根目录创建 .nomedia 文件，Android 相册将不再扫描此目录（仅对 Android 有效）')

@@ -62,9 +62,10 @@ export class DuplicateDetectionModal extends Modal {
 		contentEl.empty();
 		modalEl.addClass('duplicate-detection-modal');
 
-		// 设置模态框样式
-		modalEl.style.width = '90%';
-		modalEl.style.maxWidth = '1200px';
+		// 设置模态框样式 - 根据内容自适应宽度
+		modalEl.style.width = 'auto';
+		modalEl.style.minWidth = '600px';
+		modalEl.style.maxWidth = '90%';
 		modalEl.style.maxHeight = '90vh';
 		
 		// 设置内容区域样式，使其可以滚动
@@ -102,18 +103,50 @@ export class DuplicateDetectionModal extends Modal {
 		// 检查是否有预扫描的哈希映射
 		const hasPrescanned = this.prescannedHashMap && this.prescannedHashMap.size > 0;
 		
-		// 显示加载提示
-		let loadingText = hasPrescanned 
-			? '正在检测重复图片...' 
-			: '正在计算哈希值并检测重复图片...';
-		if (remoteCount > 0 && !hasPrescanned) {
-			loadingText += `\n（本地图片: ${localCount} 张，云端图片: ${remoteCount} 张）`;
+		// 如果有预扫描结果，先显示已检测的结果
+		let initialDuplicateGroups: DuplicateGroup[] = [];
+		if (hasPrescanned) {
+			const initialHashMap = new Map(this.prescannedHashMap);
+			// 确保所有图片（包括已有哈希值的）都在 hashMap 中
+			for (const img of this.images) {
+				if (img.md5 && !initialHashMap.has(img.md5)) {
+					initialHashMap.set(img.md5, []);
+				}
+				if (img.md5) {
+					const group = initialHashMap.get(img.md5)!;
+					if (!group.includes(img)) {
+						group.push(img);
+					}
+				}
+			}
+			
+			// 找出重复的组（数量大于1的组）
+			for (const [hash, images] of initialHashMap.entries()) {
+				if (images.length > 1) {
+					initialDuplicateGroups.push({ hash, images });
+				}
+			}
+			
+			// 如果有已检测的结果，先显示
+			if (initialDuplicateGroups.length > 0) {
+				this.displayDuplicateResults(containerEl, initialDuplicateGroups);
+			}
 		}
-		const loadingEl = containerEl.createDiv({ text: loadingText });
-		loadingEl.style.textAlign = 'center';
-		loadingEl.style.padding = '20px';
-		loadingEl.style.color = 'var(--text-muted)';
-		loadingEl.style.whiteSpace = 'pre-line';
+
+		// 检查是否有需要检测的云端图片
+		const remoteImagesToCheck = this.images.filter(img => img.isRemote && !img.md5);
+		const hasRemoteToCheck = remoteImagesToCheck.length > 0;
+		
+		// 如果有需要检测的云端图片，显示"正在检查重复云端图片"提示
+		let loadingEl: HTMLElement | null = null;
+		if (hasRemoteToCheck) {
+			loadingEl = containerEl.createDiv({ text: '正在检测重复云端图片，重启页面更新结果' });
+			loadingEl.style.textAlign = 'center';
+			loadingEl.style.padding = '20px';
+			loadingEl.style.color = 'var(--text-muted)';
+			loadingEl.style.fontSize = '0.9em';
+			loadingEl.id = 'duplicate-remote-loading';
+		}
 
 		try {
 			// 如果有预扫描的哈希映射，直接使用它作为基础
@@ -158,9 +191,14 @@ export class DuplicateDetectionModal extends Modal {
 				});
 
 			// 并行计算云端图片的哈希值（云端图片的哈希值通常不在预扫描中）
-			const remoteHashPromises = remoteImages
-				.filter(imageInfo => !imageInfo.md5) // 只处理没有哈希值的
-				.map(async (imageInfo) => {
+			// 使用批量处理，减少内存峰值（每批3个，因为需要下载完整图片内容）
+			const remoteImagesToHash = remoteImages.filter(imageInfo => !imageInfo.md5);
+			const REMOTE_BATCH_SIZE = 3; // 减少批次大小，因为需要下载完整图片
+			const remoteHashResults: Array<{ hash: string; imageInfo: ImageInfo } | null> = [];
+
+			for (let i = 0; i < remoteImagesToHash.length; i += REMOTE_BATCH_SIZE) {
+				const batch = remoteImagesToHash.slice(i, i + REMOTE_BATCH_SIZE);
+				const batchPromises = batch.map(async (imageInfo) => {
 					try {
 						// 下载图片并计算哈希值
 						const response = await requestUrl({
@@ -184,6 +222,9 @@ export class DuplicateDetectionModal extends Modal {
 							imageInfo.size = response.arrayBuffer.byteLength;
 						}
 						
+						// 清理响应体引用，帮助垃圾回收（哈希值已计算完成）
+						// 注意：response.arrayBuffer 可能无法直接设置为 null，但我们可以避免进一步引用
+						
 						return { hash, imageInfo };
 					} catch (error) {
 						if (this.plugin?.logger) {
@@ -195,11 +236,17 @@ export class DuplicateDetectionModal extends Modal {
 					}
 				});
 
+				const batchResults = await Promise.all(batchPromises);
+				remoteHashResults.push(...batchResults);
+
+				// 每批之间延迟，给垃圾回收器时间清理内存
+				if (i + REMOTE_BATCH_SIZE < remoteImagesToHash.length) {
+					await new Promise(resolve => setTimeout(resolve, 200)); // 200ms 延迟
+				}
+			}
+
 			// 等待所有缺失的哈希计算完成
-			const [localHashResults, remoteHashResults] = await Promise.all([
-				Promise.all(localHashPromises),
-				Promise.all(remoteHashPromises)
-			]);
+			const localHashResults = await Promise.all(localHashPromises);
 			
 			const hashResults = [...localHashResults, ...remoteHashResults];
 			
@@ -235,88 +282,24 @@ export class DuplicateDetectionModal extends Modal {
 				}
 			}
 
-			// 移除加载提示
-			loadingEl.remove();
-
-			// 显示结果
-			if (duplicateGroups.length === 0) {
-				const noDuplicatesEl = containerEl.createDiv({ text: '✅ 未发现重复图片！' });
-				noDuplicatesEl.style.textAlign = 'center';
-				noDuplicatesEl.style.padding = '40px';
-				noDuplicatesEl.style.color = 'var(--text-muted)';
-				noDuplicatesEl.style.fontSize = '1.2em';
-				return;
+			// 移除加载提示（如果有）
+			if (loadingEl) {
+				loadingEl.remove();
 			}
 
-			// 统计信息
-			const statsEl = containerEl.createDiv('duplicate-stats');
-			statsEl.style.cssText = `
-				margin-bottom: 20px;
-				padding: 12px 16px;
-				background: var(--background-secondary);
-				border-radius: 8px;
-				font-size: 0.9em;
-				display: flex;
-				flex-wrap: wrap;
-				gap: 16px 24px;
-				align-items: center;
-			`;
-			
-			const totalDuplicates = duplicateGroups.reduce((sum, group) => sum + group.images.length - 1, 0);
-			const totalRemoteDuplicates = duplicateGroups.reduce((sum, group) => 
-				sum + group.images.filter(img => img.isRemote).length - (group.images[0]?.isRemote ? 1 : 0), 0
-			);
-			const totalLocalDuplicates = totalDuplicates - totalRemoteDuplicates;
-			const totalWastedSpace = duplicateGroups.reduce((sum, group) => {
-				// 计算浪费的空间（所有重复图片的总大小，减去一张作为保留，只计算本地图片）
-				const groupWasted = group.images.slice(1)
-					.filter(img => !img.isRemote)
-					.reduce((groupSum, img) => groupSum + img.size, 0);
-				return sum + groupWasted;
-			}, 0);
-
-			// 创建统计项，使用 flex 布局减少留白
-			const createStatItem = (label: string, value: string) => {
-				const item = statsEl.createDiv('stat-item');
-				item.style.cssText = `
-					display: flex;
-					align-items: baseline;
-					gap: 4px;
-					flex-shrink: 0;
-				`;
-				const labelSpan = item.createSpan();
-				labelSpan.textContent = label;
-				labelSpan.style.cssText = 'color: var(--text-muted);';
-				const valueSpan = item.createSpan();
-				valueSpan.innerHTML = value;
-				valueSpan.style.cssText = 'font-weight: 600; color: var(--text-normal);';
-				return item;
-			};
-
-			createStatItem('发现', `<strong>${duplicateGroups.length}</strong>组`);
-			createStatItem('共', `<strong>${totalDuplicates}</strong>张图片`);
-			createStatItem('云端', `<strong>${totalRemoteDuplicates}</strong>张`);
-			createStatItem('本地', `<strong>${totalLocalDuplicates}</strong>张`);
-			
-			if (totalWastedSpace > 0) {
-				createStatItem('可节省空间：', `<strong>${ImageProcessor.formatFileSize(totalWastedSpace)}</strong>`);
+			// 如果之前已经显示了初始结果，现在需要更新或合并结果
+			if (hasPrescanned && initialDuplicateGroups.length > 0) {
+				// 合并新旧结果，更新UI
+				this.updateDuplicateResults(containerEl, duplicateGroups);
+			} else {
+				// 显示完整结果
+				this.displayDuplicateResults(containerEl, duplicateGroups);
 			}
-
-			// 创建滚动容器
-			const scrollContainer = containerEl.createDiv('duplicate-groups-container');
-			scrollContainer.style.cssText = `
-				max-height: calc(90vh - 250px);
-				overflow-y: auto;
-				padding-right: 8px;
-			`;
-
-			// 显示每个重复组
-			duplicateGroups.forEach((group, groupIndex) => {
-				this.renderDuplicateGroup(scrollContainer, group, groupIndex);
-			});
 
 		} catch (error) {
-			loadingEl.remove();
+			if (loadingEl) {
+				loadingEl.remove();
+			}
 			if (this.plugin?.logger) {
 				await this.plugin.logger.error(OperationType.PLUGIN_ERROR, '检测重复图片失败', {
 					error: error as Error
@@ -327,6 +310,105 @@ export class DuplicateDetectionModal extends Modal {
 			errorEl.style.padding = '20px';
 			errorEl.style.textAlign = 'center';
 		}
+	}
+
+	/**
+	 * 显示重复图片检测结果
+	 */
+	private displayDuplicateResults(containerEl: HTMLElement, duplicateGroups: DuplicateGroup[]) {
+		// 如果已经有结果显示，先清除（除了加载提示）
+		const existingStats = containerEl.querySelector('.duplicate-stats');
+		const existingContainer = containerEl.querySelector('.duplicate-groups-container');
+		const existingNoDuplicates = containerEl.querySelector('.no-duplicates-message');
+		if (existingStats) existingStats.remove();
+		if (existingContainer) existingContainer.remove();
+		if (existingNoDuplicates) existingNoDuplicates.remove();
+
+		// 显示结果
+		if (duplicateGroups.length === 0) {
+			const noDuplicatesEl = containerEl.createDiv({ text: '✅ 未发现重复图片！' });
+			noDuplicatesEl.className = 'no-duplicates-message';
+			noDuplicatesEl.style.textAlign = 'center';
+			noDuplicatesEl.style.padding = '40px';
+			noDuplicatesEl.style.color = 'var(--text-muted)';
+			noDuplicatesEl.style.fontSize = '1.2em';
+			return;
+		}
+
+		// 统计信息
+		const statsEl = containerEl.createDiv('duplicate-stats');
+		statsEl.style.cssText = `
+			margin-bottom: 20px;
+			padding: 12px 16px;
+			background: var(--background-secondary);
+			border-radius: 8px;
+			font-size: 0.9em;
+			display: flex;
+			flex-wrap: wrap;
+			gap: 16px 24px;
+			align-items: center;
+		`;
+		
+		const totalDuplicates = duplicateGroups.reduce((sum, group) => sum + group.images.length - 1, 0);
+		const totalRemoteDuplicates = duplicateGroups.reduce((sum, group) => 
+			sum + group.images.filter(img => img.isRemote).length - (group.images[0]?.isRemote ? 1 : 0), 0
+		);
+		const totalLocalDuplicates = totalDuplicates - totalRemoteDuplicates;
+		const totalWastedSpace = duplicateGroups.reduce((sum, group) => {
+			// 计算浪费的空间（所有重复图片的总大小，减去一张作为保留，只计算本地图片）
+			const groupWasted = group.images.slice(1)
+				.filter(img => !img.isRemote)
+				.reduce((groupSum, img) => groupSum + img.size, 0);
+			return sum + groupWasted;
+		}, 0);
+
+		// 创建统计项，使用 flex 布局减少留白
+		const createStatItem = (label: string, value: string) => {
+			const item = statsEl.createDiv('stat-item');
+			item.style.cssText = `
+				display: flex;
+				align-items: baseline;
+				gap: 4px;
+				flex-shrink: 0;
+			`;
+			const labelSpan = item.createSpan();
+			labelSpan.textContent = label;
+			labelSpan.style.cssText = 'color: var(--text-muted);';
+			const valueSpan = item.createSpan();
+			valueSpan.innerHTML = value;
+			valueSpan.style.cssText = 'font-weight: 600; color: var(--text-normal);';
+			return item;
+		};
+
+		createStatItem('发现', `<strong>${duplicateGroups.length}</strong>组`);
+		createStatItem('共', `<strong>${totalDuplicates}</strong>张图片`);
+		createStatItem('云端', `<strong>${totalRemoteDuplicates}</strong>张`);
+		createStatItem('本地', `<strong>${totalLocalDuplicates}</strong>张`);
+		
+		if (totalWastedSpace > 0) {
+			createStatItem('可节省空间：', `<strong>${ImageProcessor.formatFileSize(totalWastedSpace)}</strong>`);
+		}
+
+		// 创建滚动容器
+		const scrollContainer = containerEl.createDiv('duplicate-groups-container');
+		scrollContainer.style.cssText = `
+			max-height: calc(90vh - 250px);
+			overflow-y: auto;
+			padding-right: 8px;
+		`;
+
+		// 显示每个重复组
+		duplicateGroups.forEach((group, groupIndex) => {
+			this.renderDuplicateGroup(scrollContainer, group, groupIndex);
+		});
+	}
+
+	/**
+	 * 更新重复图片检测结果（合并新旧结果）
+	 */
+	private updateDuplicateResults(containerEl: HTMLElement, duplicateGroups: DuplicateGroup[]) {
+		// 重新显示完整结果（包括新检测的云端图片）
+		this.displayDuplicateResults(containerEl, duplicateGroups);
 	}
 
 	renderDuplicateGroup(containerEl: HTMLElement, group: DuplicateGroup, groupIndex: number) {

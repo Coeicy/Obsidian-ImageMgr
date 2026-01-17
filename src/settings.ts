@@ -34,6 +34,10 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	// ==================== 功能开关 ====================
 	/** 是否启用去重功能 - 检测并标记重复的图片（基于 MD5 哈希） */
 	enableDeduplication: true,
+	/** 是否启用重复图片检测 - 在首页显示重复检测按钮 */
+	enableDuplicateDetection: true,
+	/** 是否启用空链接检测 - 在首页显示空链接检测按钮 */
+	enableBrokenLinksDetection: true,
 	/** 是否自动生成图片名称 - 根据路径和时间戳自动生成有意义的名称 */
 	autoGenerateNames: true,
 	/** 前往笔记时是否保持详情页打开 - 点击引用时的行为 */
