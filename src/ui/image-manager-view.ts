@@ -91,6 +91,8 @@ export class ImageManagerView extends ItemView {
 	private clearButtonSingleClickHandled: boolean = false;
 	/** 图片懒加载观察器 */
 	private imageObserver: IntersectionObserver | null = null;
+	/** 预扫描的重复图片哈希映射（用于快速显示重复图片检测） */
+	private duplicateHashMap: Map<string, ImageInfo[]> = new Map();
 
 	constructor(leaf: WorkspaceLeaf, plugin: ImageManagementPlugin) {
 		super(leaf);
@@ -792,6 +794,10 @@ export class ImageManagerView extends ItemView {
 			);
 
 			this.images = result.images;
+			// 保存预扫描的重复图片哈希映射（用于快速显示重复图片检测）
+			if (result.hashMap) {
+				this.duplicateHashMap = result.hashMap;
+			}
 
 			// 恢复分组信息并应用分组逻辑
 			if (this.plugin.data.imageGroups) {
@@ -1700,8 +1706,11 @@ export class ImageManagerView extends ItemView {
 				previewEl.style.minHeight = '0'; // 移除最小高度限制，完全自适应
 				previewEl.style.maxHeight = UI_SIZE.IMAGE_PREVIEW.ADAPTIVE_MAX_HEIGHT;
 			} else {
-				// 固定高度模式
-				previewEl.style.height = UI_SIZE.IMAGE_PREVIEW.FIXED_HEIGHT;
+				// 固定高度模式：使用设置中的固定高度，如果没有则使用常量
+				const fixedHeight = this.plugin.settings.fixedImageHeight 
+					? `${this.plugin.settings.fixedImageHeight}px` 
+					: UI_SIZE.IMAGE_PREVIEW.FIXED_HEIGHT;
+				previewEl.style.height = fixedHeight;
 			}
 			
 			// 延迟加载图片 - 使用 IntersectionObserver 懒加载 + 预加载
@@ -2862,7 +2871,8 @@ export class ImageManagerView extends ItemView {
 				// 删除后刷新图片列表
 				this.scanImages();
 			},
-			this.plugin
+			this.plugin,
+			this.duplicateHashMap // 传递预扫描的哈希映射
 		);
 		modal.open();
 	}

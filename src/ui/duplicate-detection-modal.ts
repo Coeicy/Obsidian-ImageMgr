@@ -5,14 +5,15 @@
  * 基于 MD5 哈希值识别重复图片。
  */
 
-import { Modal, Notice, TFile } from 'obsidian';
+import { Modal, Notice, TFile, requestUrl } from 'obsidian';
 import { ImageInfo } from '../types';
-import { calculateFileHash } from '../utils/image-hash';
+import { calculateFileHash, calculateBufferHash } from '../utils/image-hash';
 import { ImageProcessor } from '../utils/image-processor';
 import { ConfirmModal } from './confirm-modal';
 import ImageManagementPlugin from '../main';
 import { OperationType } from '../utils/logger';
 import { makeModalResizable } from '../utils/resizable-modal';
+import { UI_SIZE } from '../constants';
 
 /**
  * 重复图片分组接口
@@ -38,13 +39,22 @@ export class DuplicateDetectionModal extends Modal {
 	app: any;
 	plugin?: ImageManagementPlugin;
 	onDelete?: (imagePath: string) => void;
+	/** 预扫描的重复图片哈希映射（如果提供，将直接使用，只计算缺失的哈希值） */
+	prescannedHashMap?: Map<string, ImageInfo[]>;
 
-	constructor(app: any, images: ImageInfo[], onDelete?: (imagePath: string) => void, plugin?: ImageManagementPlugin) {
+	constructor(
+		app: any, 
+		images: ImageInfo[], 
+		onDelete?: (imagePath: string) => void, 
+		plugin?: ImageManagementPlugin,
+		prescannedHashMap?: Map<string, ImageInfo[]>
+	) {
 		super(app);
 		this.images = images;
 		this.app = app;
 		this.plugin = plugin;
 		this.onDelete = onDelete;
+		this.prescannedHashMap = prescannedHashMap;
 	}
 
 	onOpen() {
@@ -70,7 +80,7 @@ export class DuplicateDetectionModal extends Modal {
 		});
 
 		// 标题
-		const titleEl = contentEl.createEl('h2', { text: '🔍 重复图片检测' });
+		const titleEl = contentEl.createEl('h2', { text: '🔍 重复图片' });
 		titleEl.style.flexShrink = '0';
 		titleEl.style.marginBottom = '16px';
 
@@ -85,44 +95,115 @@ export class DuplicateDetectionModal extends Modal {
 	}
 
 	async detectDuplicates(containerEl: HTMLElement) {
+		// 统计本地和云端图片数量
+		const localCount = this.images.filter(img => !img.isRemote).length;
+		const remoteCount = this.images.filter(img => img.isRemote).length;
+		
+		// 检查是否有预扫描的哈希映射
+		const hasPrescanned = this.prescannedHashMap && this.prescannedHashMap.size > 0;
+		
 		// 显示加载提示
-		const loadingEl = containerEl.createDiv({ text: '正在计算哈希值并检测重复图片...' });
+		let loadingText = hasPrescanned 
+			? '正在检测重复图片...' 
+			: '正在计算哈希值并检测重复图片...';
+		if (remoteCount > 0 && !hasPrescanned) {
+			loadingText += `\n（本地图片: ${localCount} 张，云端图片: ${remoteCount} 张）`;
+		}
+		const loadingEl = containerEl.createDiv({ text: loadingText });
 		loadingEl.style.textAlign = 'center';
 		loadingEl.style.padding = '20px';
 		loadingEl.style.color = 'var(--text-muted)';
+		loadingEl.style.whiteSpace = 'pre-line';
 
 		try {
-			// 计算所有图片的哈希值
-			const hashMap = new Map<string, ImageInfo[]>();
-			const imageFiles = this.images.map(img => {
-				const file = this.app.vault.getAbstractFileByPath(img.path) as TFile;
-				return { file, imageInfo: img };
-			}).filter(item => item.file !== null);
-
-			// 并行计算哈希值
-			const hashPromises = imageFiles.map(async ({ file, imageInfo }) => {
-				try {
-					// 如果已经有哈希值，直接使用
-					if (imageInfo.md5) {
-						return { hash: imageInfo.md5, imageInfo };
-					}
-					// 否则计算哈希值
-					const hash = await calculateFileHash(file, this.app.vault);
-					imageInfo.md5 = hash;
-					return { hash, imageInfo };
-				} catch (error) {
-					if (this.plugin?.logger) {
-						await this.plugin.logger.error(OperationType.PLUGIN_ERROR, `计算哈希失败 ${file.path}`, {
-							error: error as Error
-						});
-					}
-					return null;
-				}
-			});
-
-			const hashResults = await Promise.all(hashPromises);
+			// 如果有预扫描的哈希映射，直接使用它作为基础
+			const hashMap = hasPrescanned 
+				? new Map(this.prescannedHashMap) 
+				: new Map<string, ImageInfo[]>();
 			
-			// 按哈希值分组
+			// 分离本地图片和云端图片
+			const localImages: { file: TFile; imageInfo: ImageInfo }[] = [];
+			const remoteImages: ImageInfo[] = [];
+			
+			for (const img of this.images) {
+				if (img.isRemote) {
+					// 云端图片
+					remoteImages.push(img);
+				} else {
+					// 本地图片
+					const file = this.app.vault.getAbstractFileByPath(img.path) as TFile;
+					if (file) {
+						localImages.push({ file, imageInfo: img });
+					}
+				}
+			}
+
+			// 如果使用预扫描结果，本地图片的哈希值应该已经计算过了
+			// 只需要处理没有哈希值的本地图片（可能是新添加的）
+			const localHashPromises = localImages
+				.filter(({ imageInfo }) => !imageInfo.md5) // 只处理没有哈希值的
+				.map(async ({ file, imageInfo }) => {
+					try {
+						const hash = await calculateFileHash(file, this.app.vault);
+						imageInfo.md5 = hash;
+						return { hash, imageInfo };
+					} catch (error) {
+						if (this.plugin?.logger) {
+							await this.plugin.logger.error(OperationType.PLUGIN_ERROR, `计算本地图片哈希失败 ${file.path}`, {
+								error: error as Error
+							});
+						}
+						return null;
+					}
+				});
+
+			// 并行计算云端图片的哈希值（云端图片的哈希值通常不在预扫描中）
+			const remoteHashPromises = remoteImages
+				.filter(imageInfo => !imageInfo.md5) // 只处理没有哈希值的
+				.map(async (imageInfo) => {
+					try {
+						// 下载图片并计算哈希值
+						const response = await requestUrl({
+							url: imageInfo.path,
+							headers: {
+								'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+								'Referer': ''
+							}
+						});
+						
+						if (response.status >= 400) {
+							throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+						}
+						
+						// 计算哈希值
+						const hash = calculateBufferHash(response.arrayBuffer);
+						imageInfo.md5 = hash;
+						
+						// 更新图片大小（如果之前未知）
+						if (imageInfo.size === 0 && response.arrayBuffer) {
+							imageInfo.size = response.arrayBuffer.byteLength;
+						}
+						
+						return { hash, imageInfo };
+					} catch (error) {
+						if (this.plugin?.logger) {
+							await this.plugin.logger.error(OperationType.PLUGIN_ERROR, `计算云端图片哈希失败 ${imageInfo.path}`, {
+								error: error as Error
+							});
+						}
+						return null;
+					}
+				});
+
+			// 等待所有缺失的哈希计算完成
+			const [localHashResults, remoteHashResults] = await Promise.all([
+				Promise.all(localHashPromises),
+				Promise.all(remoteHashPromises)
+			]);
+			
+			const hashResults = [...localHashResults, ...remoteHashResults];
+			
+			// 将新计算的哈希值添加到 hashMap
 			hashResults.forEach(result => {
 				if (result && result.hash) {
 					if (!hashMap.has(result.hash)) {
@@ -131,6 +212,20 @@ export class DuplicateDetectionModal extends Modal {
 					hashMap.get(result.hash)!.push(result.imageInfo);
 				}
 			});
+
+			// 确保所有图片（包括已有哈希值的）都在 hashMap 中
+			// 对于已有哈希值的图片，如果它们不在 hashMap 中，需要添加
+			for (const img of this.images) {
+				if (img.md5 && !hashMap.has(img.md5)) {
+					hashMap.set(img.md5, []);
+				}
+				if (img.md5) {
+					const group = hashMap.get(img.md5)!;
+					if (!group.includes(img)) {
+						group.push(img);
+					}
+				}
+			}
 
 			// 找出重复的组（数量大于1的组）
 			const duplicateGroups: DuplicateGroup[] = [];
@@ -157,25 +252,55 @@ export class DuplicateDetectionModal extends Modal {
 			const statsEl = containerEl.createDiv('duplicate-stats');
 			statsEl.style.cssText = `
 				margin-bottom: 20px;
-				padding: 12px;
+				padding: 12px 16px;
 				background: var(--background-secondary);
 				border-radius: 8px;
 				font-size: 0.9em;
+				display: flex;
+				flex-wrap: wrap;
+				gap: 16px 24px;
+				align-items: center;
 			`;
 			
 			const totalDuplicates = duplicateGroups.reduce((sum, group) => sum + group.images.length - 1, 0);
+			const totalRemoteDuplicates = duplicateGroups.reduce((sum, group) => 
+				sum + group.images.filter(img => img.isRemote).length - (group.images[0]?.isRemote ? 1 : 0), 0
+			);
+			const totalLocalDuplicates = totalDuplicates - totalRemoteDuplicates;
 			const totalWastedSpace = duplicateGroups.reduce((sum, group) => {
-				// 计算浪费的空间（所有重复图片的总大小，减去一张作为保留）
-				const groupWasted = group.images.slice(1).reduce((groupSum, img) => groupSum + img.size, 0);
+				// 计算浪费的空间（所有重复图片的总大小，减去一张作为保留，只计算本地图片）
+				const groupWasted = group.images.slice(1)
+					.filter(img => !img.isRemote)
+					.reduce((groupSum, img) => groupSum + img.size, 0);
 				return sum + groupWasted;
 			}, 0);
 
-			statsEl.innerHTML = `
-				<strong>检测结果：</strong><br>
-				发现 <strong>${duplicateGroups.length}</strong> 组重复图片<br>
-				共 <strong>${totalDuplicates}</strong> 张重复图片<br>
-				可节省空间：<strong>${ImageProcessor.formatFileSize(totalWastedSpace)}</strong>
-			`;
+			// 创建统计项，使用 flex 布局减少留白
+			const createStatItem = (label: string, value: string) => {
+				const item = statsEl.createDiv('stat-item');
+				item.style.cssText = `
+					display: flex;
+					align-items: baseline;
+					gap: 4px;
+					flex-shrink: 0;
+				`;
+				const labelSpan = item.createSpan();
+				labelSpan.textContent = label;
+				labelSpan.style.cssText = 'color: var(--text-muted);';
+				const valueSpan = item.createSpan();
+				valueSpan.innerHTML = value;
+				valueSpan.style.cssText = 'font-weight: 600; color: var(--text-normal);';
+				return item;
+			};
+
+			createStatItem('发现', `<strong>${duplicateGroups.length}</strong>组`);
+			createStatItem('共', `<strong>${totalDuplicates}</strong>张图片`);
+			createStatItem('云端', `<strong>${totalRemoteDuplicates}</strong>张`);
+			createStatItem('本地', `<strong>${totalLocalDuplicates}</strong>张`);
+			
+			if (totalWastedSpace > 0) {
+				createStatItem('可节省空间：', `<strong>${ImageProcessor.formatFileSize(totalWastedSpace)}</strong>`);
+			}
 
 			// 创建滚动容器
 			const scrollContainer = containerEl.createDiv('duplicate-groups-container');
@@ -226,31 +351,20 @@ export class DuplicateDetectionModal extends Modal {
 		`;
 
 		const groupTitle = groupHeader.createDiv('group-title');
+		const localCount = group.images.filter(img => !img.isRemote).length;
+		const remoteCount = group.images.filter(img => img.isRemote).length;
+		let countText = `${group.images.length} 张相同图片`;
+		// 只有当组内同时存在本地和云端图片时，才显示分类信息
+		if (localCount > 0 && remoteCount > 0) {
+			countText += `（${localCount} 张本地，${remoteCount} 张云端）`;
+		}
 		groupTitle.innerHTML = `
 			<strong>重复组 #${groupIndex + 1}</strong>
 			<span style="color: var(--text-muted); font-size: 0.9em; margin-left: 8px;">
-				(${group.images.length} 张相同图片)
+				(${countText})
 			</span>
 		`;
 
-		const groupActions = groupHeader.createDiv('group-actions');
-		groupActions.style.cssText = `
-			display: flex;
-			gap: 8px;
-		`;
-
-		// 删除所有重复按钮（保留第一个）
-		const deleteDuplicatesBtn = groupActions.createEl('button', {
-			text: '删除重复',
-			cls: 'mod-cta'
-		});
-		deleteDuplicatesBtn.style.cssText = `
-			padding: 4px 12px;
-			font-size: 0.85em;
-		`;
-		deleteDuplicatesBtn.addEventListener('click', async () => {
-			await this.deleteDuplicates(group);
-		});
 
 		// 哈希值显示
 		const hashEl = groupEl.createDiv('group-hash');
@@ -262,6 +376,27 @@ export class DuplicateDetectionModal extends Modal {
 			word-break: break-all;
 		`;
 		hashEl.textContent = `MD5: ${group.hash}`;
+
+		// 如果组内存在云端图片，显示提示信息
+		if (remoteCount > 0) {
+			const remoteNotice = groupEl.createDiv('remote-notice');
+			remoteNotice.style.cssText = `
+				margin-bottom: 12px;
+				padding: 6px 10px;
+				background: var(--background-modifier-border);
+				border-radius: 4px;
+				font-size: 0.85em;
+				color: var(--text-muted);
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				width: fit-content;
+			`;
+			const icon = remoteNotice.createSpan({ text: '⚠️' });
+			icon.style.cssText = 'font-size: 1em;';
+			const text = remoteNotice.createSpan({ text: '该组包含云端图片，云端图片无法删除' });
+			text.style.cssText = 'line-height: 1.4;';
+		}
 
 		// 图片列表
 		const imagesContainer = groupEl.createDiv('group-images');
@@ -293,15 +428,37 @@ export class DuplicateDetectionModal extends Modal {
 		// 图片预览
 		const imagePreview = imageItem.createEl('img', {
 			attr: {
-				src: this.app.vault.adapter.getResourcePath(image.path)
+				src: image.isRemote ? image.path : this.app.vault.adapter.getResourcePath(image.path)
 			}
 		});
-		imagePreview.style.cssText = `
-			width: 100%;
-			height: 150px;
-			object-fit: contain;
-			background: var(--background-secondary);
-		`;
+		
+		// 根据主页设置统一图片高度
+		if (this.plugin?.settings.adaptiveImageSize) {
+			// 自适应模式：图片按原始宽高比显示
+			imagePreview.style.cssText = `
+				width: 100%;
+				height: auto;
+				min-height: 0;
+				max-height: ${UI_SIZE.IMAGE_PREVIEW.ADAPTIVE_MAX_HEIGHT};
+				object-fit: contain;
+				background: var(--background-secondary);
+			`;
+		} else {
+			// 固定高度模式：使用设置中的固定高度，如果没有则使用常量
+			const fixedHeight = this.plugin?.settings.fixedImageHeight 
+				? `${this.plugin.settings.fixedImageHeight}px` 
+				: UI_SIZE.IMAGE_PREVIEW.FIXED_HEIGHT;
+			imagePreview.style.cssText = `
+				width: 100%;
+				height: ${fixedHeight};
+				object-fit: contain;
+				background: var(--background-secondary);
+			`;
+		}
+		// 云端图片添加 referrerPolicy
+		if (image.isRemote) {
+			imagePreview.referrerPolicy = 'no-referrer';
+		}
 
 		// 图片信息容器 - 使用 flexbox 确保删除按钮始终在底部对齐
 		const imageInfo = imageItem.createDiv('image-info');
@@ -334,8 +491,14 @@ export class DuplicateDetectionModal extends Modal {
 
 		// 文件路径
 		const filePath = infoContent.createDiv('file-path');
-		// 如果路径中没有"/"，说明在根目录
-		const displayPath = image.path.includes('/') ? image.path.substring(0, image.path.lastIndexOf('/')) : '根目录';
+		// 云端图片显示完整 URL，本地图片显示目录路径
+		let displayPath: string;
+		if (image.isRemote) {
+			displayPath = image.path; // 云端图片显示完整 URL
+		} else {
+			// 如果路径中没有"/"，说明在根目录
+			displayPath = image.path.includes('/') ? image.path.substring(0, image.path.lastIndexOf('/')) : '根目录';
+		}
 		filePath.textContent = displayPath;
 		filePath.style.cssText = `
 			color: var(--text-muted);
@@ -344,6 +507,17 @@ export class DuplicateDetectionModal extends Modal {
 			word-break: break-all;
 			flex-shrink: 0;
 		`;
+		// 云端图片添加标识 - 只有当组内同时存在本地和云端图片时才显示
+		const hasLocalInGroup = group.images.some(img => !img.isRemote);
+		const hasRemoteInGroup = group.images.some(img => img.isRemote);
+		if (image.isRemote && hasLocalInGroup && hasRemoteInGroup) {
+			const remoteBadge = filePath.createSpan({ text: ' 🌩️ 云端', cls: 'remote-badge' });
+			remoteBadge.style.cssText = `
+				color: var(--text-accent);
+				font-weight: bold;
+				margin-left: 4px;
+			`;
+		}
 
 		// 文件大小
 		const fileSize = infoContent.createDiv('file-size');
@@ -355,20 +529,33 @@ export class DuplicateDetectionModal extends Modal {
 			flex-shrink: 0;
 		`;
 
-		// 所有图片都显示删除按钮 - 固定在底部
-		const deleteBtn = imageInfo.createEl('button', {
-			text: '删除',
-			cls: 'mod-danger'
-		});
-		deleteBtn.style.cssText = `
-			width: 100%;
-			margin-top: auto; /* 使用 auto margin 推到底部 */
-			padding: 6px;
-			font-size: 0.85em;
-			flex-shrink: 0;
-		`;
-		deleteBtn.addEventListener('click', async () => {
-			await this.deleteImage(image, group);
+		// 删除按钮 - 云端图片不显示删除按钮
+		if (!image.isRemote) {
+			const deleteBtn = imageInfo.createEl('button', {
+				text: '删除',
+				cls: 'mod-danger'
+			});
+			deleteBtn.style.cssText = `
+				width: 100%;
+				margin-top: auto; /* 使用 auto margin 推到底部 */
+				padding: 6px;
+				font-size: 0.85em;
+				flex-shrink: 0;
+			`;
+			deleteBtn.addEventListener('click', async (e) => {
+				e.stopPropagation(); // 阻止事件冒泡，避免触发图片点击
+				await this.deleteImage(image, group);
+			});
+		}
+
+		// 为图片卡片添加点击事件，点击后查看笔记位置
+		imageItem.style.cursor = 'pointer';
+		imageItem.addEventListener('click', async (e) => {
+			// 如果点击的是按钮，不触发跳转
+			if ((e.target as HTMLElement).tagName === 'BUTTON') {
+				return;
+			}
+			await this.navigateToImageReferences(image);
 		});
 	}
 
@@ -495,11 +682,25 @@ export class DuplicateDetectionModal extends Modal {
 	}
 
 	async deleteDuplicates(group: DuplicateGroup) {
-		// 删除除第一张外的所有重复图片
-		const duplicates = group.images.slice(1);
+		// 删除除第一张外的所有重复图片（只删除本地图片，跳过云端图片）
+		const duplicates = group.images.slice(1).filter(img => !img.isRemote);
+		const remoteDuplicates = group.images.slice(1).filter(img => img.isRemote);
+		
+		if (duplicates.length === 0) {
+			if (remoteDuplicates.length > 0) {
+				new Notice('该组重复图片均为云端图片，无法删除');
+			} else {
+				new Notice('没有可删除的重复图片');
+			}
+			return;
+		}
+		
 		const totalSize = duplicates.reduce((sum, img) => sum + img.size, 0);
 		
-		const confirmMessage = `确定要删除以下 ${duplicates.length} 张重复图片吗？\n\n这将释放 ${ImageProcessor.formatFileSize(totalSize)} 空间。\n\n此操作不可撤销。`;
+		let confirmMessage = `确定要删除以下 ${duplicates.length} 张重复图片吗？\n\n这将释放 ${ImageProcessor.formatFileSize(totalSize)} 空间。\n\n此操作不可撤销。`;
+		if (remoteDuplicates.length > 0) {
+			confirmMessage += `\n\n注意：该组还有 ${remoteDuplicates.length} 张云端图片无法删除。`;
+		}
 		
 		const confirmed = await ConfirmModal.show(
 			this.app,
@@ -609,6 +810,99 @@ export class DuplicateDetectionModal extends Modal {
 					});
 				}
 				new Notice('批量删除失败: ' + (error instanceof Error ? error.message : String(error)));
+			}
+		}
+	}
+
+	/**
+	 * 跳转到图片的引用笔记位置
+	 */
+	async navigateToImageReferences(image: ImageInfo) {
+		// 检查是否有缓存的引用信息
+		if (image.references && image.references.length > 0) {
+			// 使用第一个引用
+			const ref = image.references[0];
+			const file = this.app.vault.getAbstractFileByPath(ref.filePath) as TFile;
+			if (file) {
+				// 关闭模态框
+				this.close();
+				
+				// 在新标签页打开笔记
+				const leaf = this.app.workspace.getLeaf(true);
+				if (leaf) {
+					await leaf.openFile(file);
+					// 滚动到指定行
+					setTimeout(async () => {
+						const view = leaf.view;
+						if (view && 'editor' in view && ref.lineNumber && ref.lineNumber > 0) {
+							const editor = (view as any).editor;
+							if (editor && typeof editor.setCursor === 'function') {
+								const line = ref.lineNumber - 1;
+								let ch = 0;
+								
+								// 如果提供了完整行内容，尝试定位到图片引用的位置
+								if (ref.fullLine) {
+									try {
+										const content = await this.app.vault.read(file);
+										const lines = content.split('\n');
+										if (line < lines.length) {
+											const lineContent = lines[line];
+											// 尝试查找图片路径或文件名
+											const imageName = image.name;
+											const imagePath = image.path;
+											const patterns = [
+												new RegExp(`!\\[\\[[^\\]]*${imageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\]]*\\]\\]`),
+												new RegExp(`!\\[[^\\]]*\\]\\([^)]*${imageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^)]*\\)`),
+												new RegExp(`<img[^>]*${imageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^>]*>`, 'i'),
+												new RegExp(imagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+											];
+											for (const pattern of patterns) {
+												const match = lineContent.match(pattern);
+												if (match && match.index !== undefined) {
+													ch = match.index;
+													break;
+												}
+											}
+										}
+									} catch (e) {
+										// 定位失败，使用行首
+									}
+								}
+								
+								const pos = { line, ch };
+								editor.setCursor(pos);
+							}
+						}
+					}, 300);
+				}
+			} else {
+				new Notice(`找不到文件: ${ref.filePath}`);
+			}
+		} else {
+			// 如果没有缓存的引用信息，尝试查找引用
+			if (this.plugin?.referenceManager) {
+				try {
+					const references = await this.plugin.referenceManager.findImageReferences(image.path, image.name);
+					if (references.length > 0) {
+						// 更新缓存的引用信息
+						image.references = references;
+						image.referenceCount = references.length;
+						// 递归调用，使用更新后的引用信息
+						await this.navigateToImageReferences(image);
+					} else {
+						new Notice('该图片未被任何笔记引用');
+					}
+				} catch (error) {
+					if (this.plugin?.logger) {
+						await this.plugin.logger.error(OperationType.PLUGIN_ERROR, '查找图片引用失败', {
+							error: error as Error,
+							imagePath: image.path
+						});
+					}
+					new Notice('查找引用失败');
+				}
+			} else {
+				new Notice('该图片未被任何笔记引用');
 			}
 		}
 	}
