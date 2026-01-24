@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Coeicy/Obsidian-ImageMgr/releases">
-    <img src="https://img.shields.io/github/v/release/Coeicy/Obsidian-ImageMgr?style=flat-square" alt="Release">
+  <a href="https://github.com/Coeris/Obsidian-ImageMgr/releases">
+    <img src="https://img.shields.io/github/v/release/Coeris/Obsidian-ImageMgr?style=flat-square" alt="Release">
   </a>
-  <a href="https://github.com/Coeicy/Obsidian-ImageMgr/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/Coeicy/Obsidian-ImageMgr?style=flat-square" alt="License">
+  <a href="https://github.com/Coeris/Obsidian-ImageMgr/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/Coeris/Obsidian-ImageMgr?style=flat-square" alt="License">
   </a>
   <a href="https://obsidian.md/">
     <img src="https://img.shields.io/badge/Obsidian-0.15.0+-purple?style=flat-square" alt="Obsidian">

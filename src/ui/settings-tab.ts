@@ -32,9 +32,28 @@ export const VIEW_TYPE = 'image-manager-view';
  * - 管理锁定文件列表
  * - 自定义快捷键配置
  */
+/** 设置页标签定义 */
+const SETTINGS_TAB_DEFS: { id: string; title: string }[] = [
+	{ id: 'basic', title: '📌 基础设置' },
+	{ id: 'home', title: '🏠 主页设置' },
+	{ id: 'card', title: '🖼️ 图片卡片' },
+	{ id: 'delete', title: '🗑️ 删除与回收站' },
+	{ id: 'path-naming', title: '🔄 重命名设置' },
+	{ id: 'performance', title: '⚡ 性能优化' },
+	{ id: 'batch', title: '📦 批量操作' },
+	{ id: 'mobile', title: '📱 移动端适配' },
+	{ id: 'upload', title: '☁️ 网络图片' },
+	{ id: 'extension', title: '🧩 扩展' },
+	{ id: 'ignored-files', title: '🔒 锁定文件' },
+	{ id: 'logs', title: '📋 操作日志' },
+	{ id: 'shortcuts', title: '⌨️ 键盘快捷键' },
+	{ id: 'reference', title: '📖 插件说明' },
+];
+
 export class ImageManagementSettingTab extends PluginSettingTab {
 	plugin: ImageManagementPlugin;
-	private containerEl: HTMLElement;
+	private tabPanels: Map<string, HTMLElement> = new Map();
+	private activeTabId: string = 'basic';
 
 	constructor(app: App, plugin: ImageManagementPlugin) {
 		super(app, plugin);
@@ -108,116 +127,29 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	}
 
 	display(): void {
-		const {containerEl} = this;
-		this.containerEl = containerEl; // 保存引用用于搜索功能
-
+		const containerEl = this.containerEl;
 		containerEl.empty();
 
-		// 清空折叠状态集合，确保所有分组默认折叠
-		this.collapsedSections.clear();
+		// ========== 标签页栏 ==========
+		const tabBar = containerEl.createDiv('settings-tab-bar');
+		const contentWrapper = containerEl.createDiv('settings-tab-content');
+		this.tabPanels.clear();
+		for (const t of SETTINGS_TAB_DEFS) {
+			const tabBtn = tabBar.createEl('button', { cls: 'settings-tab-btn' });
+			tabBtn.textContent = t.title;
+			tabBtn.dataset.tabId = t.id;
+			tabBtn.addEventListener('click', () => this.showTab(t.id));
+			const panel = contentWrapper.createDiv('settings-tab-panel');
+			panel.dataset.tabId = t.id;
+			panel.style.display = 'none';
+			this.tabPanels.set(t.id, panel);
+		}
+		this.showTab(this.activeTabId || 'basic');
 
-		// ========== 设置管理工具栏 ==========
-		const settingsToolbar = containerEl.createDiv('settings-toolbar');
-		settingsToolbar.style.cssText = `
-			display: flex;
-			gap: 8px;
-			margin-bottom: 20px;
-			padding: 12px;
-			background-color: var(--background-secondary);
-			border-radius: 8px;
-			border: 1px solid var(--background-modifier-border);
-			flex-wrap: wrap;
-			align-items: center;
-		`;
-
-		// 设置搜索框
-		const searchContainer = settingsToolbar.createDiv('settings-search-container');
-		searchContainer.style.cssText = `
-			flex: 1;
-			min-width: 200px;
-			max-width: 400px;
-		`;
-		const searchInput = searchContainer.createEl('input', {
-			type: 'text',
-			placeholder: '🔍 搜索设置...',
-			cls: 'settings-search-input'
-		});
-		searchInput.style.cssText = `
-			width: 100%;
-			padding: 6px 12px;
-			border: 1px solid var(--background-modifier-border);
-			border-radius: 4px;
-			background-color: var(--background-primary);
-			color: var(--text-normal);
-			font-size: 0.9em;
-		`;
-
-		// 设置搜索功能
-		let searchTimeout: NodeJS.Timeout | null = null;
-		searchInput.addEventListener('input', (e) => {
-			const query = (e.target as HTMLInputElement).value.toLowerCase().trim();
-			
-			// 防抖搜索
-			if (searchTimeout) {
-				clearTimeout(searchTimeout);
-			}
-			
-			searchTimeout = setTimeout(() => {
-				this.filterSettings(query);
-			}, 300);
-		});
-
-		// 设置管理按钮组
-		const buttonGroup = settingsToolbar.createDiv('settings-button-group');
-		buttonGroup.style.cssText = `
-			display: flex;
-			gap: 8px;
-			flex-shrink: 0;
-		`;
-
-		// 导出设置按钮
-		const exportBtn = buttonGroup.createEl('button', { text: '📥 导出设置' });
-		exportBtn.style.cssText = `
-			padding: 6px 12px;
-			border: 1px solid var(--background-modifier-border);
-			border-radius: 4px;
-			background-color: var(--background-primary);
-			color: var(--text-normal);
-			cursor: pointer;
-			font-size: 0.9em;
-		`;
-		exportBtn.addEventListener('click', () => this.exportSettings());
-
-		// 导入设置按钮
-		const importBtn = buttonGroup.createEl('button', { text: '📤 导入设置' });
-		importBtn.style.cssText = `
-			padding: 6px 12px;
-			border: 1px solid var(--background-modifier-border);
-			border-radius: 4px;
-			background-color: var(--background-primary);
-			color: var(--text-normal);
-			cursor: pointer;
-			font-size: 0.9em;
-		`;
-		importBtn.addEventListener('click', () => this.importSettings());
-
-		// 重置设置按钮
-		const resetBtn = buttonGroup.createEl('button', { text: '🔄 重置为默认' });
-		resetBtn.style.cssText = `
-			padding: 6px 12px;
-			border: 1px solid var(--background-modifier-border);
-			border-radius: 4px;
-			background-color: var(--background-primary);
-			color: var(--text-error);
-			cursor: pointer;
-			font-size: 0.9em;
-		`;
-		resetBtn.addEventListener('click', () => this.resetSettings());
-
-		// ========== 所有设置（默认全部折叠） ==========
+		// ========== 各标签页内容 ==========
 
 		// 1. 基础设置
-		const basicSection = this.createCollapsibleSection(containerEl, '📌 基础设置', 'basic', false);
+		const basicSection = { contentEl: this.tabPanels.get('basic')! };
 		
 		new Setting(basicSection.contentEl)
 			.setName('自动扫描')
@@ -256,103 +188,37 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(basicSection.contentEl)
-			.setName('MD5去重检测')
-			.setDesc('通过计算图片的MD5哈希值自动检测重复的图片文件，节省存储空间')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enableDeduplication)
-				.onChange(async (value) => {
-					this.plugin.settings.enableDeduplication = value;
-					await this.plugin.saveSettings();
-				}));
-
-		// 1.5. 云端图片设置
-		const remoteImageSection = this.createCollapsibleSection(containerEl, '🌩️ 云端图片设置', 'remote-image', false);
-
-		// 云端图片设置说明
-		const remoteImageIntro = remoteImageSection.contentEl.createDiv();
-		remoteImageIntro.style.color = 'var(--text-muted)';
-		remoteImageIntro.style.marginBottom = '16px';
-		remoteImageIntro.style.padding = '12px';
-		remoteImageIntro.style.backgroundColor = 'var(--background-secondary)';
-		remoteImageIntro.style.borderRadius = '6px';
-		remoteImageIntro.style.fontSize = '0.9em';
-		remoteImageIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		remoteImageIntro.innerHTML = `
-			<p style="margin: 0 0 8px 0; font-weight: 600;">🌩️ 云端图片功能说明</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
-				<li><strong>网络图片扫描</strong>：自动扫描 Markdown 文件中的网络图片链接（http://、https://）</li>
-				<li><strong>代理加载</strong>：当直接加载失败时，自动尝试通过代理服务加载图片</li>
-				<li><strong>云端标识</strong>：在图片列表中显示云端图片标识，便于区分本地和云端图片</li>
-			</ul>
-			<p style="margin: 8px 0 0 0; font-size: 0.85em;">💡 提示：云端图片无法进行重命名、移动、删除等文件操作，但可以查看和复制链接。</p>
-		`;
-
-		new Setting(remoteImageSection.contentEl)
-			.setName('扫描网络图片')
-			.setDesc('扫描 Markdown 文件中的网络图片链接（http://、https://），并在列表中显示')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.scanRemoteImages ?? true)
-				.onChange(async (value) => {
-					this.plugin.settings.scanRemoteImages = value;
-					await this.plugin.saveSettings();
-					// 如果启用，提示需要重新扫描
-					if (value) {
-						new Notice('✅ 已启用网络图片扫描，请重新扫描以查看网络图片');
-					}
-				}));
-
-		new Setting(remoteImageSection.contentEl)
-			.setName('网络图片代理服务')
-			.setDesc('当直接加载失败时使用的代理服务（Obsidian 代理、公共代理或两者都尝试）')
+			.setName('图片查看滚轮行为')
+			.setDesc('在图片详情页中，鼠标滚轮的默认操作（可随时在查看图片时切换）')
 			.addDropdown(dropdown => dropdown
-				.addOption('none', '不使用代理')
-				.addOption('obsidian', '仅 Obsidian 代理')
-				.addOption('weserv', '仅公共代理（weserv.nl）')
-				.addOption('both', '两者都尝试（推荐）')
-				.setValue(this.plugin.settings.remoteImageProxy ?? 'both')
+				.addOption('zoom', '缩放图片')
+				.addOption('scroll', '切换上下张图片')
+				.setValue(this.plugin.settings.defaultWheelMode)
 				.onChange(async (value) => {
-					this.plugin.settings.remoteImageProxy = value as 'none' | 'obsidian' | 'weserv' | 'both';
+					this.plugin.settings.defaultWheelMode = value as 'scroll' | 'zoom';
 					await this.plugin.saveSettings();
-				}));
-
-		new Setting(remoteImageSection.contentEl)
-			.setName('显示云端图片标识')
-			.setDesc('在图片列表中显示 🌩️ 标识，便于区分本地和云端图片')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showRemoteImageBadge ?? true)
-				.onChange(async (value) => {
-					this.plugin.settings.showRemoteImageBadge = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
+					
+					// 更新所有打开的图片详情页
+					const leaves = this.app.workspace.getLeavesOfType('modal');
+					for (const leaf of leaves) {
+						const view = leaf.view as any;
+						if (view && view.isImageDetailModal) {
+							if (view.isScrollMode !== undefined) {
+								if (value === 'scroll') {
+									view.isScrollMode = true;
+								} else {
+									view.isScrollMode = false;
+								}
+								if (view.updateScrollModeIndicator) {
+									view.updateScrollModeIndicator();
+								}
+							}
+						}
 					}
 				}));
 
-		new Setting(remoteImageSection.contentEl)
-			.setName('云端图片加载超时')
-			.setDesc('云端图片加载的超时时间（毫秒，范围：3000-30000）')
-			.addSlider(slider => slider
-				.setLimits(3000, 30000, 1000)
-				.setValue(this.plugin.settings.remoteImageTimeout ?? 10000)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.remoteImageTimeout = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(remoteImageSection.contentEl)
-			.setName('自动重试代理加载')
-			.setDesc('当直接加载失败时，自动尝试通过代理服务加载图片')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.autoRetryRemoteImage ?? true)
-				.onChange(async (value) => {
-					this.plugin.settings.autoRetryRemoteImage = value;
-					await this.plugin.saveSettings();
-				}));
-
-		// 2. 主页设置（图片管理主页的布局和显示）
-		const homeSection = this.createCollapsibleSection(containerEl, '🏠 主页设置', 'home', false);
+	// 2. 主页设置（图片管理主页的布局和显示）
+		const homeSection = { contentEl: this.tabPanels.get('home')! };
 
 		// 布局设置（二级标题）
 		const layoutTitle = homeSection.contentEl.createEl('h4', { text: '📐 布局' });
@@ -549,7 +415,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		// 3. 图片卡片设置
-		const cardSection = this.createCollapsibleSection(containerEl, '🖼️ 图片卡片', 'card', false);
+		const cardSection = { contentEl: this.tabPanels.get('card')! };
 
 		new Setting(cardSection.contentEl)
 			.setName('纯净画廊')
@@ -664,7 +530,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		// 3. 删除设置
-		const deleteSection = this.createCollapsibleSection(containerEl, '🗑️ 删除与回收站', 'delete', false);
+		const deleteSection = { contentEl: this.tabPanels.get('delete')! };
 
 		// 删除设置说明
 		const deleteIntro = deleteSection.contentEl.createDiv();
@@ -771,80 +637,213 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			<p style="margin: 6px 0 0 0; font-size: 0.9em;">⚠️ 注意：只有通过插件删除的文件才会进入回收站。在 Obsidian 文件管理器或文件系统中直接删除的文件无法拦截。</p>
 		`;
 
-		// 4. 引用与预览（合并引用设置和预览设置）
-		const referenceSection = this.createCollapsibleSection(containerEl, '🔗 引用与预览', 'reference', false);
+// 4. 引用与预览（插件说明页）
+		const referencePanel = this.tabPanels.get('reference');
+		if (!referencePanel) {
+			console.warn('Reference tab panel not found');
+			return;
+		}
+		const referenceSection = { contentEl: referencePanel };
+
+		// 页面标题
+		const pageTitle = referenceSection.contentEl.createEl('h2', { text: '📖 插件使用说明' });
+		pageTitle.style.marginBottom = '16px';
+		pageTitle.style.fontSize = '1.2em';
+		pageTitle.style.fontWeight = '600';
+
+		// 简介
+		const introText = referenceSection.contentEl.createDiv();
+		introText.style.marginBottom = '24px';
+		introText.style.color = 'var(--text-muted)';
+		introText.style.fontSize = '0.9em';
+		introText.textContent = '本插件提供完整的图片管理解决方案，包括图片扫描、去重、重命名、引用管理等功能。';
+
+		// 功能分类容器
+		const featuresContainer = referenceSection.contentEl.createDiv('features-container');
+		featuresContainer.style.display = 'flex';
+		featuresContainer.style.flexDirection = 'column';
+		featuresContainer.style.gap = '16px';
 
 		// 图片引用格式说明
-		const referenceFormatIntro = referenceSection.contentEl.createDiv();
+		const referenceFormatIntro = featuresContainer.createDiv();
 		referenceFormatIntro.style.color = 'var(--text-muted)';
-		referenceFormatIntro.style.marginBottom = '12px';
-		referenceFormatIntro.style.padding = '10px 12px';
+		referenceFormatIntro.style.padding = '12px 16px';
 		referenceFormatIntro.style.backgroundColor = 'var(--background-secondary)';
 		referenceFormatIntro.style.borderRadius = '6px';
-		referenceFormatIntro.style.fontSize = '0.9em';
 		referenceFormatIntro.style.borderLeft = '3px solid var(--interactive-accent)';
 		referenceFormatIntro.innerHTML = `
-			<p style="margin: 0 0 8px 0; font-weight: 600;">📝 图片引用格式支持说明：</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">📝 图片引用格式</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.85em;">
 				<li><strong>Wiki 格式</strong>：<code>![[image.png|显示文本|100x200]]</code> ✅ 支持显示文本和尺寸设置</li>
 				<li><strong>HTML 格式</strong>：<code>&lt;img src="image.png" alt="文本" width="100" height="200"&gt;</code> ✅ 支持显示文本和尺寸设置</li>
 				<li><strong>Markdown 格式</strong>：<code>![alt](image.png)</code> ⚠️ 仅支持显示文本（alt），<strong>不支持尺寸设置</strong></li>
 			</ul>
-			<p style="margin: 8px 0 0 0; font-size: 0.85em;">💡 提示：如需设置图片尺寸，建议使用 Wiki 或 HTML 格式。插件会自动检测并更新所有格式的引用链接。</p>
+			<p style="margin: 10px 0 0 0; font-size: 0.8em;">💡 提示：建议使用 Wiki 或 HTML 格式以支持尺寸设置。插件会自动更新所有格式的引用链接。</p>
 		`;
 
-		new Setting(referenceSection.contentEl)
-			.setName('保持详情页打开')
-			.setDesc('点击"前往笔记"时，保持图片详情页打开（在右侧面板查看笔记），而非关闭详情页')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.keepModalOpen)
-				.onChange(async (value) => {
-					this.plugin.settings.keepModalOpen = value;
-					await this.plugin.saveSettings();
-				}));
+		// 搜索功能说明
+		const searchFeatureIntro = featuresContainer.createDiv();
+		searchFeatureIntro.style.color = 'var(--text-muted)';
+		searchFeatureIntro.style.padding = '12px 16px';
+		searchFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
+		searchFeatureIntro.style.borderRadius = '6px';
+		searchFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+		searchFeatureIntro.innerHTML = `
+			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">🔍 搜索功能</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.85em;">
+				<li><strong>搜索范围</strong>：文件名、文件路径、引用笔记名</li>
+				<li><strong>大小写敏感</strong>：默认区分大小写（"Image" ≠ "image"）</li>
+				<li><strong>实时搜索</strong>：输入后自动延迟搜索（300ms）</li>
+				<li><strong>快捷键</strong>：<code>Ctrl+Shift+F</code> 快速聚焦搜索框</li>
+				<li><strong>搜索结果</strong>：显示匹配图片及引用信息</li>
+			</ul>
+			<p style="margin: 10px 0 0 0; font-size: 0.8em;">💡 提示：支持模糊匹配，可通过路径快速定位图片。</p>
+		`;
 
-		new Setting(referenceSection.contentEl)
-			.setName('显示引用时间')
-			.setDesc('在引用信息区域显示笔记文件的最后修改时间（显示在文件名的右侧）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showReferenceTime)
-				.onChange(async (value) => {
-					this.plugin.settings.showReferenceTime = value;
-					await this.plugin.saveSettings();
-				}));
+		// 图片查看功能说明
+		const viewFeatureIntro = featuresContainer.createDiv();
+		viewFeatureIntro.style.color = 'var(--text-muted)';
+		viewFeatureIntro.style.padding = '12px 16px';
+		viewFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
+		viewFeatureIntro.style.borderRadius = '6px';
+		viewFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+		viewFeatureIntro.innerHTML = `
+			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">👁️ 图片查看</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.85em;">
+				<li><strong>缩放</strong>：鼠标滚轮、触摸板双指缩放</li>
+				<li><strong>切换</strong>：滚轮、方向键、点击左右区域</li>
+				<li><strong>旋转</strong>：支持90°旋转图片</li>
+				<li><strong>保存</strong>：可保存旋转后的图片</li>
+				<li><strong>信息</strong>：显示图片名称、尺寸、大小、引用列表</li>
+			</ul>
+			<p style="margin: 10px 0 0 0; font-size: 0.8em;">💡 提示：滚轮模式可在查看时切换（缩放/切换图片）。</p>
+		`;
 
-		new Setting(referenceSection.contentEl)
-			.setName('鼠标滚轮模式')
-			.setDesc('在图片详情页中，当鼠标位于图片上时，滚轮的默认行为')
-			.addDropdown(dropdown => dropdown
-				.addOption('zoom', '缩放图片（默认）')
-				.addOption('scroll', '切换图片')
-				.setValue(this.plugin.settings.defaultWheelMode)
-				.onChange(async (value) => {
-					this.plugin.settings.defaultWheelMode = value as 'scroll' | 'zoom';
-					await this.plugin.saveSettings();
-					
-					// 更新所有打开的图片详情页
-					const leaves = this.app.workspace.getLeavesOfType('modal');
-					for (const leaf of leaves) {
-						const view = leaf.view as any;
-						if (view && view.isImageDetailModal) {
-							if (view.isScrollMode !== undefined) {
-								if (value === 'scroll') {
-									view.isScrollMode = true;
-								} else {
-									view.isScrollMode = false;
-								}
-								if (view.updateScrollModeIndicator) {
-									view.updateScrollModeIndicator();
-								}
-							}
-						}
-					}
-				}));
+		// 批量操作说明
+		const batchFeatureIntro = featuresContainer.createDiv();
+		batchFeatureIntro.style.color = 'var(--text-muted)';
+		batchFeatureIntro.style.padding = '12px 16px';
+		batchFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
+		batchFeatureIntro.style.borderRadius = '6px';
+		batchFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+		batchFeatureIntro.innerHTML = `
+			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">📦 批量操作</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.85em;">
+				<li><strong>批量选择</strong>：多选图片进行操作</li>
+				<li><strong>批量重命名</strong>：按规则批量重命名图片</li>
+				<li><strong>智能重命名</strong>：按引用笔记自动命名</li>
+				<li><strong>批量锁定</strong>：防止重要图片被修改</li>
+				<li><strong>确认阈值</strong>：超过数量需二次确认（默认10个）</li>
+			</ul>
+			<p style="margin: 10px 0 0 0; font-size: 0.8em;">💡 提示：批量操作会生成详细日志，可追踪所有变更。</p>
+		`;
 
-		// 5. 重命名设置
-		const pathNamingSection = this.createCollapsibleSection(containerEl, '🔄 重命名设置', 'path-naming', false);
+		// 去重功能说明
+		const dedupFeatureIntro = featuresContainer.createDiv();
+		 dedupFeatureIntro.style.color = 'var(--text-muted)';
+		 dedupFeatureIntro.style.padding = '12px 16px';
+		 dedupFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
+		 dedupFeatureIntro.style.borderRadius = '6px';
+		 dedupFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+		 dedupFeatureIntro.innerHTML = `
+			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">🔄 重复检测</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.85em;">
+				<li><strong>MD5 检测</strong>：精确检测内容相同的图片</li>
+				<li><strong>快速检测</strong>：基于文件名和大小检测</li>
+				<li><strong>重复标记</strong>：在图片卡片显示重复标识</li>
+				<li><strong>批量处理</strong>：一键删除或移动重复图片</li>
+			</ul>
+			<p style="margin: 10px 0 0 0; font-size: 0.8em;">💡 提示：MD5 检测可节省存储空间，避免重复保存相同图片。</p>
+		`;
+
+		// 空链接检测说明
+		const brokenLinkIntro = featuresContainer.createDiv();
+		brokenLinkIntro.style.color = 'var(--text-muted)';
+		brokenLinkIntro.style.padding = '12px 16px';
+		brokenLinkIntro.style.backgroundColor = 'var(--background-secondary)';
+		brokenLinkIntro.style.borderRadius = '6px';
+		brokenLinkIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+		brokenLinkIntro.innerHTML = `
+			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">🔗 空链接检测</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.85em;">
+				<li><strong>自动扫描</strong>：检测笔记中的失效图片链接</li>
+				<li><strong>网络链接</strong>：验证网络图片是否可访问</li>
+				<li><strong>快速修复</strong>：一键删除或替换失效链接</li>
+				<li><strong>批量处理</strong>：批量清理多个空链接</li>
+			</ul>
+			<p style="margin: 10px 0 0 0; font-size: 0.8em;">💡 提示：定期检测可保持笔记整洁，避免遗留无效链接。</p>
+		`;
+
+		// 回收站功能说明
+		const trashFeatureIntro = featuresContainer.createDiv();
+		trashFeatureIntro.style.color = 'var(--text-muted)';
+		trashFeatureIntro.style.padding = '12px 16px';
+		trashFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
+		trashFeatureIntro.style.borderRadius = '6px';
+		trashFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+		trashFeatureIntro.innerHTML = `
+			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">🗑️ 回收站功能</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.85em;">
+				<li><strong>安全删除</strong>：删除图片时自动移入回收站</li>
+				<li><strong>预览恢复</strong>：查看已删除图片的预览和详情</li>
+				<li><strong>批量操作</strong>：批量恢复或永久删除</li>
+				<li><strong>路径恢复</strong>：可恢复到原始路径或指定目录</li>
+			</ul>
+			<p style="margin: 10px 0 0 0; font-size: 0.8em;">💡 提示：仅通过插件删除的文件会进入回收站，直接删除无法拦截。</p>
+		`;
+
+		// 快速开始指南
+		const quickStartTitle = referenceSection.contentEl.createEl('h3', { text: '🚀 快速开始' });
+		quickStartTitle.style.marginTop = '24px';
+		quickStartTitle.style.marginBottom = '12px';
+		quickStartTitle.style.fontSize = '1em';
+		quickStartTitle.style.fontWeight = '600';
+
+		const quickStartGuide = referenceSection.contentEl.createDiv();
+		quickStartGuide.style.color = 'var(--text-muted)';
+		quickStartGuide.style.marginBottom = '24px';
+		quickStartGuide.style.padding = '12px 16px';
+		quickStartGuide.style.backgroundColor = 'var(--background-secondary)';
+		quickStartGuide.style.borderRadius = '6px';
+		quickStartGuide.style.borderLeft = '3px solid var(--interactive-success)';
+		quickStartGuide.innerHTML = `
+			<ol style="margin: 0; padding-left: 20px; line-height: 1.8; font-size: 0.85em;">
+				<li><strong>首次使用</strong>：点击左侧菜单"图片管理"打开主界面</li>
+				<li><strong>扫描图片</strong>：点击"扫描图片"按钮，插件会自动发现所有图片</li>
+				<li><strong>查看详情</strong>：点击图片卡片查看大图和引用信息</li>
+				<li><strong>搜索定位</strong>：使用搜索框快速找到需要的图片</li>
+				<li><strong>管理引用</strong>：在详情页查看和跳转到引用笔记</li>
+				<li><strong>批量操作</strong>：多选图片进行重命名、删除等操作</li>
+			</ol>
+		`;
+
+		// 常用快捷键说明
+		const shortcutsTitle = referenceSection.contentEl.createEl('h3', { text: '⌨️ 常用快捷键' });
+		shortcutsTitle.style.marginBottom = '12px';
+		shortcutsTitle.style.fontSize = '1em';
+		shortcutsTitle.style.fontWeight = '600';
+
+		const shortcutsGuide = referenceSection.contentEl.createDiv();
+		shortcutsGuide.style.color = 'var(--text-muted)';
+		shortcutsGuide.style.marginBottom = '24px';
+		shortcutsGuide.style.padding = '12px 16px';
+		shortcutsGuide.style.backgroundColor = 'var(--background-secondary)';
+		shortcutsGuide.style.borderRadius = '6px';
+		shortcutsGuide.style.borderLeft = '3px solid var(--interactive-accent)';
+		shortcutsGuide.innerHTML = `
+			<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.85em;">
+				<div><strong>Ctrl+Shift+F</strong><br/><span style="color: var(--text-faint);">聚焦搜索框</span></div>
+				<div><strong>← →</strong><br/><span style="color: var(--text-faint);">切换图片</span></div>
+				<div><strong>+ -</strong><br/><span style="color: var(--text-faint);">缩放图片</span></div>
+				<div><strong>R</strong><br/><span style="color: var(--text-faint);">旋转图片</span></div>
+				<div><strong>Delete</strong><br/><span style="color: var(--text-faint);">删除图片</span></div>
+				<div><strong>Esc</strong><br/><span style="color: var(--text-faint);">关闭详情页</span></div>
+			</div>
+			<p style="margin: 12px 0 0 0; font-size: 0.8em;">💡 提示：可在"键盘快捷键"设置页自定义所有快捷键。</p>
+		`;
+
+// 5. 重命名设置
+		const pathNamingSection = { contentEl: this.tabPanels.get('path-naming')! };
 
 		new Setting(pathNamingSection.contentEl)
 			.setName('自动生成文件名')
@@ -907,7 +906,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		// 6. 性能优化
-		const performanceSection = this.createCollapsibleSection(containerEl, '⚡ 性能优化', 'performance', false);
+		const performanceSection = { contentEl: this.tabPanels.get('performance')! };
 
 		new Setting(performanceSection.contentEl)
 			.setName('启用懒加载')
@@ -943,43 +942,8 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// 9. 搜索设置
-		const searchSection = this.createCollapsibleSection(containerEl, '🔍 搜索设置', 'search', false);
-
-		new Setting(searchSection.contentEl)
-			.setName('大小写敏感')
-			.setDesc('搜索时区分大小写（例如："Image"和"image"视为不同）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.searchCaseSensitive)
-				.onChange(async (value) => {
-					this.plugin.settings.searchCaseSensitive = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(searchSection.contentEl)
-			.setName('实时搜索延迟')
-			.setDesc('输入搜索关键词后延迟多久开始搜索（毫秒，范围：0-1000）')
-			.addSlider(slider => slider
-				.setLimits(0, 1000, 50)
-				.setValue(this.plugin.settings.liveSearchDelay)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.liveSearchDelay = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(searchSection.contentEl)
-			.setName('搜索包含路径')
-			.setDesc('搜索时不仅匹配文件名，也匹配文件路径')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.searchInPath)
-				.onChange(async (value) => {
-					this.plugin.settings.searchInPath = value;
-					await this.plugin.saveSettings();
-				}));
-
 		// 10. 批量操作设置
-		const batchSection = this.createCollapsibleSection(containerEl, '📦 批量操作设置', 'batch', false);
+		const batchSection = { contentEl: this.tabPanels.get('batch')! };
 
 		new Setting(batchSection.contentEl)
 			.setName('批量操作最大数量')
@@ -1016,7 +980,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		// 11. 移动端适配
-		const mobileSection = this.createCollapsibleSection(containerEl, '📱 移动端适配', 'mobile', false);
+		const mobileSection = { contentEl: this.tabPanels.get('mobile')! };
 
 		// 移动端适配说明
 		const mobileIntro = mobileSection.contentEl.createDiv();
@@ -1104,13 +1068,13 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// 12. 扩展功能
-		const extensionSection = this.createCollapsibleSection(containerEl, '🧩 扩展功能', 'extension', false);
+		// 12. 扩展
+		const extensionSection = { contentEl: this.tabPanels.get('extension')! };
 
 		// 12.1 重复图片检测
 		new Setting(extensionSection.contentEl)
 			.setName('🔍 重复图片检测')
-			.setDesc('开启后可以检测并管理重复图片')
+			.setDesc('开启后可以检测并管理重复图片（在图片管理主页显示重复检测按钮）')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableDuplicateDetection !== false) // 默认 true
 				.onChange(async (value) => {
@@ -1120,7 +1084,20 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					this.refreshViewToolbar();
 				}));
 
-		// 12.2 空链接检测
+		// 12.2 MD5去重检测（作为重复检测的子功能）
+		const md5Setting = new Setting(extensionSection.contentEl)
+			.setName('MD5 去重检测')
+			.setDesc('自动计算图片的 MD5 哈希值，精确检测内容完全相同的重复图片（节省存储空间）')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableDeduplication)
+				.onChange(async (value) => {
+					this.plugin.settings.enableDeduplication = value;
+					await this.plugin.saveSettings();
+				}));
+		// 添加缩进，表示这是重复检测的子功能
+		md5Setting.settingEl.style.marginLeft = '24px';
+
+		// 12.3 空链接检测
 		new Setting(extensionSection.contentEl)
 			.setName('🈳 空链接检测')
 			.setDesc('开启后可以检测并管理笔记中的空链接')
@@ -1133,7 +1110,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					this.refreshViewToolbar();
 				}));
 
-		// 12.3 在Android相册中隐藏Obsidian图片
+		// 12.4 在Android相册中隐藏Obsidian图片
 		new Setting(extensionSection.contentEl)
 			.setName('🛡️ 在 Android 相册中隐藏图片')
 			.setDesc('开启后在笔记库根目录创建 .nomedia 文件，Android 相册将不再扫描此目录（仅对 Android 有效）')
@@ -1155,7 +1132,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		// 10. 锁定文件
-		const ignoredFilesSection = this.createCollapsibleSection(containerEl, '🔒 锁定文件', 'ignored-files', false);
+		const ignoredFilesSection = { contentEl: this.tabPanels.get('ignored-files')! };
 
 		// 锁定文件说明
 		const ignoredFilesIntro = ignoredFilesSection.contentEl.createDiv();
@@ -1672,10 +1649,85 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		}
 	});
 
-		// 12. 图床上传设置
-		const uploadSection = this.createCollapsibleSection(containerEl, '☁️ 图床上传设置', 'upload', false);
+	// 12. 图床上传设置
+	const uploadSection = { contentEl: this.tabPanels.get('upload')! };
 
-		new Setting(uploadSection.contentEl)
+	// 网图设置说明
+	const remoteImageIntro = uploadSection.contentEl.createDiv();
+	remoteImageIntro.style.color = 'var(--text-muted)';
+	remoteImageIntro.style.marginBottom = '16px';
+	remoteImageIntro.style.padding = '12px';
+	remoteImageIntro.style.backgroundColor = 'var(--background-secondary)';
+	remoteImageIntro.style.borderRadius = '6px';
+	remoteImageIntro.style.fontSize = '0.9em';
+	remoteImageIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+	remoteImageIntro.innerHTML = `
+		<p style="margin: 0 0 8px 0; font-weight: 600;">🌩️ 云端图片功能说明</p>
+		<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+			<li><strong>网络图片扫描</strong>：自动扫描 Markdown 文件中的网络图片链接（http://、https://）</li>
+			<li><strong>代理加载</strong>：当直接加载失败时，自动尝试通过代理服务加载图片</li>
+			<li><strong>云端标识</strong>：在图片列表中显示云端图片标识，便于区分本地和云端图片</li>
+		</ul>
+		<p style="margin: 8px 0 0 0; font-size: 0.85em;">💡 提示：云端图片无法进行重命名、移动、删除等文件操作，但可以查看和复制链接。</p>
+	`;
+
+	new Setting(uploadSection.contentEl)
+		.setName('扫描网络图片')
+		.setDesc('扫描 Markdown 文件中的网络图片链接（http://、https://），并在列表中显示')
+		.addToggle(toggle => toggle
+			.setValue(this.plugin.settings.scanRemoteImages ?? true)
+			.onChange(async (value) => {
+				this.plugin.settings.scanRemoteImages = value;
+				await this.plugin.saveSettings();
+				// 如果启用，提示需要重新扫描
+				if (value) {
+					new Notice('✅ 已启用网络图片扫描，请重新扫描以查看网络图片');
+				}
+			}));
+
+	new Setting(uploadSection.contentEl)
+		.setName('网络图片代理服务')
+		.setDesc('当直接加载失败时使用的代理服务（Obsidian 代理、公共代理或两者都尝试）')
+		.addDropdown(dropdown => dropdown
+			.addOption('none', '不使用代理')
+			.addOption('obsidian', '仅 Obsidian 代理')
+			.addOption('weserv', '仅公共代理（weserv.nl）')
+			.addOption('both', '两者都尝试（推荐）')
+			.setValue(this.plugin.settings.remoteImageProxy ?? 'both')
+			.onChange(async (value) => {
+				this.plugin.settings.remoteImageProxy = value as 'none' | 'obsidian' | 'weserv' | 'both';
+				await this.plugin.saveSettings();
+			}));
+
+	new Setting(uploadSection.contentEl)
+		.setName('云端图片加载超时')
+		.setDesc('云端图片加载的超时时间（毫秒，范围：3000-30000）')
+		.addSlider(slider => slider
+			.setLimits(3000, 30000, 1000)
+			.setValue(this.plugin.settings.remoteImageTimeout ?? 10000)
+			.setDynamicTooltip()
+			.onChange(async (value) => {
+				this.plugin.settings.remoteImageTimeout = value;
+				await this.plugin.saveSettings();
+			}));
+
+	new Setting(uploadSection.contentEl)
+		.setName('自动重试代理加载')
+		.setDesc('当直接加载失败时，自动尝试通过代理服务加载图片')
+		.addToggle(toggle => toggle
+			.setValue(this.plugin.settings.autoRetryRemoteImage ?? true)
+			.onChange(async (value) => {
+				this.plugin.settings.autoRetryRemoteImage = value;
+				await this.plugin.saveSettings();
+			}));
+
+	// 图床设置分割线
+	const uploadDivider = uploadSection.contentEl.createEl('div');
+	uploadDivider.style.cssText = 'margin: 24px 0 12px 0; padding-top: 12px; border-top: 1px solid var(--background-modifier-border);';
+	const uploadTitle = uploadDivider.createEl('h4', { text: '☁️ 图床上传配置' });
+	uploadTitle.style.cssText = 'margin: 0 0 8px 0; font-size: 0.95em; font-weight: 600; color: var(--text-normal);';
+
+	new Setting(uploadSection.contentEl)
 			.setName('图床类型')
 			.setDesc('选择要使用的图床服务')
 			.addDropdown(dropdown => dropdown
@@ -1810,7 +1862,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		}
 
 		// 13. 操作日志
-		const logsSection = this.createCollapsibleSection(containerEl, '📋 操作日志', 'logs', false);
+		const logsSection = { contentEl: this.tabPanels.get('logs')! };
 
 		// 说明文字
 		const logIntro = logsSection.contentEl.createDiv();
@@ -1904,7 +1956,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		// 12. 键盘快捷键（放在最后，高级设置）
-		const shortcutsSection = this.createCollapsibleSection(containerEl, '⌨️ 键盘快捷键', 'shortcuts', false);
+		const shortcutsSection = { contentEl: this.tabPanels.get('shortcuts')! };
 
 		// 说明文字
 		const shortcutsIntro = shortcutsSection.contentEl.createDiv();
@@ -2073,135 +2125,16 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 	}
 
-	private collapsedSections: Set<string> = new Set();
-
 	/**
-	 * 创建可折叠的设置区域
+	 * 切换到指定标签页
 	 */
-	createCollapsibleSection(container: HTMLElement, title: string, id: string, defaultExpanded: boolean = false): { headerEl: HTMLElement, contentEl: HTMLElement } {
-		const sectionContainer = container.createDiv('collapsible-section-container');
-		sectionContainer.id = id;
-		sectionContainer.style.marginTop = '20px';
-		sectionContainer.style.marginBottom = '10px';
-		
-		// 标题区域（可点击）
-		const headerEl = sectionContainer.createDiv('collapsible-section-header');
-		headerEl.style.display = 'flex';
-		headerEl.style.alignItems = 'center';
-		headerEl.style.gap = '8px';
-		headerEl.style.padding = '10px 12px';
-		headerEl.style.backgroundColor = 'var(--background-secondary)';
-		headerEl.style.borderRadius = '6px';
-		headerEl.style.cursor = 'pointer';
-		headerEl.style.transition = 'all 0.2s ease';
-		headerEl.style.border = '1px solid var(--background-modifier-border)';
-		
-		// 标题文字（包含emoji标签和括号内的折叠图标）
-		const titleEl = headerEl.createEl('h3');
-		titleEl.style.margin = '0';
-		titleEl.style.fontSize = '1.1em';
-		titleEl.style.flex = '1';
-		titleEl.style.display = 'flex';
-		titleEl.style.alignItems = 'center';
-		titleEl.style.gap = '8px';
-		
-		// 标题文本
-		const titleText = titleEl.createSpan();
-		titleText.textContent = title;
-		titleText.style.flex = '1';
-		
-		// 展开/折叠图标
-		const iconEl = titleEl.createSpan('collapse-icon');
-		iconEl.textContent = defaultExpanded ? '▼' : '▶';
-		iconEl.style.fontSize = '0.85em';
-		iconEl.style.color = 'var(--text-muted)';
-		iconEl.style.transition = 'all 0.2s ease';
-		iconEl.style.flexShrink = '0';
-		
-		// 内容区域
-		const contentEl = sectionContainer.createDiv('collapsible-section-content');
-		contentEl.style.marginTop = '10px';
-		contentEl.style.paddingLeft = '10px';
-		contentEl.style.display = defaultExpanded ? 'block' : 'none';
-		contentEl.style.transition = 'all 0.3s ease';
-		
-		// 如果默认折叠，添加到折叠集合
-		if (!defaultExpanded) {
-			this.collapsedSections.add(id);
-		}
-		
-		// 悬停效果
-		headerEl.addEventListener('mouseenter', () => {
-			headerEl.style.backgroundColor = 'var(--background-modifier-hover)';
-			headerEl.style.borderColor = 'var(--interactive-accent)';
+	private showTab(id: string): void {
+		this.activeTabId = id;
+		this.containerEl.querySelectorAll('.settings-tab-btn').forEach((btn) => {
+			btn.classList.toggle('is-active', (btn as HTMLElement).dataset.tabId === id);
 		});
-		
-		headerEl.addEventListener('mouseleave', () => {
-			headerEl.style.backgroundColor = 'var(--background-secondary)';
-			headerEl.style.borderColor = 'var(--background-modifier-border)';
-		});
-		
-		// 点击展开/折叠
-		headerEl.addEventListener('click', () => {
-			const isCollapsed = this.collapsedSections.has(id);
-			
-			if (isCollapsed) {
-				// 展开
-				contentEl.style.display = 'block';
-				iconEl.textContent = '▼';
-				this.collapsedSections.delete(id);
-			} else {
-				// 折叠
-				contentEl.style.display = 'none';
-				iconEl.textContent = '▶';
-				this.collapsedSections.add(id);
-			}
-		});
-		
-		return { headerEl, contentEl };
-	}
-
-	/**
-	 * 过滤设置项（根据搜索关键词）
-	 */
-	private filterSettings(query: string) {
-		const sections = this.containerEl.querySelectorAll('.collapsible-section-container');
-		
-		sections.forEach((section: Element) => {
-			const contentEl = section.querySelector('.collapsible-section-content') as HTMLElement;
-			if (!contentEl) return;
-
-			if (!query) {
-				// 没有搜索关键词，显示所有设置
-				contentEl.style.display = '';
-				return;
-			}
-
-			// 检查标题是否匹配
-			const headerText = section.querySelector('.collapsible-section-header')?.textContent?.toLowerCase() || '';
-			const titleMatch = headerText.includes(query);
-
-			// 检查设置项是否匹配
-			const settings = contentEl.querySelectorAll('.setting-item');
-			let hasMatch = titleMatch;
-
-			settings.forEach((setting: Element) => {
-				const settingText = setting.textContent?.toLowerCase() || '';
-				const matches = settingText.includes(query);
-				(setting as HTMLElement).style.display = matches ? '' : 'none';
-				if (matches) hasMatch = true;
-			});
-
-			// 如果标题或任何设置项匹配，展开并显示该分组
-			if (hasMatch) {
-				contentEl.style.display = 'block';
-				const iconEl = section.querySelector('.collapse-icon') as HTMLElement;
-				if (iconEl) iconEl.textContent = '▼';
-				const sectionId = section.id;
-				this.collapsedSections.delete(sectionId);
-			} else {
-				contentEl.style.display = 'none';
-			}
+		this.tabPanels.forEach((panel, pid) => {
+			panel.style.display = pid === id ? 'block' : 'none';
 		});
 	}
 
@@ -2298,43 +2231,6 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				await this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '导入设置失败', {
 					error: error instanceof Error ? error : new Error(String(error))
 				});
-			}
-		}
-	}
-
-	/**
-	 * 重置所有设置为默认值
-	 */
-	private async resetSettings() {
-		const confirmed = await ConfirmModal.show(
-			this.app,
-			'重置设置',
-			'确定要将所有设置重置为默认值吗？此操作不可撤销。\n\n注意：快捷键配置不会被重置。',
-			['重置', '取消']
-		);
-
-		if (confirmed === 'save') {
-			try {
-				// 保存快捷键配置
-				const keyboardShortcuts = this.plugin.settings.keyboardShortcuts || {};
-				
-				// 重置所有设置
-				const { DEFAULT_SETTINGS } = await import('../settings');
-				this.plugin.settings = { ...DEFAULT_SETTINGS };
-				
-				// 恢复快捷键配置
-				this.plugin.settings.keyboardShortcuts = keyboardShortcuts;
-				
-				await this.plugin.saveSettings();
-				new Notice('✅ 设置已重置为默认值');
-				this.display(); // 刷新设置页面
-			} catch (error) {
-				new Notice('❌ 重置设置失败');
-				if (this.plugin?.logger) {
-					await this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '重置设置失败', {
-						error: error instanceof Error ? error : new Error(String(error))
-					});
-				}
 			}
 		}
 	}

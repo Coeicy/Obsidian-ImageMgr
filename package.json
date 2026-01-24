@@ -19,12 +19,12 @@
 	"author": "Coeris",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Coeicy/Obsidian-ImageMgr.git"
+		"url": "https://github.com/Coeris/Obsidian-ImageMgr.git"
 	},
 	"bugs": {
-		"url": "https://github.com/Coeicy/Obsidian-ImageMgr/issues"
+		"url": "https://github.com/Coeris/Obsidian-ImageMgr/issues"
 	},
-	"homepage": "https://github.com/Coeicy/Obsidian-ImageMgr#readme",
+	"homepage": "https://github.com/Coeris/Obsidian-ImageMgr#readme",
 	"license": "MIT",
 	"devDependencies": {
 		"@types/jest": "^30.0.0",

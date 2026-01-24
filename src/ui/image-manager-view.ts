@@ -3224,43 +3224,75 @@ export class ImageManagerView extends ItemView {
 			}
 		}
 		
+		// 从设置中加载黑名单
+		const blacklist = this.plugin.settings.remoteImageBlacklist || [];
+		
 		// 并行验证需要检测的网络链接（优化批量处理，提升速度）
 		// 注意：requestUrl 会下载完整响应到内存，但我们可以通过增加批次大小和减少延迟来提升速度
 		const BATCH_SIZE = 12; // 从5增加到12，提升并发度（如果内存充足可以进一步增加）
 		const BATCH_DELAY = 50; // 从100ms减少到50ms，减少等待时间
 		
 		if (linksToValidate.length > 0) {
-			for (let i = 0; i < linksToValidate.length; i += BATCH_SIZE) {
-				const batch = linksToValidate.slice(i, i + BATCH_SIZE);
-				const validations = await Promise.all(
-					batch.map(async (item) => {
-						const validation = await validateRemoteLink(item.url);
-						// 保存到缓存
-						saveToCache(item.url, validation);
-						return { ...item, validation };
-					})
-				);
-
-				// 收集验证失败的链接
-				for (const { filePath, lineNumber, linkText, url, validation } of validations) {
-					if (!validation.valid) {
-						brokenLinks.push({
-							filePath,
-							lineNumber,
-							linkText,
-							extractedPath: url,
-							isRemoteError: true,
-							remoteError: validation.error
-						});
-					}
-				}
-
-				// 每批之间稍微延迟，避免过载，并给垃圾回收器时间清理内存
-				if (i + BATCH_SIZE < linksToValidate.length) {
-					await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+			// 先处理黑名单中的链接（直接标记为失效，不验证）
+			const blacklistLinks: typeof remoteLinksToValidate = [];
+			const validLinksToValidate: typeof remoteLinksToValidate = [];
+			
+			for (const item of linksToValidate) {
+				if (blacklist.includes(item.url)) {
+					// 黑名单中的链接，直接添加到失效列表
+					blacklistLinks.push(item);
+				} else {
+					// 需要验证的链接
+					validLinksToValidate.push(item);
 				}
 			}
 			
+			// 处理黑名单链接
+			for (const item of blacklistLinks) {
+				brokenLinks.push({
+					filePath: item.filePath,
+					lineNumber: item.lineNumber,
+					linkText: item.linkText,
+					extractedPath: item.url,
+					isRemoteError: true,
+					remoteError: '黑名单（已验证失效）'
+				});
+			}
+			
+			// 验证非黑名单链接
+			if (validLinksToValidate.length > 0) {
+				for (let i = 0; i < validLinksToValidate.length; i += BATCH_SIZE) {
+					const batch = validLinksToValidate.slice(i, i + BATCH_SIZE);
+					const validations = await Promise.all(
+						batch.map(async (item) => {
+							const validation = await validateRemoteLink(item.url);
+							// 保存到缓存
+							saveToCache(item.url, validation);
+							return { ...item, validation };
+						})
+					);
+
+					// 收集验证失败的链接
+					for (const { filePath, lineNumber, linkText, url, validation } of validations) {
+						if (!validation.valid) {
+							brokenLinks.push({
+								filePath,
+								lineNumber,
+								linkText,
+								extractedPath: url,
+								isRemoteError: true,
+								remoteError: validation.error
+							});
+						}
+					}
+
+					// 每批之间稍微延迟，避免过载，并给垃圾回收器时间清理内存
+					if (i + BATCH_SIZE < validLinksToValidate.length) {
+						await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+					}
+				}
+			}
+
 			// 保存更新后的缓存到插件数据
 			this.plugin.data.remoteLinkValidationCache = validCache;
 			await this.plugin.saveData(this.plugin.data);

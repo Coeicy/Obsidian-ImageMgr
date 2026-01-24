@@ -5,6 +5,19 @@ import { NetworkImageScanner, NetworkImageReference } from '../utils/network-ima
 import { UploaderManager } from '../utils/uploader/uploader-manager';
 import { OperationType } from '../utils/logger';
 
+/**
+ * 将 ArrayBuffer 转换为 Base64 字符串
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
 export class NetworkImageModal extends Modal {
     private scanner: NetworkImageScanner;
     private uploaderManager: UploaderManager;
@@ -239,12 +252,28 @@ export class NetworkImageModal extends Modal {
                             imagePath: img.url
                         });
                     }
+                    
+                    // 自动添加到黑名单
+                    const blacklist = this.plugin.settings.remoteImageBlacklist || [];
+                    if (!blacklist.includes(img.url)) {
+                        blacklist.push(img.url);
+                        this.plugin.settings.remoteImageBlacklist = blacklist;
+                        await this.plugin.saveSettings();
+                        
+                        if (this.plugin?.logger) {
+                            await this.plugin.logger.info(OperationType.VIEW, `已将失效图片添加到黑名单: ${img.url}`, {
+                                imagePath: img.url,
+                                details: { blacklistSize: blacklist.length }
+                            });
+                        }
+                    }
+                    
                     imgEl.style.display = 'none';
                     imgEl.setAttribute('data-retried', 'true'); // 确保标记为已重试，避免无限循环
                     if (!previewCell.querySelector('.network-image-error')) {
                         const errorSpan = previewCell.createSpan({ text: '❌', cls: 'network-image-error' });
                         errorSpan.style.cursor = 'help';
-                        errorSpan.title = `图片加载失败\nURL: ${img.url}\n已尝试: 直接加载 -> 本地代理 -> 公共代理`;
+                        errorSpan.title = `图片加载失败（已加入黑名单）\nURL: ${img.url}\n已尝试: 直接加载 -> 本地代理 -> 公共代理`;
                         
                         // 点击复制 URL
                         errorSpan.onclick = () => {
@@ -338,9 +367,10 @@ export class NetworkImageModal extends Modal {
                 } else {
                     failCount++;
                     if (this.plugin?.logger) {
+                        const errorObj = uploadResult.error instanceof Error ? uploadResult.error : new Error(String(uploadResult.error));
                         await this.plugin.logger.error(OperationType.CREATE, `上传失败: ${img.url}`, {
                             imagePath: img.url,
-                            error: uploadResult.error instanceof Error ? uploadResult.error : new Error(String(uploadResult.error))
+                            error: errorObj
                         });
                     }
                 }
@@ -410,7 +440,7 @@ export class NetworkImageModal extends Modal {
                         } else {
                             if (this.plugin?.logger) {
                                 await this.plugin.logger.warn(OperationType.UPDATE_REFERENCE, `文件内容已变更，跳过替换: ${path}:${img.line}`, {
-                                    filePath: path,
+                                    imagePath: path,
                                     details: { line: img.line }
                                 });
                             }

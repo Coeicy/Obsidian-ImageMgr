@@ -388,6 +388,10 @@ export class Logger {
 	private plugin: ImageManagementPlugin;
 	/** 是否为开发模式 */
 	private isDevMode: boolean;
+	/** 批量保存队列 */
+	private saveQueue: Promise<void> | null = null;
+	/** 需要保存的标志 */
+	private needsSave = false;
 
 	/**
 	 * 创建日志管理器实例
@@ -397,6 +401,8 @@ export class Logger {
 		this.plugin = plugin;
 		this.isDevMode = isDevelopmentMode();
 		this.loadLogs();
+		// 自动清理过期的日志（保留最近7天的日志）
+		this.performCleanup().catch(() => {});
 	}
 
 	/**
@@ -497,17 +503,38 @@ export class Logger {
 	}
 
 	/**
-	 * 保存日志（带错误处理）
+	 * 保存日志（带错误处理和批量优化）
 	 */
 	private async saveLogs(): Promise<void> {
-		try {
-			const data = this.plugin.data || {};
-			data.logs = this.logs;
-			await this.plugin.saveData(data);
-		} catch (error) {
-			// 保存日志失败时，只输出到控制台，避免循环错误
-			console.error('[ImageMgr] 保存日志失败:', error);
+		// 如果已经在保存队列中，直接返回
+		if (this.saveQueue) {
+			this.needsSave = true;
+			return this.saveQueue;
 		}
+
+		// 创建新的保存队列
+		this.saveQueue = (async () => {
+			try {
+				// 短暂延迟，允许更多的日志条目累积
+				await new Promise(resolve => setTimeout(resolve, 100));
+
+				// 检查是否需要保存
+				if (this.needsSave) {
+					this.needsSave = false;
+					const data = this.plugin.data || {};
+					data.logs = this.logs;
+					await this.plugin.saveData(data);
+				}
+			} catch (error) {
+				// 保存日志失败时，只输出到控制台，避免循环错误
+				console.error('[ImageMgr] 保存日志失败:', error);
+			} finally {
+				this.saveQueue = null;
+			}
+		})();
+
+		this.needsSave = true;
+		return this.saveQueue;
 	}
 
 	/**
@@ -667,7 +694,7 @@ export class Logger {
 	}
 
 	/**
-	 * 记录调试日志
+	 * 记录调试日志（同步版本，不阻塞操作）
 	 * 
 	 * 用于记录详细的调试信息，仅在启用 DEBUG 日志时记录。
 	 * 
@@ -675,7 +702,22 @@ export class Logger {
 	 * @param message - 日志消息
 	 * @param options - 可选参数（图片信息、详情等）
 	 */
-	async debug(operation: OperationType, message: string, options?: {
+	debug(operation: OperationType, message: string, options?: {
+		imageHash?: string;
+		imagePath?: string;
+		imageName?: string;
+		details?: any;
+		error?: Error | string;
+	}) {
+		this.log(LogLevel.DEBUG, operation, message, options).catch(() => {});
+	}
+
+	/**
+	 * 记录调试日志（异步版本）
+	 * 
+	 * 用于需要等待日志记录完成的情况。
+	 */
+	async debugAsync(operation: OperationType, message: string, options?: {
 		imageHash?: string;
 		imagePath?: string;
 		imageName?: string;
@@ -686,7 +728,7 @@ export class Logger {
 	}
 
 	/**
-	 * 记录信息日志
+	 * 记录信息日志（同步版本，不阻塞操作）
 	 * 
 	 * 用于记录正常的操作信息，如成功的操作。
 	 * 
@@ -694,7 +736,22 @@ export class Logger {
 	 * @param message - 日志消息
 	 * @param options - 可选参数（图片信息、详情等）
 	 */
-	async info(operation: OperationType, message: string, options?: {
+	info(operation: OperationType, message: string, options?: {
+		imageHash?: string;
+		imagePath?: string;
+		imageName?: string;
+		details?: any;
+		error?: Error | string;
+	}) {
+		this.log(LogLevel.INFO, operation, message, options).catch(() => {});
+	}
+
+	/**
+	 * 记录信息日志（异步版本）
+	 * 
+	 * 用于需要等待日志记录完成的情况。
+	 */
+	async infoAsync(operation: OperationType, message: string, options?: {
 		imageHash?: string;
 		imagePath?: string;
 		imageName?: string;
@@ -705,7 +762,7 @@ export class Logger {
 	}
 
 	/**
-	 * 记录警告日志
+	 * 记录警告日志（同步版本，不阻塞操作）
 	 * 
 	 * 用于记录可能的问题或异常情况，但不影响功能。
 	 * 
@@ -713,7 +770,22 @@ export class Logger {
 	 * @param message - 日志消息
 	 * @param options - 可选参数（图片信息、详情等）
 	 */
-	async warn(operation: OperationType, message: string, options?: {
+	warn(operation: OperationType, message: string, options?: {
+		imageHash?: string;
+		imagePath?: string;
+		imageName?: string;
+		details?: any;
+		error?: Error | string;
+	}) {
+		this.log(LogLevel.WARNING, operation, message, options).catch(() => {});
+	}
+
+	/**
+	 * 记录警告日志（异步版本）
+	 * 
+	 * 用于需要等待日志记录完成的情况。
+	 */
+	async warnAsync(operation: OperationType, message: string, options?: {
 		imageHash?: string;
 		imagePath?: string;
 		imageName?: string;
@@ -724,7 +796,7 @@ export class Logger {
 	}
 
 	/**
-	 * 记录错误日志
+	 * 记录错误日志（同步版本，不阻塞操作）
 	 * 
 	 * 用于记录错误信息，包括异常和失败的操作。
 	 * 
@@ -732,7 +804,22 @@ export class Logger {
 	 * @param message - 日志消息
 	 * @param options - 可选参数（图片信息、详情、错误对象等）
 	 */
-	async error(operation: OperationType, message: string, options?: {
+	error(operation: OperationType, message: string, options?: {
+		imageHash?: string;
+		imagePath?: string;
+		imageName?: string;
+		details?: any;
+		error?: Error | string;
+	}) {
+		this.log(LogLevel.ERROR, operation, message, options).catch(() => {});
+	}
+
+	/**
+	 * 记录错误日志（异步版本）
+	 * 
+	 * 用于需要等待日志记录完成的情况。
+	 */
+	async errorAsync(operation: OperationType, message: string, options?: {
 		imageHash?: string;
 		imagePath?: string;
 		imageName?: string;
@@ -824,6 +911,8 @@ export class Logger {
 		}
 	}
 	
+
+
 	/**
 	 * 清除指定时间范围之前的日志
 	 */
@@ -839,7 +928,24 @@ export class Logger {
 			throw error;
 		}
 	}
-	
+
+	/**
+	 * 执行日志清理（保留最近7天）
+	 */
+	private async performCleanup(): Promise<void> {
+		try {
+			const now = Date.now();
+			const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000); // 7天前
+			const removed = await this.clearLogsBefore(sevenDaysAgo);
+			if (removed > 0) {
+				console.log(`[ImageMgr] 自动清理了 ${removed} 条过期日志`);
+			}
+		} catch (error) {
+			// 清理失败不影响插件运行
+			console.error('[ImageMgr] 清理过期日志失败:', error);
+		}
+	}
+
 	/**
 	 * 获取日志数量统计
 	 */

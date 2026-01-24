@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Coeicy/Obsidian-ImageMgr/releases">
-    <img src="https://img.shields.io/github/v/release/Coeicy/Obsidian-ImageMgr?style=flat-square" alt="Release">
+  <a href="https://github.com/Coeris/Obsidian-ImageMgr/releases">
+    <img src="https://img.shields.io/github/v/release/Coeris/Obsidian-ImageMgr?style=flat-square" alt="Release">
   </a>
-  <a href="https://github.com/Coeicy/Obsidian-ImageMgr/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/Coeicy/Obsidian-ImageMgr?style=flat-square" alt="License">
+  <a href="https://github.com/Coeris/Obsidian-ImageMgr/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/Coeris/Obsidian-ImageMgr?style=flat-square" alt="License">
   </a>
   <a href="https://obsidian.md/">
     <img src="https://img.shields.io/badge/Obsidian-0.15.0+-purple?style=flat-square" alt="Obsidian">
@@ -303,6 +303,33 @@ graph TD
 
 #### Android 相册隐藏
 - 创建 `.nomedia` 文件防止 Android 相册扫描图片
+
+## 📚 完整文档
+
+本插件提供完整的文档体系，帮助不同类型的用户快速上手：
+
+### 文档导航
+
+| 文档 | 目标读者 | 主要内容 | 链接 |
+|------|----------|----------|------|
+| 📖 **用户指南** | 所有用户 | 安装、使用、设置、FAQ | [README.md](./README.md) |
+| 🔧 **API文档** | 开发者 | API接口、事件系统、示例代码 | [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) |
+| 🏗️ **技术指南** | 贡献者 | 架构设计、流程图、性能优化 | [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) |
+| 📋 **更新日志** | 所有用户 | 版本历史、新功能、Bug修复 | [CHANGELOG.md](./CHANGELOG.md) |
+
+### 快速导航
+
+- **新用户**：从[用户指南](#快速开始)开始
+- **高级用户**：查看[设置选项](#设置选项)和[快捷键](#快捷键)
+- **开发者**：参考[API文档](./API_DOCUMENTATION.md)
+- **贡献者**：阅读[技术指南](./TECHNICAL_GUIDE.md)
+
+### 文档统计
+
+- 总字数：约45,000字
+- 代码示例：65+
+- 流程图：10+
+- 覆盖功能：50+
 
 ## 📋 完整功能清单
 

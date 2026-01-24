@@ -336,8 +336,6 @@ export interface ImageManagerSettings {
 	// ==================== 引用与预览设置 ====================
 	/** 前往笔记时是否保持详情页打开 */
 	keepModalOpen: boolean;
-	/** 是否显示引用时间 */
-	showReferenceTime: boolean;
 	/** 鼠标滚轮默认模式：scroll-切换图片、zoom-缩放图片 */
 	defaultWheelMode: 'scroll' | 'zoom';
 	
@@ -448,6 +446,8 @@ export interface ImageManagerSettings {
 	remoteImageTimeout?: number;
 	/** 是否自动尝试代理加载失败的云端图片 */
 	autoRetryRemoteImage?: boolean;
+	/** 失效网络图片黑名单 - 自动检测失效的图片 URL 并加入此列表 */
+	remoteImageBlacklist?: string[];
 	
 	// ==================== 图床上传设置 ====================
 	/** 图床配置 */

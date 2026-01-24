@@ -4959,20 +4959,18 @@ export class ImageDetailModal extends Modal {
 			});
 			
 			// 引用时间（放在右下角）
-			if (this.plugin?.settings.showReferenceTime) {
-				const refTimeSpan = refItem.createSpan('reference-time');
-				refTimeSpan.textContent = ImageProcessor.formatDate(ref.refTime);
-				refTimeSpan.title = '文件最后修改时间';
-				refTimeSpan.style.cssText = `
-					font-size: 0.85em;
-					color: var(--text-muted);
-					font-family: monospace;
-					opacity: 0.7;
-					margin-top: auto;
-					text-align: right;
-					align-self: flex-end;
-				`;
-			}
+			const refTimeSpan = refItem.createSpan('reference-time');
+			refTimeSpan.textContent = ImageProcessor.formatDate(ref.refTime);
+			refTimeSpan.title = '文件最后修改时间';
+			refTimeSpan.style.cssText = `
+				font-size: 0.85em;
+				color: var(--text-muted);
+				font-family: monospace;
+				opacity: 0.7;
+				margin-top: auto;
+				text-align: right;
+				align-self: flex-end;
+			`;
 			
 		}
 	}

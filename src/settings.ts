@@ -42,8 +42,6 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	autoGenerateNames: true,
 	/** 前往笔记时是否保持详情页打开 - 点击引用时的行为 */
 	keepModalOpen: false,
-	/** 是否显示引用时间 - 显示引用该图片的笔记的最后修改时间 */
-	showReferenceTime: true,
 
 	// ==================== 重命名设置 ====================
 	/** 路径命名深度 - 自动命名时包含的路径级数（1-5） */
@@ -141,7 +139,7 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 
 	// ==================== 搜索设置 ====================
 	/** 搜索是否区分大小写 - 搜索时的大小写敏感性 */
-	searchCaseSensitive: false,
+	searchCaseSensitive: true,
 	/** 实时搜索延迟（毫秒） - 输入时的防抖延迟 */
 	liveSearchDelay: 300,
 	/** 搜索是否包含路径 - 是否在文件路径中搜索 */
@@ -178,7 +176,7 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 
 	// ==================== 云端图片设置 ====================
 	/** 是否扫描网络图片 - 扫描 Markdown 文件中的网络图片链接 */
-	scanRemoteImages: true,
+	scanRemoteImages: false,
 	/** 网络图片代理服务 - 当直接加载失败时使用的代理服务 */
 	remoteImageProxy: 'both', // 'none' | 'obsidian' | 'weserv' | 'both'
 	/** 是否在列表中显示云端图片标识 */
@@ -187,6 +185,8 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	remoteImageTimeout: 10000,
 	/** 是否自动尝试代理加载失败的云端图片 */
 	autoRetryRemoteImage: true,
+	/** 失效网络图片黑名单 - 自动检测失效的图片 URL 并加入此列表 */
+	remoteImageBlacklist: [],
 	
 	// ==================== 图床上传设置 ====================
 	uploadConfig: {

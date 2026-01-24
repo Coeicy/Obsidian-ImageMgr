@@ -82,15 +82,37 @@ export default class ImageManagementPlugin extends Plugin {
 	}, 2000, true);
 
 	/**
-	 * 插件加载生命周期方法
+	 * 插件加载生命周期方法 - 核心初始化流程
 	 * 
 	 * 执行流程：
-	 * 1. 加载持久化数据和设置
-	 * 2. 初始化核心管理器（日志、错误处理、引用、回收站）
+	 * 1. 加载持久化数据和设置 (loadData → loadSettings)
+	 * 2. 初始化核心管理器（日志、错误处理、引用、回收站、锁定列表）
 	 * 3. 注册视图、命令和事件监听器
 	 * 4. 延迟初始化缓存和标记初始化完成
 	 * 
-	 * 注意：某些初始化操作延迟执行，避免阻塞插件启动
+	 * 延迟初始化说明：
+	 * - 引用缓存延迟5秒：避免启动时扫描所有文件，提升启动速度
+	 * - 初始化标记延迟3秒：避免在启动扫描时记录大量日志
+	 * 
+	 * 事件监听器注册：
+	 * - metadataCache.on('changed'): 检测显示文本变化和引用变化
+	 * - vault.on('create'): 检测新图片文件创建
+	 * - vault.on('rename'): 检测图片文件重命名
+	 * - vault.on('delete'): 检测图片文件删除
+	 * - workspace.on('file-menu'): 添加右键菜单项
+	 * 
+	 * 错误处理：
+	 * - 使用 try-catch 包裹整个初始化过程
+	 * - 初始化失败时通过 ErrorHandler 记录错误
+	 * - 即使部分初始化失败，插件仍可继续使用
+	 * 
+	 * @returns {Promise<void>}
+	 * 
+	 * @example
+	 * ```typescript
+	 * // 插件自动调用，无需手动调用
+	 * await plugin.onload();
+	 * ```
 	 */
 	async onload() {
 		try {
@@ -104,35 +126,37 @@ export default class ImageManagementPlugin extends Plugin {
 				delete (this.data as any).settings;
 			}
 			
-			// 初始化日志管理器
+			// 初始化日志管理器 - 用于记录所有操作日志
 			this.logger = new Logger(this);
 			
-			// 初始化错误处理器
+			// 初始化错误处理器 - 统一处理和记录错误
 			this.errorHandler = new ErrorHandler(this);
 			
-			// 初始化引用管理器
+			// 初始化引用管理器 - 查找和管理图片的引用关系
 			this.referenceManager = new ReferenceManager(this.app, this);
 			
-			// 初始化回收站管理器
+			// 初始化回收站管理器 - 管理已删除的文件
 			this.trashManager = new TrashManager(this.app, this);
 			
-			// 初始化回收站预加载（在设置加载后）
+			// 初始化回收站预加载（在设置加载后）- 提升回收站打开速度
 			this.trashManager.initializePreload();
 			
-			// 初始化锁定列表管理器
+			// 初始化锁定列表管理器 - 管理和监控锁定文件列表
 			this.lockListManager = new LockListManager(this);
 			await this.lockListManager.initialize();
 			
-			// 延迟初始化引用缓存，避免在启动时记录所有现有引用
+			// 延迟初始化引用缓存，避免在启动时扫描所有文件
+			// 5秒后初始化，让插件先完成核心启动流程
 			setTimeout(() => {
 				this.initializeReferenceCache();
-			}, 5000); // 5秒后初始化引用缓存
+			}, 5000);
 			
 			// 标记插件初始化完成（3秒后，避免在启动扫描时记录大量日志）
 			setTimeout(() => {
 				this.isInitializing = false;
 			}, 3000);
 			
+			// 记录插件加载成功日志
 			await this.logger.info(OperationType.PLUGIN_LOAD, '插件加载成功', {
 				details: { version: this.manifest.version }
 			});
@@ -325,7 +349,7 @@ export default class ImageManagementPlugin extends Plugin {
 				const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
 					'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
 					'enableDuplicateDetection', 'enableBrokenLinksDetection',
-					'autoGenerateNames', 'keepModalOpen', 'showReferenceTime', 'pathNamingDepth',
+					'autoGenerateNames', 'keepModalOpen', 'pathNamingDepth',
 					'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
 					'defaultWheelMode', 'showImageName', 'showImageSize', 
 					'showImageDimensions', 'showLockIcon', 'imageNameWrap', 'adaptiveImageSize',
@@ -420,7 +444,7 @@ export default class ImageManagementPlugin extends Plugin {
 			const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
 				'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
 				'enableDuplicateDetection', 'enableBrokenLinksDetection',
-				'autoGenerateNames', 'keepModalOpen', 'showReferenceTime', 'pathNamingDepth',
+				'autoGenerateNames', 'keepModalOpen', 'pathNamingDepth',
 				'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
 				'defaultWheelMode', 'showImageName', 'showImageSize', 
 				'showImageDimensions', 'showLockIcon', 'imageNameWrap', 'adaptiveImageSize',
