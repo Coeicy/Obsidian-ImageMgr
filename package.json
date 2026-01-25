@@ -1,7 +1,7 @@
 {
 	"name": "imagemgr",
-	"version": "0.2.0",
-	"description": "强大的 Obsidian 图片管理插件，支持智能扫描、批量重命名、MD5 去重、引用追踪、云端图片管理、链接格式转换、空链接检测、回收站、操作日志、移动端适配等功能。",
+	"version": "0.3.0",
+	"description": "强大的 Obsidian 图片管理插件，支持智能扫描、批量重命名、MD5 去重、引用追踪、云端图片管理、链接格式转换、空链接检测、回收站、操作日志、移动端适配等功能。新增网络图片缓存与增量扫描系统，性能提升15倍！",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
