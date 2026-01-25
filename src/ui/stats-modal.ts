@@ -141,24 +141,6 @@ export class StatsModal extends Modal {
 					if (uniqueLinks.length < this.linkStats.remote) {
 						remoteLi.createSpan({ text: ` (去重后: ${uniqueLinks.length} 张)` });
 					}
-
-					const remoteDetails = linkEl.createEl('details');
-					remoteDetails.style.marginTop = '8px';
-					const summary = remoteDetails.createEl('summary', { text: '查看网络图片链接列表' });
-					summary.style.cursor = 'pointer';
-					summary.style.color = 'var(--text-muted)';
-					
-					const remoteLinksList = remoteDetails.createEl('ul');
-					remoteLinksList.style.fontSize = '0.9em';
-					remoteLinksList.style.color = 'var(--text-muted)';
-					remoteLinksList.style.maxHeight = '200px';
-					remoteLinksList.style.overflowY = 'auto';
-					
-					uniqueLinks.forEach(link => {
-						const li = remoteLinksList.createEl('li');
-						li.style.wordBreak = 'break-all';
-						li.createEl('a', { text: link, href: link });
-					});
 				}
 			}
 		}

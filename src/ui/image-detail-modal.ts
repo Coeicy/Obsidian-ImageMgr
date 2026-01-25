@@ -436,7 +436,7 @@ export class ImageDetailModal extends Modal {
 			fileNameValue.style.fontSize = '0.9em';
 			fileNameValue.style.wordBreak = 'break-word';
 			fileNameValue.style.flex = '1';
-			// 如果是云端图片，添加标识和 URL 信息
+			// 如果是云端图片，添加标识
 			if (this.isRemoteImage) {
 				const cloudBadge = fileNameLi.createSpan('cloud-badge');
 				cloudBadge.textContent = '🌩️ 云端图片';
@@ -449,17 +449,6 @@ export class ImageDetailModal extends Modal {
 					border-radius: 4px;
 					flex-shrink: 0;
 				`;
-				// 添加 URL 显示（在文件名下方或作为提示）
-				const urlInfo = fileNameLi.createDiv('url-info');
-				urlInfo.textContent = this.image.path;
-				urlInfo.style.cssText = `
-					font-size: 0.75em;
-					color: var(--text-muted);
-					word-break: break-all;
-					margin-top: 4px;
-					width: 100%;
-				`;
-				urlInfo.title = '图片 URL';
 			}
 			// 保存引用（用于切换图片时更新）
 			this.fileNameInput = null;

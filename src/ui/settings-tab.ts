@@ -37,13 +37,13 @@ const SETTINGS_TAB_DEFS: { id: string; title: string }[] = [
 	{ id: 'basic', title: '📌 基础设置' },
 	{ id: 'home', title: '🏠 主页设置' },
 	{ id: 'card', title: '🖼️ 图片卡片' },
-	{ id: 'delete', title: '🗑️ 删除与回收站' },
+	{ id: 'delete', title: '🗑️ 回收站' },
 	{ id: 'path-naming', title: '🔄 重命名设置' },
 	{ id: 'performance', title: '⚡ 性能优化' },
 	{ id: 'batch', title: '📦 批量操作' },
 	{ id: 'mobile', title: '📱 移动端适配' },
 	{ id: 'upload', title: '☁️ 网络图片' },
-	{ id: 'extension', title: '🧩 扩展' },
+	{ id: 'extension', title: '🧩 扩展功能' },
 	{ id: 'ignored-files', title: '🔒 锁定文件' },
 	{ id: 'logs', title: '📋 操作日志' },
 	{ id: 'shortcuts', title: '⌨️ 键盘快捷键' },
@@ -121,6 +121,19 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				brokenLinksBtn.style.display = 'none';
 			}
 		} else if (this.plugin.settings.enableBrokenLinksDetection !== false) {
+			// 如果按钮不存在但应该显示，需要重新构建工具栏
+			// 这里简化处理：如果按钮不存在，说明视图可能还没完全加载，不处理
+		}
+
+		// 查找库统计按钮
+		const statsBtn = toolbarEl.querySelector('#stats-btn') as HTMLElement;
+		if (statsBtn) {
+			if (this.plugin.settings.showStatistics !== false) {
+				statsBtn.style.display = '';
+			} else {
+				statsBtn.style.display = 'none';
+			}
+		} else if (this.plugin.settings.showStatistics !== false) {
 			// 如果按钮不存在但应该显示，需要重新构建工具栏
 			// 这里简化处理：如果按钮不存在，说明视图可能还没完全加载，不处理
 		}
@@ -377,42 +390,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// 统计信息设置（二级标题）
-		const statsTitle = homeSection.contentEl.createEl('h4', { text: '📊 统计信息' });
-		statsTitle.style.marginTop = '20px';
-		statsTitle.style.marginBottom = '12px';
-		statsTitle.style.paddingBottom = '8px';
-		statsTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
 
-		new Setting(homeSection.contentEl)
-			.setName('显示统计信息')
-			.setDesc('显示图片总数量、总大小等统计数据')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showStatistics)
-				.onChange(async (value) => {
-					this.plugin.settings.showStatistics = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(homeSection.contentEl)
-			.setName('统计信息位置')
-			.setDesc('统计面板显示在页面顶部还是底部')
-			.addDropdown(dropdown => dropdown
-				.addOption('top', '顶部')
-				.addOption('bottom', '底部')
-				.setValue(this.plugin.settings.statisticsPosition)
-				.onChange(async (value) => {
-					this.plugin.settings.statisticsPosition = value as 'top' | 'bottom';
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
 
 		// 3. 图片卡片设置
 		const cardSection = { contentEl: this.tabPanels.get('card')! };
@@ -1071,7 +1049,20 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 12. 扩展
 		const extensionSection = { contentEl: this.tabPanels.get('extension')! };
 
-		// 12.1 重复图片检测
+		// 12.1 库统计
+		new Setting(extensionSection.contentEl)
+			.setName('📊 库统计')
+			.setDesc('开启后在图片管理主页显示库统计信息（图片总数量、总大小、分类统计等）')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showStatistics)
+				.onChange(async (value) => {
+					this.plugin.settings.showStatistics = value;
+					await this.plugin.saveSettings();
+					// 刷新视图以更新按钮显示
+					this.refreshViewToolbar();
+				}));
+
+		// 12.2 重复图片检测
 		new Setting(extensionSection.contentEl)
 			.setName('🔍 重复图片检测')
 			.setDesc('开启后可以检测并管理重复图片（在图片管理主页显示重复检测按钮）')
@@ -1084,7 +1075,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					this.refreshViewToolbar();
 				}));
 
-		// 12.2 MD5去重检测（作为重复检测的子功能）
+		// 12.3 MD5去重检测（作为重复检测的子功能）
 		const md5Setting = new Setting(extensionSection.contentEl)
 			.setName('MD5 去重检测')
 			.setDesc('自动计算图片的 MD5 哈希值，精确检测内容完全相同的重复图片（节省存储空间）')
@@ -1097,7 +1088,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 添加缩进，表示这是重复检测的子功能
 		md5Setting.settingEl.style.marginLeft = '24px';
 
-		// 12.3 空链接检测
+		// 12.4 空链接检测
 		new Setting(extensionSection.contentEl)
 			.setName('🈳 空链接检测')
 			.setDesc('开启后可以检测并管理笔记中的空链接')
@@ -1110,7 +1101,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					this.refreshViewToolbar();
 				}));
 
-		// 12.4 在Android相册中隐藏Obsidian图片
+		// 12.5 在Android相册中隐藏Obsidian图片
 		new Setting(extensionSection.contentEl)
 			.setName('🛡️ 在 Android 相册中隐藏图片')
 			.setDesc('开启后在笔记库根目录创建 .nomedia 文件，Android 相册将不再扫描此目录（仅对 Android 有效）')

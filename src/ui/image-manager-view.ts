@@ -367,11 +367,13 @@ export class ImageManagerView extends ItemView {
 		this.updateButtonIndicator(linkFormatBtn, 'link-format');
 		linkFormatBtn.addEventListener('click', () => this.showLinkFormatModal());
 
-		// 库统计按钮
-		const statsBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
-		statsBtn.setAttribute('id', 'stats-btn');
-		this.updateButtonIndicator(statsBtn, 'stats');
-		statsBtn.addEventListener('click', () => this.showImageInfo());
+		// 库统计按钮（根据设置显示/隐藏）
+		if (this.plugin.settings.showStatistics !== false) {
+			const statsBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
+			statsBtn.setAttribute('id', 'stats-btn');
+			this.updateButtonIndicator(statsBtn, 'stats');
+			statsBtn.addEventListener('click', () => this.showImageInfo());
+		}
 
 		// 回收站按钮（仅在启用插件回收站时显示）
 		if (this.plugin.settings.enablePluginTrash) {
