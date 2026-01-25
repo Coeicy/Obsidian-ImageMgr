@@ -1,7 +1,7 @@
 
 import { App, Modal, Setting, Notice, requestUrl, TFile, ButtonComponent } from 'obsidian';
 import ImageManagementPlugin from '../main';
-import { NetworkImageScanner, NetworkImageReference } from '../utils/network-image-scanner';
+import { NetworkImageScanner, LegacyNetworkImageReference } from '../utils/network-image-scanner';
 import { UploaderManager } from '../utils/uploader/uploader-manager';
 import { OperationType } from '../utils/logger';
 
@@ -21,7 +21,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 export class NetworkImageModal extends Modal {
     private scanner: NetworkImageScanner;
     private uploaderManager: UploaderManager;
-    private images: NetworkImageReference[] = [];
+    private images: LegacyNetworkImageReference[] = [];
     private selectedImages: Set<number> = new Set(); // index in this.images
     private listContainer: HTMLElement;
     private uploadBtnComponent: ButtonComponent;
@@ -112,7 +112,7 @@ export class NetworkImageModal extends Modal {
         this.listContainer.createDiv({ text: '正在自动扫描全库网络图片...' });
         
         // 强制扫描全库
-        this.images = await this.scanner.scan();
+        this.images = await this.scanner.scanAll();
         this.selectedImages.clear();
         
         if (this.images.length === 0) {
@@ -213,6 +213,9 @@ export class NetworkImageModal extends Modal {
                                 await this.plugin.logger.warn(OperationType.VIEW, `DNS 解析失败，域名可能无法访问: ${img.url}`, {
                                     imagePath: img.url
                                 });
+                                
+                                // 自动添加到黑名单
+                                await this.addToBlacklist(img.url, 'ERR_NAME_NOT_RESOLVED');
                             }
                         }
                         
@@ -323,9 +326,9 @@ export class NetworkImageModal extends Modal {
         progressDiv.style.padding = '10px';
         progressDiv.style.backgroundColor = 'var(--background-secondary)';
 
-        // Map<FilePath, Array<{img: NetworkImageReference, newUrl: string}>>
+        // Map<FilePath, Array<{img: LegacyNetworkImageReference, newUrl: string}>>
         const pendingReplacements = new Map<string, Array<{
-            img: NetworkImageReference,
+            img: LegacyNetworkImageReference,
             newUrl: string
         }>>();
 
@@ -367,7 +370,13 @@ export class NetworkImageModal extends Modal {
                 } else {
                     failCount++;
                     if (this.plugin?.logger) {
-                        const errorObj = uploadResult.error instanceof Error ? uploadResult.error : new Error(String(uploadResult.error));
+                        const error = uploadResult.error;
+                        let errorObj: Error;
+                        if (error instanceof (Error as any)) {
+                            errorObj = error as Error;
+                        } else {
+                            errorObj = new Error(String(error));
+                        }
                         await this.plugin.logger.error(OperationType.CREATE, `上传失败: ${img.url}`, {
                             imagePath: img.url,
                             error: errorObj
@@ -452,7 +461,7 @@ export class NetworkImageModal extends Modal {
                 } catch (err) {
                     if (this.plugin?.logger) {
                         await this.plugin.logger.error(OperationType.UPDATE_REFERENCE, `更新文件失败: ${path}`, {
-                            filePath: path,
+                            imagePath: path,
                             error: err instanceof Error ? err : new Error(String(err))
                         });
                     }
@@ -468,6 +477,51 @@ export class NetworkImageModal extends Modal {
         
         // 重新扫描以更新列表
         await this.scanImages();
+    }
+
+    /**
+     * 添加 URL 到黑名单
+     * @param url - 要添加到黑名单的 URL
+     * @param errorMessage - 错误信息
+     */
+    private async addToBlacklist(url: string, errorMessage: string): Promise<void> {
+        try {
+            // 优先使用 networkImageAPI 的黑名单系统
+            if (this.plugin.networkImageAPI) {
+                const { hashUrl } = await import('../network-image/utils');
+                const imageId = await hashUrl(url);
+                // @ts-ignore - 访问私有方法
+                await this.plugin.networkImageAPI.addToBlacklist([{
+                    id: imageId,
+                    url: url,
+                    reason: 'network_error',
+                    errorMessage: errorMessage
+                }]);
+            }
+            
+            // 同时添加到设置中的黑名单（用于兼容）
+            const blacklist = this.plugin.settings.remoteImageBlacklist || [];
+            if (!blacklist.includes(url)) {
+                blacklist.push(url);
+                this.plugin.settings.remoteImageBlacklist = blacklist;
+                await this.plugin.saveSettings();
+                
+                if (this.plugin?.logger) {
+                    await this.plugin.logger.info(OperationType.VIEW, `已将失效图片添加到黑名单: ${url}`, {
+                        imagePath: url,
+                        details: { errorMessage, blacklistSize: blacklist.length }
+                    });
+                }
+            }
+        } catch (error) {
+            // 静默失败，不影响主流程
+            if (this.plugin?.logger) {
+                await this.plugin.logger.warn(OperationType.VIEW, `添加到黑名单失败: ${url}`, {
+                    imagePath: url,
+                    error: error instanceof Error ? error : new Error(String(error))
+                });
+            }
+        }
     }
 
     onClose() {

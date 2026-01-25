@@ -237,8 +237,8 @@ export class BrokenLinksModal extends Modal {
 		
 		// 设置模态框样式 - 根据内容自适应宽度
 		modalEl.style.width = 'auto';
-		modalEl.style.minWidth = '600px';
-		modalEl.style.maxWidth = '90%';
+		modalEl.style.minWidth = '500px';
+		modalEl.style.maxWidth = '85%';
 		modalEl.style.maxHeight = '90vh';
 		
 		// 设置内容区域样式，使其可以滚动
@@ -247,10 +247,12 @@ export class BrokenLinksModal extends Modal {
 		contentEl.style.height = '100%';
 		contentEl.style.overflow = 'hidden';
 		contentEl.style.padding = '20px';
+		contentEl.style.maxWidth = '100%';
+		contentEl.style.boxSizing = 'border-box';
 
 		// 启用模态框可调整大小
 		makeModalResizable(modalEl, {
-			minWidth: 700,
+			minWidth: 500,
 			minHeight: 500,
 		});
 
@@ -378,29 +380,64 @@ export class BrokenLinksModal extends Modal {
 			}
 		}
 
-		// 找到对应的分组容器并添加
-		const groups = [
-			{ title: '🌐 网络链接错误', links: remoteErrors, icon: '🌐' },
-			{ title: '📁 本地链接错误', links: localErrors, icon: '📁' },
-			{ title: '✅ 可恢复的链接', links: recoverableLinks, icon: '✅' },
-			{ title: '❌ 不可恢复的链接', links: nonRecoverableLinks, icon: '❌' }
+		// 更新按钮计数
+		const filterGroups = [
+			{ id: 'remote', title: '🌐 网络链接错误', links: remoteErrors },
+			{ id: 'local', title: '📁 本地链接错误', links: localErrors },
+			{ id: 'nonRecoverable', title: '❌ 不可恢复的链接', links: nonRecoverableLinks }
 		];
 
-		for (const group of groups) {
+		for (const group of filterGroups) {
 			if (group.links.length === 0) continue;
 
-			// 查找或创建分组容器
-			let groupContainer = this.listContainer.querySelector(`.broken-links-group[data-group="${group.title}"]`) as HTMLElement;
-			
-			if (!groupContainer) {
-				// 创建新分组
-				groupContainer = this.listContainer.createDiv('broken-links-group');
-				groupContainer.setAttribute('data-group', group.title);
-				groupContainer.style.cssText = 'margin-bottom: 16px;';
+			// 查找对应的按钮并更新计数
+			const button = this.listContainer.querySelector(`[data-filter-id="${group.id}"]`) as HTMLElement;
+			if (button) {
+				const currentCount = parseInt(button.textContent?.match(/\((\d+)\)/)?.[1] || '0');
+				button.textContent = `${group.title} (${currentCount + group.links.length})`;
+			} else {
+				// 如果按钮不存在，需要创建（这种情况应该很少，因为按钮应该在初始渲染时创建）
+				// 这里暂时跳过，因为需要重新渲染整个按钮组
+			}
+		}
 
-				// 创建分组标题
-				const groupHeader = groupContainer.createDiv('broken-links-group-header');
-				groupHeader.style.cssText = `
+		// 如果当前显示的是对应的分类，直接添加到内容容器
+		const contentContainer = this.listContainer.querySelector('.broken-links-content-container') as HTMLElement;
+		if (contentContainer) {
+			// 获取当前激活的过滤器ID
+			const activeButton = this.listContainer.querySelector('.broken-links-filter-btn[style*="interactive-accent"]') as HTMLElement;
+			const activeFilterId = activeButton?.getAttribute('data-filter-id');
+
+			// 根据当前激活的过滤器添加对应的链接
+			if (activeFilterId === 'remote' && remoteErrors.length > 0) {
+				for (const link of remoteErrors) {
+					this.renderLinkItem(contentContainer, link);
+				}
+			} else if (activeFilterId === 'local' && localErrors.length > 0) {
+				for (const link of localErrors) {
+					this.renderLinkItem(contentContainer, link);
+				}
+			} else if (activeFilterId === 'nonRecoverable' && nonRecoverableLinks.length > 0) {
+				for (const link of nonRecoverableLinks) {
+					this.renderLinkItem(contentContainer, link);
+				}
+			}
+		}
+
+		// 处理可恢复的链接（单独显示，不参与切换）
+		if (recoverableLinks.length > 0) {
+			let recoverableContainer = this.listContainer.querySelector('.broken-links-recoverable-group') as HTMLElement;
+			if (!recoverableContainer) {
+				// 如果可恢复链接容器不存在，创建它
+				recoverableContainer = this.listContainer.createDiv('broken-links-recoverable-group');
+				recoverableContainer.style.cssText = `
+					margin-top: 24px;
+					padding-top: 16px;
+					border-top: 2px solid var(--background-modifier-border);
+				`;
+
+				const recoverableHeader = recoverableContainer.createDiv('broken-links-group-header');
+				recoverableHeader.style.cssText = `
 					display: flex;
 					align-items: center;
 					justify-content: space-between;
@@ -412,49 +449,51 @@ export class BrokenLinksModal extends Modal {
 					transition: all 0.2s ease;
 				`;
 
-				const headerLeft = groupHeader.createDiv();
+				const headerLeft = recoverableHeader.createDiv();
 				headerLeft.style.cssText = 'display: flex; align-items: center; gap: 8px; flex: 1;';
 
 				const groupTitle = headerLeft.createSpan();
 				groupTitle.style.cssText = 'font-weight: 600; font-size: 0.95em; color: var(--text-normal);';
-				groupTitle.textContent = `${group.title} (${group.links.length})`;
+				groupTitle.textContent = `✅ 可恢复的链接 (${recoverableLinks.length})`;
 
 				const collapseIcon = headerLeft.createSpan();
 				collapseIcon.textContent = '▼';
 				collapseIcon.style.cssText = 'font-size: 0.8em; color: var(--text-muted); transition: transform 0.2s ease;';
 
-				const groupContent = groupContainer.createDiv('broken-links-group-content');
+				const groupContent = recoverableContainer.createDiv('broken-links-group-content');
 				groupContent.style.cssText = 'display: block;';
 
 				let isExpanded = true;
-				groupHeader.addEventListener('click', () => {
+				recoverableHeader.addEventListener('click', () => {
 					isExpanded = !isExpanded;
 					groupContent.style.display = isExpanded ? 'block' : 'none';
 					collapseIcon.textContent = isExpanded ? '▼' : '▶';
 				});
 
-				groupHeader.addEventListener('mouseenter', () => {
-					groupHeader.style.backgroundColor = 'var(--background-modifier-hover)';
+				recoverableHeader.addEventListener('mouseenter', () => {
+					recoverableHeader.style.backgroundColor = 'var(--background-modifier-hover)';
 				});
-				groupHeader.addEventListener('mouseleave', () => {
-					groupHeader.style.backgroundColor = 'var(--background-secondary)';
+				recoverableHeader.addEventListener('mouseleave', () => {
+					recoverableHeader.style.backgroundColor = 'var(--background-secondary)';
 				});
+
+				for (const link of recoverableLinks) {
+					this.renderLinkItem(groupContent, link);
+				}
 			} else {
-				// 更新分组标题中的数量
-				const groupTitle = groupContainer.querySelector('.broken-links-group-header span') as HTMLElement;
+				// 更新计数并添加新链接
+				const groupTitle = recoverableContainer.querySelector('.broken-links-group-header span') as HTMLElement;
 				if (groupTitle) {
 					const currentCount = parseInt(groupTitle.textContent?.match(/\((\d+)\)/)?.[1] || '0');
-					groupTitle.textContent = `${group.title} (${currentCount + group.links.length})`;
+					groupTitle.textContent = `✅ 可恢复的链接 (${currentCount + recoverableLinks.length})`;
 				}
-			}
 
-			// 获取分组内容容器
-			const groupContent = groupContainer.querySelector('.broken-links-group-content') as HTMLElement;
-			if (!groupContent) continue;
-
-			// 添加新链接到分组
-			for (const link of group.links) {
-				this.renderLinkItem(groupContent, link);
+				const groupContent = recoverableContainer.querySelector('.broken-links-group-content') as HTMLElement;
+				if (groupContent) {
+					for (const link of recoverableLinks) {
+						this.renderLinkItem(groupContent, link);
+					}
+				}
 			}
 		}
 	}
@@ -577,6 +616,8 @@ export class BrokenLinksModal extends Modal {
 			scrollContainer.style.flex = '1';
 			scrollContainer.style.overflowY = 'auto';
 			scrollContainer.style.overflowX = 'hidden';
+			scrollContainer.style.width = '100%';
+			scrollContainer.style.boxSizing = 'border-box';
 		}
 
 		// 创建列表容器（如果不存在，放在滚动容器内）
@@ -587,6 +628,10 @@ export class BrokenLinksModal extends Modal {
 			listContainer.style.borderRadius = '8px';
 			listContainer.style.padding = '12px';
 			listContainer.style.minHeight = '0';
+			listContainer.style.width = 'fit-content';
+			listContainer.style.minWidth = '100%';
+			listContainer.style.maxWidth = '100%';
+			listContainer.style.boxSizing = 'border-box';
 		}
 		this.listContainer = listContainer;
 
@@ -610,28 +655,128 @@ export class BrokenLinksModal extends Modal {
 			}
 		}
 
-		// 创建分组并渲染（只显示非空分组）
-		const groups = [
-			{ title: '🌐 网络链接错误', links: remoteErrors, icon: '🌐' },
-			{ title: '📁 本地链接错误', links: localErrors, icon: '📁' },
-			{ title: '✅ 可恢复的链接', links: recoverableLinks, icon: '✅' },
-			{ title: '❌ 不可恢复的链接', links: nonRecoverableLinks, icon: '❌' }
+		// 定义分类组（只包含需要显示为按钮的3个分类）
+		const filterGroups = [
+			{ id: 'remote', title: '🌐 网络链接错误', links: remoteErrors, icon: '🌐' },
+			{ id: 'local', title: '📁 本地链接错误', links: localErrors, icon: '📁' },
+			{ id: 'nonRecoverable', title: '❌ 不可恢复的链接', links: nonRecoverableLinks, icon: '❌' }
 		];
 
-		for (const group of groups) {
-			// 只显示非空分组
+		// 创建按钮组容器
+		const buttonContainer = listContainer.createDiv('broken-links-filter-buttons');
+		buttonContainer.style.cssText = `
+			display: flex;
+			gap: 8px;
+			margin-bottom: 16px;
+			flex-wrap: wrap;
+			width: fit-content;
+			max-width: 100%;
+		`;
+
+		// 创建内容容器（用于显示当前选中的分类）
+		const contentContainer = listContainer.createDiv('broken-links-content-container');
+		contentContainer.style.cssText = `
+			min-height: 200px;
+			width: fit-content;
+			min-width: 100%;
+			max-width: 100%;
+			box-sizing: border-box;
+		`;
+
+		// 当前选中的分类ID
+		let activeFilterId: string | null = null;
+
+		// 渲染分类内容
+		const renderContent = (filterId: string) => {
+			contentContainer.empty();
+			const group = filterGroups.find(g => g.id === filterId);
+			if (!group || group.links.length === 0) return;
+
+			for (const link of group.links) {
+				this.renderLinkItem(contentContainer, link);
+			}
+		};
+
+		// 创建按钮并绑定点击事件
+		for (const group of filterGroups) {
+			// 如果没有链接，隐藏该按钮
 			if (group.links.length === 0) continue;
 
-			// 创建分组容器（添加 data-group 属性以便后续查找）
-			const groupContainer = listContainer.createDiv('broken-links-group');
-			groupContainer.setAttribute('data-group', group.title);
-			groupContainer.style.cssText = `
-				margin-bottom: 16px;
+			const button = buttonContainer.createEl('button', {
+				text: `${group.title} (${group.links.length})`,
+				cls: 'broken-links-filter-btn'
+			});
+			button.setAttribute('data-filter-id', group.id);
+			button.style.cssText = `
+				padding: 8px 16px;
+				border-radius: 6px;
+				border: 1px solid var(--background-modifier-border);
+				background: var(--background-secondary);
+				color: var(--text-normal);
+				cursor: pointer;
+				font-size: 0.9em;
+				transition: all 0.2s ease;
+				flex: 0 0 auto;
 			`;
 
-			// 分组标题
-			const groupHeader = groupContainer.createDiv('broken-links-group-header');
-			groupHeader.style.cssText = `
+			// 点击切换
+			button.addEventListener('click', () => {
+				// 如果点击的是当前激活的按钮，不做任何操作
+				if (activeFilterId === group.id) return;
+
+				// 更新所有按钮状态
+				const allButtons = buttonContainer.querySelectorAll('.broken-links-filter-btn');
+				allButtons.forEach(btn => {
+					(btn as HTMLElement).style.background = 'var(--background-secondary)';
+					(btn as HTMLElement).style.borderColor = 'var(--background-modifier-border)';
+					(btn as HTMLElement).style.color = 'var(--text-normal)';
+				});
+
+				// 激活当前按钮
+				button.style.background = 'var(--interactive-accent)';
+				button.style.borderColor = 'var(--interactive-accent)';
+				button.style.color = 'var(--text-on-accent)';
+
+				// 更新激活状态
+				activeFilterId = group.id;
+
+				// 渲染内容
+				renderContent(group.id);
+			});
+
+			// 悬停效果
+			button.addEventListener('mouseenter', () => {
+				if (activeFilterId !== group.id) {
+					button.style.background = 'var(--background-modifier-hover)';
+				}
+			});
+			button.addEventListener('mouseleave', () => {
+				if (activeFilterId !== group.id) {
+					button.style.background = 'var(--background-secondary)';
+				}
+			});
+		}
+
+		// 默认激活第一个有内容的按钮
+		const firstGroup = filterGroups.find(g => g.links.length > 0);
+		if (firstGroup) {
+			const firstButton = buttonContainer.querySelector(`[data-filter-id="${firstGroup.id}"]`) as HTMLElement;
+			if (firstButton) {
+				firstButton.click();
+			}
+		}
+
+		// 如果有可恢复的链接，单独显示（不参与切换）
+		if (recoverableLinks.length > 0) {
+			const recoverableContainer = listContainer.createDiv('broken-links-recoverable-group');
+			recoverableContainer.style.cssText = `
+				margin-top: 24px;
+				padding-top: 16px;
+				border-top: 2px solid var(--background-modifier-border);
+			`;
+
+			const recoverableHeader = recoverableContainer.createDiv('broken-links-group-header');
+			recoverableHeader.style.cssText = `
 				display: flex;
 				align-items: center;
 				justify-content: space-between;
@@ -643,54 +788,35 @@ export class BrokenLinksModal extends Modal {
 				transition: all 0.2s ease;
 			`;
 
-			const headerLeft = groupHeader.createDiv();
-			headerLeft.style.cssText = `
-				display: flex;
-				align-items: center;
-				gap: 8px;
-				flex: 1;
-			`;
+			const headerLeft = recoverableHeader.createDiv();
+			headerLeft.style.cssText = 'display: flex; align-items: center; gap: 8px; flex: 1;';
 
 			const groupTitle = headerLeft.createSpan();
-			groupTitle.style.cssText = `
-				font-weight: 600;
-				font-size: 0.95em;
-				color: var(--text-normal);
-			`;
-			groupTitle.textContent = `${group.title} (${group.links.length})`;
+			groupTitle.style.cssText = 'font-weight: 600; font-size: 0.95em; color: var(--text-normal);';
+			groupTitle.textContent = `✅ 可恢复的链接 (${recoverableLinks.length})`;
 
 			const collapseIcon = headerLeft.createSpan();
 			collapseIcon.textContent = '▼';
-			collapseIcon.style.cssText = `
-				font-size: 0.8em;
-				color: var(--text-muted);
-				transition: transform 0.2s ease;
-			`;
+			collapseIcon.style.cssText = 'font-size: 0.8em; color: var(--text-muted); transition: transform 0.2s ease;';
 
-			// 分组内容
-			const groupContent = groupContainer.createDiv('broken-links-group-content');
-			groupContent.style.cssText = `
-				display: block;
-			`;
+			const groupContent = recoverableContainer.createDiv('broken-links-group-content');
+			groupContent.style.cssText = 'display: block;';
 
-			// 折叠/展开功能
 			let isExpanded = true;
-			groupHeader.addEventListener('click', () => {
+			recoverableHeader.addEventListener('click', () => {
 				isExpanded = !isExpanded;
 				groupContent.style.display = isExpanded ? 'block' : 'none';
 				collapseIcon.textContent = isExpanded ? '▼' : '▶';
 			});
 
-			// 悬停效果
-			groupHeader.addEventListener('mouseenter', () => {
-				groupHeader.style.backgroundColor = 'var(--background-modifier-hover)';
+			recoverableHeader.addEventListener('mouseenter', () => {
+				recoverableHeader.style.backgroundColor = 'var(--background-modifier-hover)';
 			});
-			groupHeader.addEventListener('mouseleave', () => {
-				groupHeader.style.backgroundColor = 'var(--background-secondary)';
+			recoverableHeader.addEventListener('mouseleave', () => {
+				recoverableHeader.style.backgroundColor = 'var(--background-secondary)';
 			});
 
-			// 为每个错误链接创建条目
-			for (const link of group.links) {
+			for (const link of recoverableLinks) {
 				this.renderLinkItem(groupContent, link);
 			}
 		}
@@ -706,6 +832,10 @@ export class BrokenLinksModal extends Modal {
 		linkItem.style.backgroundColor = 'var(--background-secondary)';
 		linkItem.style.borderRadius = '6px';
 		linkItem.style.border = '1px solid var(--background-modifier-border)';
+		linkItem.style.width = 'fit-content';
+		linkItem.style.minWidth = '100%';
+		linkItem.style.maxWidth = '100%';
+		linkItem.style.boxSizing = 'border-box';
 
 		// 主内容区域
 		const mainContent = linkItem.createDiv();
@@ -731,26 +861,40 @@ export class BrokenLinksModal extends Modal {
 		if (link.isRemoteError && link.remoteError) {
 			const errorInfo = mainContent.createDiv();
 			errorInfo.style.cssText = `
-				margin-top: 6px;
-				padding: 6px 8px;
-				background: var(--background-modifier-error);
-				color: var(--text-error);
+				margin-top: 8px;
+				padding: 8px 10px;
+				background: var(--background-secondary-alt);
+				border-left: 3px solid var(--text-error);
 				border-radius: 4px;
 				font-size: 0.85em;
-				font-family: monospace;
 			`;
-			errorInfo.textContent = `🌐 网络链接错误: ${link.remoteError}`;
+			
+			// 错误图标和文字
+			const errorText = errorInfo.createSpan();
+			errorText.style.cssText = `
+				color: var(--text-error);
+				font-weight: 500;
+			`;
+			errorText.textContent = `🌐 网络链接错误: `;
+			
+			const errorDetail = errorInfo.createSpan();
+			errorDetail.style.cssText = `
+				color: var(--text-muted);
+			`;
+			errorDetail.textContent = link.remoteError;
 			
 			// 显示链接地址
 			if (link.extractedPath) {
 				const urlInfo = mainContent.createDiv();
 				urlInfo.style.cssText = `
-					margin-top: 4px;
+					margin-top: 6px;
+					padding-left: 10px;
 					font-size: 0.8em;
 					color: var(--text-muted);
 					word-break: break-all;
+					opacity: 0.8;
 				`;
-				urlInfo.textContent = `链接: ${link.extractedPath}`;
+				urlInfo.textContent = `🔗 ${link.extractedPath}`;
 			}
 		}
 

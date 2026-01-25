@@ -29,6 +29,7 @@ export class ImagePreviewPanel {
 	private dragStartTranslateX: number = 0;
 	private dragStartTranslateY: number = 0;
 	public lockBtn?: HTMLElement; // 锁定按钮引用（public以便外部控制显示/隐藏）
+	private objectUrl: string | null = null; // 用于追踪和释放 createObjectURL
 
 	private logger?: (message: string, error?: any) => void;
 
@@ -162,19 +163,20 @@ export class ImagePreviewPanel {
 					placeholder.innerHTML = '📷<br><span style="font-size: 12px;">加载失败</span>';
 				}
 			})();
-		} else if (this.isTrashFile) {
-			// 回收站文件：使用 adapter 直接读取
-			(async () => {
-				try {
-					const arrayBuffer = await this.vault.adapter.readBinary(this.image.path);
-					const blob = new Blob([arrayBuffer]);
-					const imageUrl = URL.createObjectURL(blob);
-					
-					const imgEl = this.container.createEl('img', {
-						attr: { src: imageUrl }
-					});
-					imgEl.classList.add('detail-image');
-					this.imageElement = imgEl;
+} else if (this.isTrashFile) {
+		// 回收站文件：使用 adapter 直接读取
+		(async () => {
+			try {
+				const arrayBuffer = await this.vault.adapter.readBinary(this.image.path);
+				const blob = new Blob([arrayBuffer]);
+				const imageUrl = URL.createObjectURL(blob);
+				this.objectUrl = imageUrl; // 保存引用以便清理
+				
+				const imgEl = this.container.createEl('img', {
+					attr: { src: imageUrl }
+				});
+				imgEl.classList.add('detail-image');
+				this.imageElement = imgEl;
 					
 					// 添加滚轮事件处理
 					this.wheelHandler = (e: WheelEvent) => {
@@ -363,24 +365,31 @@ export class ImagePreviewPanel {
 					this.onImageLoaded(imgEl);
 				}
 			}
-		} else if (this.isTrashFile) {
-			// 回收站文件：使用 adapter 加载
-			(async () => {
-				try {
-					const arrayBuffer = await this.vault.adapter.readBinary(this.image.path);
-					const blob = new Blob([arrayBuffer]);
-					const imageUrl = URL.createObjectURL(blob);
-					
-					if (this.imageElement) {
-						const preloader = new Image();
-						preloader.onload = () => {
-							this.imageElement!.src = imageUrl;
-							// 通知外部图片已更新
-							if (this.onImageLoaded && this.imageElement) {
-								this.onImageLoaded(this.imageElement);
-							}
-						};
-						preloader.src = imageUrl;
+} else if (this.isTrashFile) {
+		// 回收站文件：使用 adapter 加载
+		(async () => {
+			try {
+				// 释放之前的 object URL
+				if (this.objectUrl) {
+					URL.revokeObjectURL(this.objectUrl);
+					this.objectUrl = null;
+				}
+				
+				const arrayBuffer = await this.vault.adapter.readBinary(this.image.path);
+				const blob = new Blob([arrayBuffer]);
+				const imageUrl = URL.createObjectURL(blob);
+				this.objectUrl = imageUrl; // 保存引用以便清理
+				
+				if (this.imageElement) {
+					const preloader = new Image();
+					preloader.onload = () => {
+						this.imageElement!.src = imageUrl;
+						// 通知外部图片已更新
+						if (this.onImageLoaded && this.imageElement) {
+							this.onImageLoaded(this.imageElement);
+						}
+					};
+					preloader.src = imageUrl;
 					} else {
 						const preloader = new Image();
 						preloader.onload = () => {
@@ -449,6 +458,7 @@ export class ImagePreviewPanel {
 	 * 清理资源
 	 */
 	cleanup() {
+		// 清理事件监听器
 		if (this.imageElement) {
 			if (this.wheelHandler) {
 				this.imageElement.removeEventListener('wheel', this.wheelHandler);
@@ -465,6 +475,12 @@ export class ImagePreviewPanel {
 		this.dragHandler = null;
 		this.dragStartHandler = null;
 		this.dragEndHandler = null;
+		
+		// 释放 object URL（防止内存泄漏）
+		if (this.objectUrl) {
+			URL.revokeObjectURL(this.objectUrl);
+			this.objectUrl = null;
+		}
 	}
 }
 

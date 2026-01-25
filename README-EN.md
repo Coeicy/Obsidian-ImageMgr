@@ -45,6 +45,33 @@ ImageMgr is a feature-rich image management plugin for Obsidian that helps you e
 | 📱 **Mobile Adaptation** | Responsive layout, supports phones and tablets, optimized touch interactions |
 | ⚡ **Performance** | Lazy loading, incremental scan cache, link info pre-calculation for smooth handling of large image sets |
 
+## 🔄 Changelog
+
+### v1.0.1 (2025-01-25)
+
+#### 🐛 Bug Fixes
+- ✅ **Fixed EventListener Memory Leak** - Properly clean up event listeners when closing image detail modal
+- ✅ **Fixed Image Resource Leak** - Correctly release ObjectURL when previewing trash images
+- ✅ **Fixed Recursive Stack Overflow Risk** - Added depth limit (max 100 levels) for trash file collection
+- ✅ **Fixed Null Pointer Exception** - Added defensive checks in settings page
+
+#### 📊 Issue Fix Statistics
+- **Critical Issues:** 11 → 0 (100% fixed)
+- **Actually Fixed:** 4
+- **No Fix Needed:** 7 (already properly handled)
+- **Stability:** Significantly improved
+
+#### 📄 Related Documents
+- [Issues Summary](./ISSUES_SUMMARY.md) - Detailed issue analysis and fix records
+- [Technical Guide](./TECHNICAL_GUIDE.md) - In-depth plugin architecture
+- [API Documentation](./API_DOCUMENTATION.md) - Development interface documentation
+
+### v1.0.0 (2025-01-24)
+
+- 🎉 Initial version release
+- ✨ All core features included (smart scan, cloud images, search filter, batch operations, etc.)
+- 📚 Complete documentation system (User Guide, API Docs, Technical Guide)
+
 ## 📦 Installation
 
 ### Option 1: BRAT (Recommended)

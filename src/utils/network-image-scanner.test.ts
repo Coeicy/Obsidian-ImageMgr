@@ -1,5 +1,5 @@
 
-import { NetworkImageScanner } from './network-image-scanner';
+import { NetworkImageScanner, LegacyNetworkImageReference } from './network-image-scanner';
 import { App, TFile, Vault } from 'obsidian';
 
 // Mock Obsidian types
@@ -30,7 +30,7 @@ describe('NetworkImageScanner', () => {
         (mockVault.getMarkdownFiles as jest.Mock).mockReturnValue([mockFile]);
         (mockVault.read as jest.Mock).mockResolvedValue('Here is an image: ![alt](http://example.com/image.png)');
 
-        const results = await scanner.scan();
+        const results = await scanner.scanAll();
 
         expect(results).toHaveLength(1);
         expect(results[0].url).toBe('http://example.com/image.png');
@@ -42,7 +42,7 @@ describe('NetworkImageScanner', () => {
         (mockVault.getMarkdownFiles as jest.Mock).mockReturnValue([mockFile]);
         (mockVault.read as jest.Mock).mockResolvedValue('Here is an image: <img src="https://example.com/image.jpg" alt="test">');
 
-        const results = await scanner.scan();
+        const results = await scanner.scanAll();
 
         expect(results).toHaveLength(1);
         expect(results[0].url).toBe('https://example.com/image.jpg');
@@ -52,7 +52,7 @@ describe('NetworkImageScanner', () => {
         (mockVault.getMarkdownFiles as jest.Mock).mockReturnValue([mockFile]);
         (mockVault.read as jest.Mock).mockResolvedValue('![local](http://localhost:3000/img.png) <img src="http://127.0.0.1/img.png">');
 
-        const results = await scanner.scan();
+        const results = await scanner.scanAll();
 
         expect(results).toHaveLength(0);
     });
@@ -64,7 +64,7 @@ describe('NetworkImageScanner', () => {
         (mockVault.getMarkdownFiles as jest.Mock).mockReturnValue([file1, file2]);
         (mockVault.read as jest.Mock).mockResolvedValue('![img](http://example.com/img.png)');
 
-        const results = await scanner.scan('folder1');
+        const results = await scanner.scanAll('folder1');
 
         expect(results).toHaveLength(1);
         expect(results[0].sourceFile).toBe(file1);
@@ -75,7 +75,7 @@ describe('NetworkImageScanner', () => {
         (mockVault.read as jest.Mock).mockRejectedValue(new Error('Read failed'));
         const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-        const results = await scanner.scan();
+        const results = await scanner.scanAll();
 
         expect(results).toHaveLength(0);
         expect(consoleSpy).toHaveBeenCalled();

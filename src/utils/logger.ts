@@ -392,6 +392,12 @@ export class Logger {
 	private saveQueue: Promise<void> | null = null;
 	/** 需要保存的标志 */
 	private needsSave = false;
+	/** 错误去重映射表：key = operation + imagePath + errorMessage, value = { count, firstTime, lastTime } */
+	private errorDeduplicationMap: Map<string, { count: number; firstTime: number; lastTime: number; entry: LogEntry }> = new Map();
+	/** 错误聚合窗口时间（毫秒），在此时间内的相同错误会被聚合 */
+	private readonly ERROR_AGGREGATION_WINDOW = 60000; // 60秒
+	/** 错误聚合阈值，超过此数量的相同错误会被聚合统计 */
+	private readonly ERROR_AGGREGATION_THRESHOLD = 3;
 
 	/**
 	 * 创建日志管理器实例
@@ -566,6 +572,32 @@ export class Logger {
 	}
 
 	/**
+	 * 生成错误去重键
+	 * @param operation - 操作类型
+	 * @param imagePath - 图片路径
+	 * @param errorMessage - 错误消息
+	 * @returns 去重键
+	 */
+	private getErrorDeduplicationKey(operation: OperationType, imagePath: string, errorMessage: string): string {
+		// 提取错误类型（如 ERR_HTTP2_PROTOCOL_ERROR, ERR_CONNECTION_CLOSED 等）
+		const errorType = errorMessage.match(/(ERR_\w+|net::\w+|Request failed)/)?.[0] || 'UNKNOWN';
+		return `${operation}:${imagePath}:${errorType}`;
+	}
+
+	/**
+	 * 清理过期的去重记录
+	 * @param now - 当前时间戳
+	 */
+	private cleanupDeduplicationMap(now: number): void {
+		const cleanupThreshold = this.ERROR_AGGREGATION_WINDOW * 2;
+		for (const [key, value] of this.errorDeduplicationMap.entries()) {
+			if (now - value.lastTime > cleanupThreshold) {
+				this.errorDeduplicationMap.delete(key);
+			}
+		}
+	}
+
+	/**
 	 * 格式化控制台输出消息（简洁版本）
 	 */
 	private formatConsoleMessage(entry: LogEntry): string {
@@ -635,13 +667,89 @@ export class Logger {
 			if (options?.error) {
 				if (options.error instanceof Error) {
 					entry.error = options.error.message;
-					entry.stackTrace = options.error.stack;
+					// 对于网络图片加载错误，不记录完整堆栈信息以减少日志大小
+					if (operation === OperationType.VIEW && entry.imagePath && entry.imagePath.startsWith('http')) {
+						// 只记录简化的错误信息，不记录堆栈
+						entry.stackTrace = undefined;
+					} else {
+						entry.stackTrace = options.error.stack;
+					}
 				} else {
 					entry.error = options.error;
 				}
 			}
 
-			this.logs.push(entry);
+			// 错误去重和聚合处理（仅对 WARNING 和 ERROR 级别的网络图片加载错误）
+			if ((level === LogLevel.WARNING || level === LogLevel.ERROR) && 
+			    operation === OperationType.VIEW && 
+			    entry.imagePath && 
+			    entry.imagePath.startsWith('http')) {
+				
+				const dedupKey = this.getErrorDeduplicationKey(operation, entry.imagePath, entry.error || message);
+				const now = Date.now();
+				const existing = this.errorDeduplicationMap.get(dedupKey);
+				
+					if (existing) {
+					// 检查是否在聚合窗口内
+					if (now - existing.lastTime < this.ERROR_AGGREGATION_WINDOW) {
+						// 在窗口内，增加计数
+						existing.count++;
+						existing.lastTime = now;
+						
+						// 如果超过阈值，使用聚合消息并更新现有条目
+						if (existing.count >= this.ERROR_AGGREGATION_THRESHOLD) {
+							// 更新聚合消息
+							entry.message = `${message} (已发生 ${existing.count} 次，首次: ${new Date(existing.firstTime).toLocaleTimeString('zh-CN')})`;
+							entry.details = {
+								...(entry.details || {}),
+								aggregatedCount: existing.count,
+								firstOccurrence: existing.firstTime,
+								lastOccurrence: now
+							};
+							
+							// 替换之前的日志条目（如果存在）
+							const existingIndex = this.logs.findIndex(log => log.id === existing.entry.id);
+							if (existingIndex !== -1) {
+								// 更新现有条目
+								this.logs[existingIndex] = entry;
+								existing.entry = entry;
+								// 超过阈值后只更新现有条目，不添加新条目，但继续执行后续的保存和输出逻辑
+							} else {
+								// 如果之前的条目已被清理，添加新的聚合条目
+								this.logs.push(entry);
+								existing.entry = entry;
+							}
+							// 注意：这里不 return，继续执行后续的保存和输出逻辑
+						} else {
+							// 未超过阈值，正常记录
+							this.logs.push(entry);
+							existing.entry = entry;
+						}
+					} else {
+						// 超出窗口，重置计数
+						existing.count = 1;
+						existing.firstTime = now;
+						existing.lastTime = now;
+						existing.entry = entry;
+						this.logs.push(entry);
+					}
+				} else {
+					// 首次出现，记录并初始化
+					this.errorDeduplicationMap.set(dedupKey, {
+						count: 1,
+						firstTime: now,
+						lastTime: now,
+						entry: entry
+					});
+					this.logs.push(entry);
+				}
+				
+				// 清理过期的去重记录（超过聚合窗口2倍时间）
+				this.cleanupDeduplicationMap(now);
+			} else {
+				// 非网络图片错误，正常记录
+				this.logs.push(entry);
+			}
 
 			// 限制日志数量（保持最新的日志）
 			if (this.logs.length > this.MAX_LOGS) {

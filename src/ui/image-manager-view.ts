@@ -34,6 +34,7 @@ import { PathValidator } from '../utils/path-validator';
 import { matchesShortcut, isInputElement, SHORTCUT_DEFINITIONS } from '../utils/keyboard-shortcut-manager';
 import { DragSelectManager } from '../utils/drag-select-manager';
 import { LinkFormatModal } from './link-format-modal';
+import { ObjectStore } from '../network-image/types';
 
 /** 图片管理视图的类型标识符 */
 export const IMAGE_MANAGER_VIEW_TYPE = 'image-manager-view';
@@ -236,6 +237,9 @@ export class ImageManagerView extends ItemView {
 								await this.plugin.logger.warn(OperationType.VIEW, `DNS 解析失败，域名可能无法访问: ${src}`, {
 									imagePath: src
 								});
+								
+								// 自动添加到黑名单
+								await this.addToBlacklist(src, 'ERR_NAME_NOT_RESOLVED');
 							}
 						}
 						
@@ -276,6 +280,9 @@ export class ImageManagerView extends ItemView {
 					imagePath: src
 				});
 			}
+			
+			// 如果最终失败，添加到黑名单
+			await this.addToBlacklist(src, 'Network error');
 			previewEl.style.backgroundImage = 'none';
 			previewEl.style.display = 'flex';
 			previewEl.style.alignItems = 'center';
@@ -2943,6 +2950,88 @@ export class ImageManagerView extends ItemView {
 		}
 
 		const brokenLinks: Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string}> = [];
+		
+		// 1. 优先从网络图片缓存系统获取已标记为 broken 的图片（增量显示）
+		if (this.plugin.networkImageAPI) {
+			try {
+				// 获取所有 broken 状态的图片（这些已经验证过并记录在数据库中）
+				const brokenImagesResult = await this.plugin.networkImageAPI.searchImagesByStatus('broken');
+				
+				for (const image of brokenImagesResult.images) {
+					if (image.status === 'deleted') {
+						continue; // 跳过已删除的
+					}
+					
+					// 检查文件是否仍然存在
+					const file = this.app.vault.getAbstractFileByPath(image.sourceFilePath);
+					if (!file || !(file instanceof TFile)) {
+						continue; // 文件已删除，跳过
+					}
+					
+					// 从验证结果中获取错误信息
+					const errorMessage = image.validationResult?.error || 'Network error';
+					
+					brokenLinks.push({
+						filePath: image.sourceFilePath,
+						lineNumber: image.line + 1, // line 是 0-based，需要 +1
+						linkText: image.originalText || image.url,
+						extractedPath: image.url,
+						isRemoteError: true,
+						remoteError: errorMessage
+					});
+				}
+				
+				// 同时从黑名单获取失败的链接（作为补充）
+				const blacklist = await this.plugin.networkImageAPI.getBlacklist();
+				const db = this.plugin.networkImageDBManager.getDB();
+				const tx = db.transaction(['network_images'], 'readonly');
+				const imageStore = tx.objectStore('network_images');
+				const imageIndex = imageStore.index('by-url');
+				
+				// 记录已添加的链接，避免重复
+				const addedUrls = new Set(brokenLinks.map(link => link.extractedPath));
+				
+				for (const blacklistItem of blacklist) {
+					// 如果已经在 broken 列表中，跳过
+					if (addedUrls.has(blacklistItem.url)) {
+						continue;
+					}
+					
+					// 查找使用该 URL 的所有图片记录
+					const images = await new Promise<any[]>((resolve, reject) => {
+						const request = imageIndex.getAll(blacklistItem.url);
+						request.onsuccess = () => resolve(request.result || []);
+						request.onerror = () => reject(request.error);
+					});
+					
+					// 为每个图片记录创建失败链接信息
+					for (const image of images) {
+						if (image.status === 'deleted') {
+							continue; // 跳过已删除的
+						}
+						
+						// 检查文件是否仍然存在
+						const file = this.app.vault.getAbstractFileByPath(image.sourceFilePath);
+						if (!file || !(file instanceof TFile)) {
+							continue; // 文件已删除，跳过
+						}
+						
+						brokenLinks.push({
+							filePath: image.sourceFilePath,
+							lineNumber: image.line + 1, // line 是 0-based，需要 +1
+							linkText: image.originalText || image.url,
+							extractedPath: image.url,
+							isRemoteError: true,
+							remoteError: blacklistItem.errorMessage || 'Network error'
+						});
+						addedUrls.add(image.url);
+					}
+				}
+			} catch (error) {
+				console.warn('Failed to get broken images from cache:', error);
+			}
+		}
+		
 		const allFiles = this.app.vault.getMarkdownFiles();
 		const metadataCache = this.app.metadataCache;
 		
@@ -2955,38 +3044,65 @@ export class ImageManagerView extends ItemView {
 		const now = Date.now();
 		
 		// 清理过期的缓存项
-		const validCache: { [url: string]: { valid: boolean; error?: string; timestamp: number } } = {};
+		const validCache: { [url: string]: { valid: boolean; error?: string; isTimeout?: boolean; timestamp: number } } = {};
 		for (const [url, cached] of Object.entries(validationCache)) {
 			if (now - cached.timestamp < CACHE_VALIDITY) {
 				validCache[url] = cached;
 			}
 		}
 		
+		// 记录已从缓存系统获取的 URL，避免重复验证
+		const cachedUrls = new Set(brokenLinks.map(link => link.extractedPath).filter(Boolean));
+		
+		// 获取已扫描的文件列表（用于增量扫描）
+		const scannedFiles = new Set<string>();
+		if (this.plugin.networkImageAPI) {
+			try {
+				const db = this.plugin.networkImageDBManager.getDB();
+				const tx = db.transaction([ObjectStore.FILES], 'readonly');
+				const fileStore = tx.objectStore(ObjectStore.FILES);
+				const allScannedFiles = await new Promise<any[]>((resolve, reject) => {
+					const request = fileStore.getAll();
+					request.onsuccess = () => resolve(request.result || []);
+					request.onerror = () => reject(request.error);
+				});
+				
+				for (const scannedFile of allScannedFiles) {
+					if (scannedFile.status !== 'deleted') {
+						scannedFiles.add(scannedFile.id);
+					}
+				}
+			} catch (error) {
+				console.warn('Failed to get scanned files:', error);
+			}
+		}
+		
 		// 辅助函数：从缓存获取验证结果
-		const getCachedValidation = (url: string): { valid: boolean; error?: string } | null => {
+		const getCachedValidation = (url: string): { valid: boolean; error?: string; isTimeout?: boolean } | null => {
 			const cached = validCache[url];
 			if (cached && (now - cached.timestamp < CACHE_VALIDITY)) {
-				return { valid: cached.valid, error: cached.error };
+				return { valid: cached.valid, error: cached.error, isTimeout: cached.isTimeout };
 			}
 			return null;
 		};
 		
 		// 辅助函数：保存验证结果到缓存
-		const saveToCache = (url: string, result: { valid: boolean; error?: string }) => {
+		const saveToCache = (url: string, result: { valid: boolean; error?: string; isTimeout?: boolean }) => {
 			validCache[url] = {
 				valid: result.valid,
 				error: result.error,
+				isTimeout: result.isTimeout,
 				timestamp: now
 			};
 		};
 		
 		// 辅助函数：验证网络链接（带超时和快速失败，优化内存使用）
-		const validateRemoteLink = async (url: string): Promise<{ valid: boolean; error?: string }> => {
-			// 使用 Promise.race 实现超时控制（2秒超时，提升速度）
-			const timeoutPromise = new Promise<{ valid: boolean; error: string }>((resolve) => {
+		const validateRemoteLink = async (url: string): Promise<{ valid: boolean; error?: string; isTimeout?: boolean }> => {
+			// 使用 Promise.race 实现超时控制（5秒超时，给慢速网络更多时间）
+			const timeoutPromise = new Promise<{ valid: boolean; error: string; isTimeout: boolean }>((resolve) => {
 				setTimeout(() => {
-					resolve({ valid: false, error: 'ERR_TIMED_OUT (连接超时)' });
-				}, 2000); // 2秒超时（从3秒减少到2秒）
+					resolve({ valid: false, error: 'ERR_TIMED_OUT (连接超时，可能网络较慢)', isTimeout: true });
+				}, 5000); // 5秒超时，给慢速网络更多时间
 			});
 
 			const requestPromise = (async () => {
@@ -3009,7 +3125,7 @@ export class ImageManagerView extends ItemView {
 					}
 					
 					// 状态码 < 400，链接有效
-					return { valid: true };
+					return { valid: true, isTimeout: false };
 				} catch (error: any) {
 					// 提取错误信息
 					let errorMsg = '网络错误';
@@ -3025,12 +3141,12 @@ export class ImageManagerView extends ItemView {
 					} else if (errorMsg.includes('ERR_CONNECTION_REFUSED')) {
 						errorMsg = 'ERR_CONNECTION_REFUSED (连接被拒绝)';
 					} else if (errorMsg.includes('ERR_TIMED_OUT')) {
-						errorMsg = 'ERR_TIMED_OUT (连接超时)';
+						errorMsg = 'ERR_TIMED_OUT (连接超时，可能网络较慢)';
 					} else if (errorMsg.includes('ERR_CERT_AUTHORITY_INVALID')) {
 						errorMsg = 'ERR_CERT_AUTHORITY_INVALID (证书无效)';
 					}
 					
-					return { valid: false, error: errorMsg };
+					return { valid: false, error: errorMsg, isTimeout: false };
 				}
 			})();
 
@@ -3046,8 +3162,34 @@ export class ImageManagerView extends ItemView {
 			url: string;
 		}> = [];
 
-		// 第一遍：收集所有网络链接，同时检查本地链接（避免重复扫描）
+		// 第一遍：收集所有网络链接，同时检查本地链接（增量扫描：只处理新增或修改的文件）
 		for (const file of allFiles) {
+			// 增量扫描：如果文件已扫描过且未修改，跳过（网络链接错误已从缓存系统获取）
+			if (scannedFiles.has(file.path)) {
+				// 检查文件是否修改（通过 mtime 和 size）
+				try {
+					const db = this.plugin.networkImageDBManager?.getDB();
+					if (db) {
+						const tx = db.transaction([ObjectStore.FILES], 'readonly');
+						const fileStore = tx.objectStore(ObjectStore.FILES);
+						const cachedFile = await new Promise<any>((resolve, reject) => {
+							const request = fileStore.get(file.path);
+							request.onsuccess = () => resolve(request.result);
+							request.onerror = () => reject(request.error);
+						});
+						
+						// 如果文件未修改（mtime 和 size 都相同），跳过扫描
+						if (cachedFile && 
+							cachedFile.mtime === file.stat.mtime && 
+							cachedFile.size === file.stat.size) {
+							continue; // 文件未修改，跳过（网络链接错误已从缓存系统获取）
+						}
+					}
+				} catch (error) {
+					// 如果检查失败，继续扫描（保守策略）
+				}
+			}
+			
 			try {
 				const content = await this.app.vault.read(file);
 				const lines = content.split('\n');
@@ -3061,6 +3203,11 @@ export class ImageManagerView extends ItemView {
 						
 						// 检查是否是网络链接
 						if (isRemoteLink(linkPath)) {
+							// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
+							if (cachedUrls.has(linkPath)) {
+								continue;
+							}
+							
 							const lineIndex = embed.position.start.line;
 							const fullLine = lines[lineIndex];
 							remoteLinksToValidate.push({
@@ -3096,6 +3243,11 @@ export class ImageManagerView extends ItemView {
 						
 						// 检查是否是网络链接
 						if (isRemoteLink(linkPath)) {
+							// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
+							if (cachedUrls.has(linkPath)) {
+								continue;
+							}
+							
 							// 收集所有网络链接进行验证
 							const lineIndex = link.position.start.line;
 							const fullLine = lines[lineIndex];
@@ -3139,6 +3291,11 @@ export class ImageManagerView extends ItemView {
 						
 						// 检查是否是网络链接
 						if (isRemoteLink(linkPath)) {
+							// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
+							if (cachedUrls.has(linkPath)) {
+								continue;
+							}
+							
 							remoteLinksToValidate.push({
 								filePath: file.path,
 								lineNumber: lineNum + 1,
@@ -3166,6 +3323,11 @@ export class ImageManagerView extends ItemView {
 						
 						// 检查是否是网络链接
 						if (isRemoteLink(linkPath)) {
+							// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
+							if (cachedUrls.has(linkPath)) {
+								continue;
+							}
+							
 							remoteLinksToValidate.push({
 								filePath: file.path,
 								lineNumber: lineNum + 1,
@@ -3213,13 +3375,16 @@ export class ImageManagerView extends ItemView {
 			const cached = cachedResults.get(item.url);
 			if (cached && !cached.valid) {
 				// 缓存显示链接无效，直接添加到错误列表
+				const isTimeout = cached.isTimeout || (cached.error && cached.error.includes('ERR_TIMED_OUT'));
 				brokenLinks.push({
 					filePath: item.filePath,
 					lineNumber: item.lineNumber,
 					linkText: item.linkText,
 					extractedPath: item.url,
 					isRemoteError: true,
-					remoteError: cached.error
+					remoteError: isTimeout 
+						? `${cached.error}（验证超时，链接可能有效，请手动检查）`
+						: cached.error
 				});
 			}
 		}
@@ -3275,14 +3440,26 @@ export class ImageManagerView extends ItemView {
 					// 收集验证失败的链接
 					for (const { filePath, lineNumber, linkText, url, validation } of validations) {
 						if (!validation.valid) {
+							const isTimeout = validation.isTimeout || (validation.error && validation.error.includes('ERR_TIMED_OUT'));
+							const isDnsError = validation.error && validation.error.includes('ERR_NAME_NOT_RESOLVED');
+							
+							// 所有验证失败的链接都添加到空链接列表
+							// 但超时的情况会提示"验证超时，可能需要手动检查"
 							brokenLinks.push({
 								filePath,
 								lineNumber,
 								linkText,
 								extractedPath: url,
 								isRemoteError: true,
-								remoteError: validation.error
+								remoteError: isTimeout 
+									? `${validation.error}（验证超时，链接可能有效，请手动检查）`
+									: validation.error
 							});
+							
+							// 只有明确的 DNS 错误才添加到黑名单，超时的情况不添加（可能是网络慢）
+							if (isDnsError) {
+								await this.addToBlacklist(url, validation.error);
+							}
 						}
 					}
 
@@ -3302,6 +3479,50 @@ export class ImageManagerView extends ItemView {
 		// 这样可以避免重复检测，提高性能
 		
 		return brokenLinks;
+	}
+
+	/**
+	 * 添加 URL 到黑名单
+	 * @param url - 要添加到黑名单的 URL
+	 * @param errorMessage - 错误信息
+	 */
+	private async addToBlacklist(url: string, errorMessage: string): Promise<void> {
+		try {
+			// 优先使用 networkImageAPI 的黑名单系统
+			if (this.plugin.networkImageAPI) {
+				const { hashUrl } = await import('../network-image/utils');
+				const imageId = await hashUrl(url);
+				await this.plugin.networkImageAPI.addToBlacklist([{
+					id: imageId,
+					url: url,
+					reason: 'network_error',
+					errorMessage: errorMessage
+				}]);
+			}
+			
+			// 同时添加到设置中的黑名单（用于兼容）
+			const blacklist = this.plugin.settings.remoteImageBlacklist || [];
+			if (!blacklist.includes(url)) {
+				blacklist.push(url);
+				this.plugin.settings.remoteImageBlacklist = blacklist;
+				await this.plugin.saveSettings();
+				
+				if (this.plugin?.logger) {
+					await this.plugin.logger.info(OperationType.VIEW, `已将失效图片添加到黑名单: ${url}`, {
+						imagePath: url,
+						details: { errorMessage, blacklistSize: blacklist.length }
+					});
+				}
+			}
+		} catch (error) {
+			// 静默失败，不影响主流程
+			if (this.plugin?.logger) {
+				await this.plugin.logger.warn(OperationType.VIEW, `添加到黑名单失败: ${url}`, {
+					imagePath: url,
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
+		}
 	}
 
 	openImageDetail(image: ImageInfo) {

@@ -194,7 +194,7 @@ class TrashItemCollector {
 			return items;
 		}
 
-		await this.collectTrashItems(folder, items);
+		await this.collectTrashItems(folder, items, 0);
 		
 		// 按删除时间降序排序
 		items.sort((a, b) => b.deletedAt - a.deletedAt);
@@ -232,7 +232,20 @@ class TrashItemCollector {
 	/**
 	 * 递归收集回收站文件
 	 */
-	private async collectTrashItems(folder: TFolder, items: TrashItem[]): Promise<void> {
+	private async collectTrashItems(folder: TFolder, items: TrashItem[], depth: number = 0): Promise<void> {
+		// 防止无限递归，设置最大深度限制（默认100层）
+		const MAX_DEPTH = 100;
+		if (depth > MAX_DEPTH) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.warn(
+					OperationType.PLUGIN_ERROR,
+					`回收站目录深度超过限制 (${MAX_DEPTH}): ${folder.path}`,
+					{ details: { folderPath: folder.path, depth: depth } }
+				);
+			}
+			return;
+		}
+		
 		if (!folder || !folder.children) {
 			return;
 		}
@@ -245,7 +258,7 @@ class TrashItemCollector {
 						items.push(item);
 					}
 				} else if (child instanceof TFolder) {
-					await this.collectTrashItems(child, items);
+					await this.collectTrashItems(child, items, depth + 1);
 				}
 			} catch (childError) {
 				const itemPath = child?.path || '未知路径';

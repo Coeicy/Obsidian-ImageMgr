@@ -1,4 +1,4 @@
-import { Plugin, TFile, debounce, TFolder } from 'obsidian';
+import { Plugin, TFile, debounce, TFolder, Notice } from 'obsidian';
 import { ImageManagementSettings, DEFAULT_SETTINGS } from './settings';
 import { ImageManagementSettingTab } from './ui/settings-tab';
 import { ImageManagerView, IMAGE_MANAGER_VIEW_TYPE } from './ui/image-manager-view';
@@ -10,6 +10,15 @@ import { ReferenceManager, parseWikiLink, parseHtmlImageSize } from './utils/ref
 import { TrashManager } from './utils/trash-manager';
 import { LockListManager } from './utils/lock-list-manager';
 import { HistoryManager } from './utils/history-manager';
+
+// ==================== 网络图片缓存系统导入 ====================
+import {
+    IndexedDBManager,
+    NetworkImageScannerAPI,
+    NetworkImageCacheManager,
+    ScanErrorHandler
+} from './network-image';
+import { NetworkImageScanner } from './utils/network-image-scanner';
 
 /**
  * ImageManagement 插件主类
@@ -39,6 +48,18 @@ export default class ImageManagementPlugin extends Plugin {
 	historyManager: HistoryManager;
 	/** 锁定列表管理器 - 管理和监控锁定文件列表 */
 	lockListManager: LockListManager;
+
+	// ==================== 网络图片缓存系统 ====================
+	/** IndexedDB 管理器 */
+	networkImageDBManager: IndexedDBManager;
+	/** 网络图片缓存 API */
+	networkImageAPI: NetworkImageScannerAPI;
+	/** 网络图片缓存管理器 */
+	networkImageCacheManager: NetworkImageCacheManager;
+	/** 网络图片错误处理器 */
+	networkImageErrorHandler: ScanErrorHandler;
+	/** 网络图片扫描器 */
+	networkImageScanner: NetworkImageScanner;
 
 	// ==================== 缓存机制 ====================
 	/** 显示文本缓存：filePath -> lineNumber -> displayText
@@ -141,11 +162,20 @@ export default class ImageManagementPlugin extends Plugin {
 			// 初始化回收站预加载（在设置加载后）- 提升回收站打开速度
 			this.trashManager.initializePreload();
 			
-			// 初始化锁定列表管理器 - 管理和监控锁定文件列表
-			this.lockListManager = new LockListManager(this);
-			await this.lockListManager.initialize();
-			
-			// 延迟初始化引用缓存，避免在启动时扫描所有文件
+		// 初始化锁定列表管理器 - 管理和监控锁定文件列表
+		this.lockListManager = new LockListManager(this);
+		await this.lockListManager.initialize();
+		
+		// 初始化网络图片缓存系统（仅在启用扫描网络图片时）
+		if (this.settings.scanRemoteImages) {
+			await this.initializeNetworkImageCache();
+		} else {
+			if (this.logger) {
+				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image scanning is disabled, skipping cache system initialization');
+			}
+		}
+		
+		// 延迟初始化引用缓存，避免在启动时扫描所有文件
 			// 5秒后初始化，让插件先完成核心启动流程
 			setTimeout(() => {
 				this.initializeReferenceCache();
@@ -176,12 +206,73 @@ export default class ImageManagementPlugin extends Plugin {
 			}
 		});
 
-		// 添加扫描网络图片命令
+		// 添加扫描网络图片命令（仅在启用网络图片扫描时显示）
 		this.addCommand({
 			id: 'scan-network-images',
 			name: '扫描网络图片',
 			callback: () => {
+				// 检查是否启用网络图片扫描
+				if (!this.settings.scanRemoteImages) {
+					new Notice('❌ 网络图片扫描功能未启用\n请在设置中开启"扫描网络图片"选项');
+					return;
+				}
 				new NetworkImageModal(this.app, this).open();
+			}
+		});
+
+		// 添加完整扫描网络图片命令
+		this.addCommand({
+			id: 'full-scan-network-images',
+			name: '完整扫描网络图片',
+			callback: () => {
+				// 检查是否启用网络图片扫描
+				if (!this.settings.scanRemoteImages) {
+					new Notice('❌ 网络图片扫描功能未启用\n请在设置中开启"扫描网络图片"选项');
+					return;
+				}
+				// 执行完整扫描
+				this.performFullNetworkImageScan();
+			}
+		});
+
+		// 添加清理网络图片缓存命令
+		this.addCommand({
+			id: 'cleanup-network-image-cache',
+			name: '清理网络图片缓存',
+			callback: () => {
+				// 检查是否启用网络图片扫描
+				if (!this.settings.scanRemoteImages) {
+					new Notice('❌ 网络图片扫描功能未启用\n请在设置中开启"扫描网络图片"选项');
+					return;
+				}
+				// 执行缓存清理
+				this.cleanupNetworkImageCache();
+			}
+		});
+
+		// 添加网络图片缓存统计命令
+		this.addCommand({
+			id: 'network-image-cache-stats',
+			name: '网络图片缓存统计',
+			callback: async () => {
+				// 检查是否启用网络图片扫描
+				if (!this.settings.scanRemoteImages) {
+					new Notice('❌ 网络图片扫描功能未启用\n请在设置中开启"扫描网络图片"选项');
+					return;
+				}
+				// 获取并显示统计
+				const stats = await this.getNetworkImageCacheStats();
+				if (stats) {
+					const message = `缓存统计\n` +
+						`总图片数: ${stats.totalImages}\n` +
+						`活跃图片: ${stats.activeImages}\n` +
+						`失效图片: ${stats.brokenImages}\n` +
+						`缓存命中率: ${stats.cacheHitRate.toFixed(2)}%\n` +
+						`数据库大小: ${(stats.databaseSize / 1024 / 1024).toFixed(2)} MB`;
+					new Notice(message, 5000);
+				} else {
+					new Notice('无法获取缓存统计', 3000);
+				}
 			}
 		});
 
@@ -210,6 +301,21 @@ export default class ImageManagementPlugin extends Plugin {
 					// 确保 file 有效且有 name 属性
 					if (file instanceof TFile && file.name) {
 						await this.detectImageCreate(file);
+						
+						// 如果是 Markdown 文件且启用了网络图片扫描，自动更新缓存
+						if (file.extension === 'md' && this.settings.scanRemoteImages && this.networkImageAPI) {
+							try {
+								// 延迟扫描，避免在文件创建时立即扫描（文件可能还未完全写入）
+								setTimeout(async () => {
+									await this.networkImageAPI.quickScan(file.path);
+								}, 1000);
+							} catch (error) {
+								// 静默失败，不影响主流程
+								if (this.logger) {
+									await this.logger.warn(OperationType.SCAN, `Failed to auto-scan network images for new file: ${file.path}`, { error });
+								}
+							}
+						}
 					}
 				})
 			);
@@ -220,6 +326,19 @@ export default class ImageManagementPlugin extends Plugin {
 					// 确保 file 有效且有 name 属性
 					if (file instanceof TFile && file.name) {
 						await this.detectImageRename(file, oldPath);
+						
+						// 如果是 Markdown 文件且启用了网络图片扫描，更新缓存中的文件路径
+						if (file.extension === 'md' && this.settings.scanRemoteImages && this.networkImageAPI) {
+							try {
+								// 更新缓存中的文件路径
+								await this.updateNetworkImageCachePath(oldPath, file.path);
+							} catch (error) {
+								// 静默失败，不影响主流程
+								if (this.logger) {
+									await this.logger.warn(OperationType.SCAN, `Failed to update network image cache path: ${oldPath} -> ${file.path}`, { error });
+								}
+							}
+						}
 					}
 				})
 			);
@@ -230,6 +349,19 @@ export default class ImageManagementPlugin extends Plugin {
 					// 确保 file 有效且有 name 属性
 					if (file instanceof TFile && file.name) {
 						await this.handleFileDelete(file);
+						
+						// 如果是 Markdown 文件且启用了网络图片扫描，清理缓存
+						if (file.extension === 'md' && this.settings.scanRemoteImages && this.networkImageAPI) {
+							try {
+								// 标记该文件的网络图片为删除状态
+								await this.markNetworkImagesAsDeleted(file.path);
+							} catch (error) {
+								// 静默失败，不影响主流程
+								if (this.logger) {
+									await this.logger.warn(OperationType.SCAN, `Failed to mark network images as deleted: ${file.path}`, { error });
+								}
+							}
+						}
 					}
 				})
 			);
@@ -247,6 +379,11 @@ export default class ImageManagementPlugin extends Plugin {
 								.setTitle('扫描网络图片')
 								.setIcon('search')
 								.onClick(() => {
+									// 检查是否启用网络图片扫描
+									if (!this.settings.scanRemoteImages) {
+										new Notice('❌ 网络图片扫描功能未启用\n请在设置中开启"扫描网络图片"选项');
+										return;
+									}
 									new NetworkImageModal(this.app, this).open();
 								});
 						});
@@ -260,6 +397,22 @@ export default class ImageManagementPlugin extends Plugin {
 					// 确保 file 有效且有 name 属性
 					if (file && file.name) {
 						await this.detectReferenceChanges(file, cache);
+						
+						// 如果是 Markdown 文件且启用了网络图片扫描，自动更新缓存
+						if (file instanceof TFile && file.extension === 'md' && 
+							this.settings.scanRemoteImages && this.networkImageAPI) {
+							try {
+								// 延迟扫描，避免频繁触发
+								setTimeout(async () => {
+									await this.networkImageAPI.quickScan(file.path);
+								}, 2000);
+							} catch (error) {
+								// 静默失败，不影响主流程
+								if (this.logger) {
+									await this.logger.warn(OperationType.SCAN, `Failed to auto-scan network images for changed file: ${file.path}`, { error });
+								}
+							}
+						}
 					}
 				})
 			);
@@ -282,9 +435,409 @@ export default class ImageManagementPlugin extends Plugin {
 		}
 	}
 
+	// ==================== 网络图片缓存系统方法 ====================
+	
+	/**
+	 * 初始化网络图片缓存系统
+	 * 注意：此方法应在确认 scanRemoteImages 为 true 时调用
+	 * 公开方法，允许从设置页面调用
+	 */
+	async initializeNetworkImageCache(): Promise<void> {
+		// 双重检查：如果设置已禁用，不初始化
+		if (!this.settings.scanRemoteImages) {
+			if (this.logger) {
+				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image scanning is disabled, skipping cache system initialization');
+			}
+			return;
+		}
+		
+		try {
+			if (this.logger) {
+				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Initializing network image cache system...');
+			}
+			
+			// 1. 创建 IndexedDB 管理器
+			this.networkImageDBManager = new IndexedDBManager();
+			
+			// 2. 初始化数据库
+			const db = await this.networkImageDBManager.init();
+			if (this.logger) {
+				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image database initialized successfully');
+			}
+		
+		// 3. 创建网络图片扫描器
+		this.networkImageScanner = new NetworkImageScanner(
+			this.app,
+			async (msg, error) => {
+				if (this.logger) {
+					await this.logger.error(OperationType.SCAN, msg, { error });
+				}
+			}
+		);
+		
+		// 4. 创建错误处理器
+		this.networkImageErrorHandler = new ScanErrorHandler(100, true);
+		
+		// 5. 创建缓存管理器
+		this.networkImageCacheManager = new NetworkImageCacheManager(db);
+		
+		// 6. 创建 API 实例
+		this.networkImageAPI = new NetworkImageScannerAPI(
+			this.app,
+			db,
+			this.networkImageScanner,
+			this.networkImageErrorHandler
+		);
+		
+		if (this.logger) {
+			await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image cache system initialized successfully');
+		}
+		} catch (error) {
+			if (this.logger) {
+				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to initialize network image cache system', { error });
+			}
+			
+			// 初始化失败时，回退到不使用缓存的模式
+			this.networkImageAPI = null as any;
+			this.networkImageDBManager = null as any;
+		}
+	}
+
+	/**
+	 * 扫描网络图片（使用缓存系统）
+	 */
+	async scanNetworkImages(path?: string): Promise<any[]> {
+		// 检查是否启用网络图片扫描
+		if (!this.settings.scanRemoteImages) {
+			new Notice('❌ 网络图片扫描功能未启用\n请在设置中开启"扫描网络图片"选项');
+			return [];
+		}
+
+		// 检查缓存系统是否可用
+		if (!this.networkImageAPI) {
+			if (this.logger) {
+				await this.logger.warn(OperationType.SCAN, 'Network image cache system not available, using legacy scanner');
+			}
+			return await this.scanNetworkImagesLegacy(path);
+		}
+
+		try {
+			if (this.logger) {
+				await this.logger.info(OperationType.SCAN, `Scanning network images${path ? ` in ${path}` : ''}...`);
+			}
+			
+			// 显示进度提示
+			const notice = new Notice('正在扫描网络图片...', 0);
+			
+			// 执行增量扫描
+			const result = await this.networkImageAPI.scan({
+				path,
+				incremental: true,
+				validateImages: false
+			});
+			
+			// 更新通知
+			notice.hide();
+			
+			const message = `扫描完成！\n` +
+			              `共发现 ${result.totalImages} 张图片\n` +
+			              `新增: ${result.newImages} 张\n` +
+			              `更新: ${result.updatedImages} 张\n` +
+			              `缓存: ${result.cachedImages} 张\n` +
+			              `耗时: ${(result.duration / 1000).toFixed(2)} 秒\n` +
+			              `缓存命中率: ${result.cacheHitRate.toFixed(1)}%`;
+			
+			new Notice(message, 5000);
+			
+// 记录性能指标
+		if (this.logger) {
+			await this.logger.info(OperationType.SCAN, `Network image scan completed: ${JSON.stringify(result)}`);
+		}
+		
+		// 获取扫描的图片数据
+		const images = await this.getNetworkImagesFromCache(path);
+		
+		return images;
+	} catch (error) {
+		if (this.logger) {
+			await this.logger.error(OperationType.SCAN, 'Network image scan failed', { error });
+		}
+		new Notice(`网络图片扫描失败: ${error.message}`, 5000);
+		
+		// 回退到旧版扫描器
+		return await this.scanNetworkImagesLegacy(path);
+	}
+}
+
+/**
+ * 从缓存获取网络图片数据
+ */
+private async getNetworkImagesFromCache(path?: string): Promise<any[]> {
+	try {
+		// 搜索活跃的网络图片
+		const searchResult = await this.networkImageAPI.searchImages({
+			status: 'active',
+			page: 1,
+			pageSize: 10000
+		});
+		
+		// 转换格式以适配现有代码
+		return searchResult.images.map(img => ({
+			url: img.url,
+			sourceFile: this.app.vault.getAbstractFileByPath(img.sourceFilePath),
+			line: img.line,
+			originalText: img.originalText,
+			index: img.column,
+			length: img.originalText.length
+		}));
+	} catch (error) {
+		if (this.logger) {
+			await this.logger.error(OperationType.SCAN, 'Failed to get images from cache', { error });
+		}
+		return [];
+	}
+}
+
+/**
+ * 旧版网络图片扫描（不使用缓存）
+ */
+private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
+	const scanner = new NetworkImageScanner(this.app, async (msg, error) => {
+		if (this.logger) {
+			await this.logger.error(OperationType.SCAN, msg, { error });
+		}
+	});
+	return await scanner.scanAll(path);
+}
+
+	/**
+	 * 执行完整扫描（用于定期维护）
+	 */
+	async performFullNetworkImageScan(): Promise<void> {
+		if (!this.settings.scanRemoteImages || !this.networkImageAPI) {
+			return;
+		}
+
+		try {
+			if (this.logger) {
+				await this.logger.info(OperationType.SCAN, 'Performing full network image scan...');
+			}
+			
+			const result = await this.networkImageAPI.fullScan();
+			
+			if (this.logger) {
+				await this.logger.info(OperationType.SCAN, `Full scan completed: ${JSON.stringify(result)}`);
+			}
+			
+			// 显示通知
+			if (result.totalImages > 0) {
+				new Notice(`网络图片完整扫描完成！\n共处理 ${result.totalImages} 张图片`, 3000);
+			}
+		} catch (error) {
+			if (this.logger) {
+				await this.logger.error(OperationType.SCAN, 'Full network image scan failed', { error });
+			}
+		}
+	}
+
+	/**
+	 * 清理网络图片缓存
+	 */
+	async cleanupNetworkImageCache(): Promise<void> {
+		if (!this.networkImageAPI) {
+			return;
+		}
+
+		try {
+			if (this.logger) {
+				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Cleaning up network image cache...');
+			}
+			
+			const result = await this.networkImageAPI.fullCleanup();
+			
+			if (this.logger) {
+				await this.logger.info(OperationType.PLUGIN_OPERATION, `Cache cleanup completed: ${JSON.stringify(result)}`);
+			}
+			
+			new Notice(`缓存清理完成！\n移除 ${result.imagesRemoved} 张图片\n释放 ${(result.spaceFreed / 1024 / 1024).toFixed(2)} MB 空间`, 3000);
+		} catch (error) {
+			if (this.logger) {
+				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Cache cleanup failed', { error });
+			}
+			new Notice('缓存清理失败', 3000);
+		}
+	}
+
+	/**
+	 * 获取网络图片缓存统计
+	 */
+	async getNetworkImageCacheStats(): Promise<any> {
+		if (!this.networkImageAPI) {
+			return null;
+		}
+
+		try {
+			const stats = await this.networkImageAPI.getStats();
+			
+			return {
+				totalImages: stats.totalImages,
+				activeImages: stats.activeImages,
+				brokenImages: stats.brokenImages,
+				cacheHitRate: stats.cacheHitRate,
+				databaseSize: stats.databaseSize
+			};
+		} catch (error) {
+			if (this.logger) {
+				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to get cache stats', { error });
+			}
+			return null;
+		}
+	}
+
+	/**
+	 * 更新网络图片缓存中的文件路径（文件重命名时调用）
+	 * @param oldPath - 旧文件路径
+	 * @param newPath - 新文件路径
+	 */
+	private async updateNetworkImageCachePath(oldPath: string, newPath: string): Promise<void> {
+		if (!this.networkImageAPI || !this.networkImageDBManager) {
+			return;
+		}
+
+		try {
+			const db = this.networkImageDBManager.getDB();
+			const tx = db.transaction(['network_images', 'scanned_files'], 'readwrite');
+			const imageStore = tx.objectStore('network_images');
+			const fileStore = tx.objectStore('scanned_files');
+			const imageIndex = imageStore.index('by-source-file');
+			const fileIndex = fileStore.index('by-mtime');
+
+			// 更新图片记录中的文件路径
+			const images = await new Promise<any[]>((resolve, reject) => {
+				const request = imageIndex.getAll(oldPath);
+				request.onsuccess = () => resolve(request.result || []);
+				request.onerror = () => reject(request.error);
+			});
+
+			for (const image of images) {
+				image.sourceFilePath = newPath;
+				image.updatedAt = Date.now();
+				await new Promise<void>((resolve, reject) => {
+					const request = imageStore.put(image);
+					request.onsuccess = () => resolve();
+					request.onerror = () => reject(request.error);
+				});
+			}
+
+			// 更新文件记录
+			const fileRecord = await new Promise<any>((resolve, reject) => {
+				const request = fileStore.get(oldPath);
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+
+			if (fileRecord) {
+				// 删除旧记录
+				await new Promise<void>((resolve, reject) => {
+					const request = fileStore.delete(oldPath);
+					request.onsuccess = () => resolve();
+					request.onerror = () => reject(request.error);
+				});
+
+				// 创建新记录
+				fileRecord.id = newPath;
+				fileRecord.updatedAt = Date.now();
+				await new Promise<void>((resolve, reject) => {
+					const request = fileStore.put(fileRecord);
+					request.onsuccess = () => resolve();
+					request.onerror = () => reject(request.error);
+				});
+			}
+
+			if (this.logger && images.length > 0) {
+				await this.logger.info(OperationType.PLUGIN_OPERATION, `Updated ${images.length} network image cache records: ${oldPath} -> ${newPath}`);
+			}
+		} catch (error) {
+			if (this.logger) {
+				await this.logger.warn(OperationType.PLUGIN_OPERATION, `Failed to update network image cache path: ${oldPath} -> ${newPath}`, { error });
+			}
+		}
+	}
+
+	/**
+	 * 标记网络图片为删除状态（文件删除时调用）
+	 * @param filePath - 已删除的文件路径
+	 */
+	private async markNetworkImagesAsDeleted(filePath: string): Promise<void> {
+		if (!this.networkImageAPI || !this.networkImageDBManager) {
+			return;
+		}
+
+		try {
+			const db = this.networkImageDBManager.getDB();
+			const tx = db.transaction(['network_images', 'scanned_files'], 'readwrite');
+			const imageStore = tx.objectStore('network_images');
+			const fileStore = tx.objectStore('scanned_files');
+			const imageIndex = imageStore.index('by-source-file');
+
+			// 获取该文件的所有图片
+			const images = await new Promise<any[]>((resolve, reject) => {
+				const request = imageIndex.getAll(filePath);
+				request.onsuccess = () => resolve(request.result || []);
+				request.onerror = () => reject(request.error);
+			});
+
+			// 标记图片为删除状态
+			for (const image of images) {
+				image.status = 'deleted';
+				image.updatedAt = Date.now();
+				await new Promise<void>((resolve, reject) => {
+					const request = imageStore.put(image);
+					request.onsuccess = () => resolve();
+					request.onerror = () => reject(request.error);
+				});
+			}
+
+			// 标记文件记录为删除状态
+			const fileRecord = await new Promise<any>((resolve, reject) => {
+				const request = fileStore.get(filePath);
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+
+			if (fileRecord) {
+				fileRecord.status = 'deleted';
+				fileRecord.updatedAt = Date.now();
+				await new Promise<void>((resolve, reject) => {
+					const request = fileStore.put(fileRecord);
+					request.onsuccess = () => resolve();
+					request.onerror = () => reject(request.error);
+				});
+			}
+
+			if (this.logger && images.length > 0) {
+				await this.logger.info(OperationType.PLUGIN_OPERATION, `Marked ${images.length} network images as deleted: ${filePath}`);
+			}
+		} catch (error) {
+			if (this.logger) {
+				await this.logger.warn(OperationType.PLUGIN_OPERATION, `Failed to mark network images as deleted: ${filePath}`, { error });
+			}
+		}
+	}
+
+	// ==================== 生命周期方法 ====================
+
 	onunload() {
 		// 清理视图
 		this.app.workspace.detachLeavesOfType(IMAGE_MANAGER_VIEW_TYPE);
+		
+		// 关闭网络图片数据库连接
+		if (this.networkImageDBManager) {
+			this.networkImageDBManager.close();
+			if (this.logger) {
+				this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image database connection closed');
+			}
+		}
 		
 		// 清理 ReferenceManager 的事件监听器
 		if (this.referenceManager) {

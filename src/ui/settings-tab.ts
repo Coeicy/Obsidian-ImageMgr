@@ -1671,21 +1671,9 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		<p style="margin: 8px 0 0 0; font-size: 0.85em;">💡 提示：云端图片无法进行重命名、移动、删除等文件操作，但可以查看和复制链接。</p>
 	`;
 
-	new Setting(uploadSection.contentEl)
-		.setName('扫描网络图片')
-		.setDesc('扫描 Markdown 文件中的网络图片链接（http://、https://），并在列表中显示')
-		.addToggle(toggle => toggle
-			.setValue(this.plugin.settings.scanRemoteImages ?? true)
-			.onChange(async (value) => {
-				this.plugin.settings.scanRemoteImages = value;
-				await this.plugin.saveSettings();
-				// 如果启用，提示需要重新扫描
-				if (value) {
-					new Notice('✅ 已启用网络图片扫描，请重新扫描以查看网络图片');
-				}
-			}));
-
-	new Setting(uploadSection.contentEl)
+	// 先创建所有网络图片相关设置（但不显示，稍后统一控制）
+	// 网络图片代理服务
+	const proxySetting = new Setting(uploadSection.contentEl)
 		.setName('网络图片代理服务')
 		.setDesc('当直接加载失败时使用的代理服务（Obsidian 代理、公共代理或两者都尝试）')
 		.addDropdown(dropdown => dropdown
@@ -1699,7 +1687,8 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 			}));
 
-	new Setting(uploadSection.contentEl)
+	// 云端图片加载超时
+	const timeoutSetting = new Setting(uploadSection.contentEl)
 		.setName('云端图片加载超时')
 		.setDesc('云端图片加载的超时时间（毫秒，范围：3000-30000）')
 		.addSlider(slider => slider
@@ -1711,7 +1700,8 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 			}));
 
-	new Setting(uploadSection.contentEl)
+	// 自动重试代理加载
+	const retrySetting = new Setting(uploadSection.contentEl)
 		.setName('自动重试代理加载')
 		.setDesc('当直接加载失败时，自动尝试通过代理服务加载图片')
 		.addToggle(toggle => toggle
@@ -1720,6 +1710,42 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				this.plugin.settings.autoRetryRemoteImage = value;
 				await this.plugin.saveSettings();
 			}));
+
+	// 失效网络图片黑名单
+	const blacklistSetting = new Setting(uploadSection.contentEl)
+		.setName('失效网络图片黑名单')
+		.setDesc('自动检测失效的图片 URL 并加入此列表（用于下次快速检测，每行一个 URL）')
+		.addTextArea(text => text
+			.setValue((this.plugin.settings.remoteImageBlacklist || []).join('\n'))
+			.setPlaceholder('http://example.com/broken-image.png')
+			.onChange(async (value) => {
+				this.plugin.settings.remoteImageBlacklist = value.split('\n').filter(line => line.trim());
+				await this.plugin.saveSettings();
+			}));
+
+	// 扫描网络图片开关
+	new Setting(uploadSection.contentEl)
+		.setName('扫描网络图片')
+		.setDesc('扫描 Markdown 文件中的网络图片链接（http://、https://），并在列表中显示。关闭后将停止所有自动扫描。')
+		.addToggle(toggle => toggle
+			.setValue(this.plugin.settings.scanRemoteImages ?? false)
+			.onChange(async (value) => {
+				this.plugin.settings.scanRemoteImages = value;
+				await this.plugin.saveSettings();
+				
+				// 根据开关状态初始化或清理网络图片缓存系统
+				if (value) {
+					// 启用：初始化网络图片缓存系统
+					if (!this.plugin.networkImageAPI) {
+						await this.plugin.initializeNetworkImageCache();
+					}
+					new Notice('✅ 已启用网络图片扫描，请重新扫描以查看网络图片');
+				} else {
+					// 禁用：清理网络图片缓存系统（可选，保留数据以便将来重新启用）
+					new Notice('❌ 已禁用网络图片扫描，将停止所有自动扫描');
+				}
+			}));
+
 
 	// 图床设置分割线
 	const uploadDivider = uploadSection.contentEl.createEl('div');

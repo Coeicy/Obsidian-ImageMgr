@@ -5854,6 +5854,11 @@ export class ImageDetailModal extends Modal {
 		if (this.imgElement && this.wheelHandler) {
 			this.imgElement.removeEventListener('wheel', this.wheelHandler);
 		}
+		// 清理图片加载监听器（防止内存泄漏）
+		if (this.imgElement) {
+			this.imgElement.removeEventListener('load', this.onImageLoadBound || (() => {}));
+			this.imgElement.removeEventListener('error', this.onImageErrorBound || (() => {}));
+		}
 		if (this.closeSuggestionsHandler) {
 			document.removeEventListener('click', this.closeSuggestionsHandler);
 		}
