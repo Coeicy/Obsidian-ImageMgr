@@ -98,6 +98,8 @@ export class ImageManagerView extends ItemView {
 	private imageObserver: IntersectionObserver | null = null;
 	/** 预扫描的重复图片哈希映射（用于快速显示重复图片检测） */
 	private duplicateHashMap: Map<string, ImageInfo[]> = new Map();
+	/** 工具栏按钮元素缓存（避免重复DOM查询） */
+	private toolbarButtons: Map<string, HTMLElement | null> = new Map();
 
 	constructor(leaf: WorkspaceLeaf, plugin: ImageManagementPlugin) {
 		super(leaf);
@@ -156,6 +158,14 @@ export class ImageManagerView extends ItemView {
 	private loadImage(previewEl: HTMLElement) {
 		const src = previewEl.dataset.src;
 		if (!src || previewEl.classList.contains('loaded')) return;
+		
+		// 检查是否在忽略的域名列表中（代码块中的示例域名）
+		const ignoredDomains = ['static.runoob.com', 'example.com', 'placeholder.com', 'localhost', '127.0.0.1'];
+		const isIgnored = ignoredDomains.some(domain => src.includes(domain));
+		if (isIgnored) {
+			// 如果是忽略的域名，跳过加载
+			return;
+		}
 
 		const img = new Image();
 		img.referrerPolicy = 'no-referrer'; // 添加防盗链策略
@@ -1224,7 +1234,10 @@ export class ImageManagerView extends ItemView {
 				this.searchQuery = query;
 				this.addToOperationHistory('search');
 				this.applySortAndFilter();
-				this.updateButtonIndicator(document.getElementById('search-btn') as HTMLElement, 'search');
+				const searchBtn = this.getToolbarButton('search-btn');
+				if (searchBtn) {
+					this.updateButtonIndicator(searchBtn, 'search');
+				}
 				
 				// 更新清除按钮的显示状态和文本
 				this.updateClearButtonState();
@@ -1245,7 +1258,10 @@ export class ImageManagerView extends ItemView {
 				this.sortOptions = options;
 				this.addToOperationHistory('sort');
 				this.applySortAndFilter();
-				this.updateButtonIndicator(document.getElementById('sort-btn') as HTMLElement, 'sort');
+				const sortBtn = this.getToolbarButton('sort-btn');
+				if (sortBtn) {
+					this.updateButtonIndicator(sortBtn, 'sort');
+				}
 				
 				// 更新清除按钮的显示状态和文本
 				this.updateClearButtonState();
@@ -1265,7 +1281,10 @@ export class ImageManagerView extends ItemView {
 			this.filterOptions = options;
 			this.addToOperationHistory('filter');
 			this.applySortAndFilter();
-			this.updateButtonIndicator(document.getElementById('filter-btn') as HTMLElement, 'filter');
+			const filterBtn = this.getToolbarButton('filter-btn');
+			if (filterBtn) {
+				this.updateButtonIndicator(filterBtn, 'filter');
+			}
 			
 			// 更新清除按钮的显示状态和文本
 			this.updateClearButtonState();
@@ -1509,6 +1528,36 @@ export class ImageManagerView extends ItemView {
 				}
 			});
 		}
+	}
+
+	/**
+	 * 获取工具栏按钮元素（带缓存，避免重复DOM查询）
+	 * @param buttonId - 按钮ID
+	 * @returns 按钮元素，如果不存在则返回null
+	 */
+	private getToolbarButton(buttonId: string): HTMLElement | null {
+		// 检查缓存
+		if (this.toolbarButtons.has(buttonId)) {
+			const cached = this.toolbarButtons.get(buttonId);
+			// 验证元素是否仍然在DOM中
+			if (cached && document.body.contains(cached)) {
+				return cached;
+			}
+			// 如果元素已不在DOM中，清除缓存
+			this.toolbarButtons.delete(buttonId);
+		}
+		
+		// 查询DOM并缓存
+		const button = document.getElementById(buttonId);
+		this.toolbarButtons.set(buttonId, button);
+		return button;
+	}
+
+	/**
+	 * 清除工具栏按钮缓存（在视图关闭或重新渲染时调用）
+	 */
+	private clearToolbarButtonCache(): void {
+		this.toolbarButtons.clear();
 	}
 
     private isIgnoredFile(filename: string, md5?: string, filePath?: string): boolean {
@@ -2145,7 +2194,7 @@ export class ImageManagerView extends ItemView {
                 await this.plugin.saveData(this.plugin.data);
                 this.renderImageList();
                 // 更新分组按钮绿点
-                const groupBtn = document.getElementById('group-btn') as HTMLElement;
+                const groupBtn = this.getToolbarButton('group-btn');
                 if (groupBtn) this.updateButtonIndicator(groupBtn, 'group');
                 // 更新清除按钮状态
                 this.updateClearButtonState();
@@ -4235,6 +4284,8 @@ export class ImageManagerView extends ItemView {
 
 
 	async onClose() {
+		// 清除工具栏按钮缓存
+		this.clearToolbarButtonCache();
 		// 清理图片懒加载观察器
 		if (this.imageObserver) {
 			this.imageObserver.disconnect();
@@ -5106,7 +5157,10 @@ export class ImageManagerView extends ItemView {
 		this.searchQuery = '';
 		this.removeFromOperationHistory('search');
 		this.applySortAndFilter();
-		this.updateButtonIndicator(document.getElementById('search-btn') as HTMLElement, 'search');
+		const searchBtn = this.getToolbarButton('search-btn');
+		if (searchBtn) {
+			this.updateButtonIndicator(searchBtn, 'search');
+		}
 		
 		// 更新清除按钮状态
 		this.updateClearButtonState();
@@ -5140,7 +5194,10 @@ export class ImageManagerView extends ItemView {
 		};
 		this.removeFromOperationHistory('filter');
 		this.applySortAndFilter();
-		this.updateButtonIndicator(document.getElementById('filter-btn') as HTMLElement, 'filter');
+		const filterBtn = this.getToolbarButton('filter-btn');
+		if (filterBtn) {
+			this.updateButtonIndicator(filterBtn, 'filter');
+		}
 		
 		// 更新清除按钮状态
 		this.updateClearButtonState();

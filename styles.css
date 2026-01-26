@@ -14,23 +14,22 @@
 .settings-tab-bar {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 2px;
-	border-bottom: 1px solid var(--background-modifier-border);
-	margin-bottom: 16px;
-	padding: 0 4px 0 0;
+	gap: 0;
+	margin-bottom: 0;
+	padding: 0;
 	overflow-x: auto;
 }
 
 .settings-tab-btn {
-	padding: 8px 12px;
+	padding: 10px 16px;
 	border: none;
-	border-bottom: 3px solid transparent;
 	background: transparent;
 	color: var(--text-muted);
 	cursor: pointer;
 	font-size: 0.9em;
 	white-space: nowrap;
-	transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+	transition: color 0.15s ease, background 0.15s ease;
+	position: relative;
 }
 
 .settings-tab-btn:hover {
@@ -40,8 +39,22 @@
 
 .settings-tab-btn.is-active {
 	color: var(--text-normal);
-	border-bottom-color: var(--interactive-accent);
 	background: var(--background-secondary);
+	font-weight: 600;
+}
+
+
+
+/* 活动标签的下划线指示器 */
+.settings-tab-btn.is-active::after {
+	content: '';
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background-color: var(--interactive-accent);
+	z-index: 2;
 }
 
 .settings-tab-content {
@@ -488,22 +501,42 @@
 	border: 1px solid var(--background-modifier-border);
 	overflow: hidden;
 	word-break: break-word;
+	font-family: inherit;
+	font-size: 14px;
+	line-height: 1.4;
 }
 
 .stats-section h3 {
 	margin-top: 0;
-	margin-bottom: 12px;
+	margin-bottom: 16px;
 	color: var(--text-normal);
-	font-size: 1.1em;
+	font-size: 16px;
 	font-weight: 600;
+	font-family: inherit;
+	line-height: 1.4;
 	padding-bottom: 8px;
 	border-bottom: 2px solid var(--interactive-accent);
+}
+
+.stats-section h4 {
+	margin-top: 0;
+	margin-bottom: 12px;
+	color: var(--text-normal);
+	font-size: 14px;
+	font-weight: 600;
+	font-family: inherit;
+	line-height: 1.4;
+	padding-bottom: 6px;
+	border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .stats-list {
 	margin: 0;
 	padding-left: 0;
 	list-style: none;
+	font-family: inherit;
+	font-size: 14px;
+	line-height: 1.4;
 }
 
 .stats-list li {
@@ -512,7 +545,10 @@
 	border-radius: 4px;
 	background: var(--background-primary);
 	color: var(--text-normal);
-	font-weight: 500;
+	font-weight: 400;
+	font-family: inherit;
+	font-size: 14px;
+	line-height: 1.4;
 	border-left: 3px solid var(--interactive-accent);
 	word-break: break-word;
 	overflow-wrap: break-word;
@@ -2272,4 +2308,43 @@
 	justify-content: flex-end;
 	gap: 10px;
 	margin-top: 16px;
+}
+
+/* ========== 设置页输入验证样式 ========== */
+.input-error {
+	border-color: var(--text-error) !important;
+	background-color: rgba(var(--text-error-rgb), 0.05) !important;
+	box-shadow: 0 0 0 2px rgba(var(--text-error-rgb), 0.1) !important;
+}
+
+.input-error:focus {
+	border-color: var(--text-error) !important;
+	box-shadow: 0 0 0 2px rgba(var(--text-error-rgb), 0.2) !important;
+}
+
+/* 数字输入框样式优化 */
+.setting-item input[type="number"] {
+	text-align: center;
+	font-weight: 500;
+}
+
+.setting-item input[type="number"]:focus {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+/* 滑块工具提示居中样式 */
+.slider-tooltip {
+	left: 50% !important;
+	transform: translateX(-50%) translateY(-100%) !important;
+	text-align: center !important;
+	min-width: 30px !important;
+	font-weight: 600 !important;
+}
+
+/* ========== 设置项标题字体大小 ========== */
+.setting-item-name {
+	font-size: 1em !important;
+	font-weight: normal;
+	color: var(--text-normal);
 }

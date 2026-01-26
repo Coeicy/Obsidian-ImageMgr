@@ -14,6 +14,15 @@ export interface LegacyNetworkImageReference {
 
 export class NetworkImageScanner {
     private logger?: (message: string, error?: any) => void;
+    
+    // 需要忽略的域名列表（代码块中的示例域名）
+    private readonly ignoredDomains = new Set([
+        'static.runoob.com',
+        'example.com',
+        'placeholder.com',
+        'localhost',
+        '127.0.0.1'
+    ]);
 
     constructor(private app: App, logger?: (message: string, error?: any) => void) {
         this.logger = logger;
@@ -34,16 +43,81 @@ export class NetworkImageScanner {
             const lines = content.split('\n');
             const results: NetworkImageReference[] = [];
 
+            // 检测代码块状态
+            let inCodeBlock = false;
+            let codeBlockMarker = '';
+
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
+                const trimmed = line.trim();
+
+                // 检查代码块开始/结束标记
+                if (trimmed.startsWith('```')) {
+                    const marker = trimmed.match(/^`{3,}/)?.[0] || '';
+                    if (marker.length >= 3) {
+                        if (!inCodeBlock) {
+                            // 开始代码块
+                            inCodeBlock = true;
+                            codeBlockMarker = marker;
+                        } else if (marker === codeBlockMarker) {
+                            // 结束代码块
+                            inCodeBlock = false;
+                            codeBlockMarker = '';
+                        }
+                    }
+                } else if (trimmed.startsWith('~~~')) {
+                    const marker = trimmed.match(/^~{3,}/)?.[0] || '';
+                    if (marker.length >= 3) {
+                        if (!inCodeBlock) {
+                            // 开始代码块
+                            inCodeBlock = true;
+                            codeBlockMarker = marker;
+                        } else if (marker === codeBlockMarker) {
+                            // 结束代码块
+                            inCodeBlock = false;
+                            codeBlockMarker = '';
+                        }
+                    }
+                } else if (trimmed.startsWith('<!--') && trimmed.includes('code')) {
+                    // 检查 HTML 注释中的代码块标记
+                    if (trimmed.includes('code') && !trimmed.includes('end')) {
+                        inCodeBlock = true;
+                    } else if (trimmed.includes('end') && trimmed.includes('code')) {
+                        inCodeBlock = false;
+                    }
+                }
+
+                // 跳过代码块内的内容
+                if (inCodeBlock) continue;
+                
+                // 检查是否为内联代码块（反引号包围的内容）
+                const inlineCodeRegex = /`[^`]+`/g;
+                let inlineCodeMatch;
+                const inlineCodeSpans: [number, number][] = [];
+                
+                while ((inlineCodeMatch = inlineCodeRegex.exec(line)) !== null) {
+                    inlineCodeSpans.push([inlineCodeMatch.index, inlineCodeMatch.index + inlineCodeMatch[0].length]);
+                }
                 
                 // 1. Markdown 格式: ![alt](http://...)
                 const mdRegex = /!\[(.*?)\]\(\s*(https?:\/\/[^)]+)\s*\)/g;
                 let match;
                 while ((match = mdRegex.exec(line)) !== null) {
+                    // 检查是否在内联代码块内
+                    const isInInlineCode = inlineCodeSpans.some(([start, end]) => 
+                        match.index >= start && match.index <= end
+                    );
+                    
+                    if (isInInlineCode) continue;
+                    
                     let url = match[2];
                     if (url.includes(' ')) {
                         url = url.split(/\s+/)[0];
+                    }
+
+                    // 检查是否在忽略的域名列表中
+                    if (this.isIgnoredDomain(url)) {
+                        continue;
                     }
 
                     if (!url.includes('localhost') && !url.includes('127.0.0.1')) {
@@ -59,6 +133,18 @@ export class NetworkImageScanner {
                 // 2. HTML 格式: <img src="http://...">
                 const htmlRegex = /<img[^>]+src=["'](https?:\/\/[^"']+)["'][^>]*>/g;
                 while ((match = htmlRegex.exec(line)) !== null) {
+                    // 检查是否在内联代码块内
+                    const isInInlineCode = inlineCodeSpans.some(([start, end]) => 
+                        match.index >= start && match.index <= end
+                    );
+                    
+                    if (isInInlineCode) continue;
+                    
+                    // 检查是否在忽略的域名列表中
+                    if (this.isIgnoredDomain(match[1])) {
+                        continue;
+                    }
+                    
                     if (!match[1].includes('localhost') && !match[1].includes('127.0.0.1')) {
                         results.push({
                             url: match[1],
@@ -120,5 +206,20 @@ export class NetworkImageScanner {
             }
         }
         return results;
+    }
+    
+    /**
+     * 检查 URL 是否在忽略的域名列表中
+     * @param url - 要检查的 URL
+     * @returns 是否应该忽略此 URL
+     */
+    private isIgnoredDomain(url: string): boolean {
+        try {
+            const urlObj = new URL(url);
+            return this.ignoredDomains.has(urlObj.hostname);
+        } catch (error) {
+            // URL 解析失败，返回 false
+            return false;
+        }
     }
 }

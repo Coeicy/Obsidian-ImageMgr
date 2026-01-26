@@ -35,8 +35,7 @@ export const VIEW_TYPE = 'image-manager-view';
 /** 设置页标签定义 */
 const SETTINGS_TAB_DEFS: { id: string; title: string }[] = [
 	{ id: 'basic', title: '📌 基础设置' },
-	{ id: 'home', title: '🏠 主页设置' },
-	{ id: 'card', title: '🖼️ 图片卡片' },
+	{ id: 'display', title: '🖼️ 显示设置' },
 	{ id: 'delete', title: '🗑️ 回收站' },
 	{ id: 'path-naming', title: '🔄 重命名设置' },
 	{ id: 'performance', title: '⚡ 性能优化' },
@@ -154,15 +153,23 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			tabBtn.addEventListener('click', () => this.showTab(t.id));
 			const panel = contentWrapper.createDiv('settings-tab-panel');
 			panel.dataset.tabId = t.id;
+			// 默认所有面板都隐藏，只有当前激活的会显示
 			panel.style.display = 'none';
 			this.tabPanels.set(t.id, panel);
 		}
+		// 显示默认标签页
 		this.showTab(this.activeTabId || 'basic');
 
 		// ========== 各标签页内容 ==========
 
 		// 1. 基础设置
 		const basicSection = { contentEl: this.tabPanels.get('basic')! };
+		
+		// 添加一级标题
+		const basicTitle = basicSection.contentEl.createEl('h2', { text: '📌 基础设置' });
+		basicTitle.style.marginTop = '24px';
+		basicTitle.style.marginBottom = '20px';
+		basicTitle.style.fontSize = '1.6em';
 		
 		new Setting(basicSection.contentEl)
 			.setName('自动扫描')
@@ -230,89 +237,220 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-	// 2. 主页设置（图片管理主页的布局和显示）
-		const homeSection = { contentEl: this.tabPanels.get('home')! };
+	// 2. 显示设置（合并主页设置和图片卡片设置）
+		const displaySection = { contentEl: this.tabPanels.get('display')! };
+		
+		// 添加一级标题
+		const displayTitle = displaySection.contentEl.createEl('h2', { text: '🖼️ 显示设置' });
+		displayTitle.style.marginTop = '24px';
+		displayTitle.style.marginBottom = '20px';
+		displayTitle.style.fontSize = '1.6em';
 
-		// 布局设置（二级标题）
-		const layoutTitle = homeSection.contentEl.createEl('h4', { text: '📐 布局' });
+		// 主页设置（二级标题）
+		const layoutTitle = displaySection.contentEl.createEl('h4', { text: '🏠 主页设置' });
 		layoutTitle.style.marginBottom = '12px';
 		layoutTitle.style.paddingBottom = '8px';
 		layoutTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
 
-		new Setting(homeSection.contentEl)
+		const imagesPerRowSetting = new Setting(displaySection.contentEl)
 			.setName('每行显示数量')
-			.setDesc('图片画廊中每行显示的图片数量（范围：1-10）')
-			.addSlider(slider => {
-				const currentValue = (typeof this.plugin.settings.imagesPerRow === 'number' && 
-					this.plugin.settings.imagesPerRow >= 1 && 
-					this.plugin.settings.imagesPerRow <= 10) 
-					? this.plugin.settings.imagesPerRow 
-					: 5;
-				
-				slider
-					.setLimits(1, 10, 1)
-					.setValue(currentValue)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						const validValue = Math.max(1, Math.min(10, Math.round(value)));
-						this.plugin.settings.imagesPerRow = validValue;
-						await this.plugin.saveSettings();
-						const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-						if (view) {
-							await (view.view as any).scanImages();
-						}
-					});
-			});
-
-		new Setting(homeSection.contentEl)
-			.setName('卡片间距')
-			.setDesc('图片卡片之间的间距（像素，范围：4-24）')
-			.addSlider(slider => slider
-				.setLimits(4, 24, 2)
-				.setValue(this.plugin.settings.cardSpacing)
+			.setDesc('图片画廊中每行显示的图片数量（范围：1-10）');
+		
+		let imagesPerRowText: any;
+		let imagesPerRowSlider: any;
+		
+		imagesPerRowSetting.addSlider(slider => {
+			imagesPerRowSlider = slider;
+			const currentValue = (typeof this.plugin.settings.imagesPerRow === 'number' && 
+				this.plugin.settings.imagesPerRow >= 1 && 
+				this.plugin.settings.imagesPerRow <= 10) 
+				? this.plugin.settings.imagesPerRow 
+				: 5;
+			
+			slider
+				.setLimits(1, 10, 1)
+				.setValue(currentValue)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
-					this.plugin.settings.cardSpacing = value;
+					const validValue = Math.max(1, Math.min(10, Math.round(value)));
+					this.plugin.settings.imagesPerRow = validValue;
+					if (imagesPerRowText) {
+						imagesPerRowText.setValue(validValue.toString());
+					}
 					await this.plugin.saveSettings();
 					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
 					if (view) {
 						await (view.view as any).scanImages();
 					}
-				}));
+				});
+		});
+		
+		imagesPerRowSetting.addText(text => {
+			imagesPerRowText = text;
+			const currentValue = (typeof this.plugin.settings.imagesPerRow === 'number' && 
+				this.plugin.settings.imagesPerRow >= 1 && 
+				this.plugin.settings.imagesPerRow <= 10) 
+				? this.plugin.settings.imagesPerRow 
+				: 5;
+			
+			text
+				.setValue(currentValue.toString())
+				.setPlaceholder('1-10')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 10) {
+					this.plugin.settings.imagesPerRow = numValue;
+					if (imagesPerRowSlider) {
+						imagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(homeSection.contentEl)
+
+
+		const cardBorderRadiusSetting = new Setting(displaySection.contentEl)
 			.setName('卡片圆角')
-			.setDesc('图片卡片的圆角大小（像素，范围：0-20）')
-			.addSlider(slider => slider
+			.setDesc('图片卡片的圆角大小（像素，范围：0-20）');
+		
+		let cardBorderRadiusText: any;
+		let cardBorderRadiusSlider: any;
+		
+		cardBorderRadiusSetting.addSlider(slider => {
+			cardBorderRadiusSlider = slider;
+			slider
 				.setLimits(0, 20, 1)
 				.setValue(this.plugin.settings.cardBorderRadius)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.cardBorderRadius = value;
+					if (cardBorderRadiusText) {
+						cardBorderRadiusText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
 					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
 					if (view) {
 						await (view.view as any).scanImages();
 					}
-				}));
+				});
+		});
+		
+		cardBorderRadiusSetting.addText(text => {
+			cardBorderRadiusText = text;
+			text
+				.setValue(this.plugin.settings.cardBorderRadius.toString())
+				.setPlaceholder('0-20')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 0 && numValue <= 20) {
+					this.plugin.settings.cardBorderRadius = numValue;
+					if (cardBorderRadiusSlider) {
+						cardBorderRadiusSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(homeSection.contentEl)
+		const fixedImageHeightSetting = new Setting(displaySection.contentEl)
 			.setName('固定图片高度')
-			.setDesc('关闭"自适应大小"时的图片高度（像素，范围：100-400）')
-			.addSlider(slider => slider
+			.setDesc('关闭"自适应大小"时的图片高度（像素，范围：100-400）');
+		
+		let fixedImageHeightText: any;
+		let fixedImageHeightSlider: any;
+		
+		fixedImageHeightSetting.addSlider(slider => {
+			fixedImageHeightSlider = slider;
+			slider
 				.setLimits(100, 400, 10)
 				.setValue(this.plugin.settings.fixedImageHeight)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.fixedImageHeight = value;
+					if (fixedImageHeightText) {
+						fixedImageHeightText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
 					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
 					if (view) {
 						await (view.view as any).scanImages();
 					}
-				}));
+				});
+		});
+		
+		fixedImageHeightSetting.addText(text => {
+			fixedImageHeightText = text;
+			text
+				.setValue(this.plugin.settings.fixedImageHeight.toString())
+				.setPlaceholder('100-400')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 100 && numValue <= 400) {
+					this.plugin.settings.fixedImageHeight = numValue;
+					if (fixedImageHeightSlider) {
+						fixedImageHeightSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(homeSection.contentEl)
+		new Setting(displaySection.contentEl)
 			.setName('统一卡片高度')
 			.setDesc('同一行的图片卡片保持相同高度')
 			.addToggle(toggle => toggle
@@ -326,7 +464,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(homeSection.contentEl)
+		new Setting(displaySection.contentEl)
 			.setName('启用悬停效果')
 			.setDesc('鼠标悬停时显示阴影和缩放动画')
 			.addToggle(toggle => toggle
@@ -340,14 +478,133 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
+		// 图片显示设置（二级标题）
+		const displaySubTitle = displaySection.contentEl.createEl('h4', { text: '🖼️ 图片显示' });
+		displaySubTitle.style.marginTop = '20px';
+		displaySubTitle.style.marginBottom = '12px';
+		displaySubTitle.style.paddingBottom = '8px';
+		displaySubTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+
+		new Setting(displaySection.contentEl)
+			.setName('纯净画廊')
+			.setDesc('开启后只显示图片，隐藏所有信息（文件名、大小、尺寸、锁定图标、选择框等）')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.pureGallery)
+				.onChange(async (value) => {
+					this.plugin.settings.pureGallery = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('自适应图片大小')
+			.setDesc('图片按原始宽高比自适应显示（类似 Notion 效果），关闭则固定高度显示')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.adaptiveImageSize)
+				.onChange(async (value) => {
+					this.plugin.settings.adaptiveImageSize = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示图片名称')
+			.setDesc('在图片卡片上显示文件名')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showImageName)
+				.onChange(async (value) => {
+					this.plugin.settings.showImageName = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('图片名称换行')
+			.setDesc('当图片名称过长时允许换行显示')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.imageNameWrap)
+				.onChange(async (value) => {
+					this.plugin.settings.imageNameWrap = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示锁定图标')
+			.setDesc('显示被锁定文件右上角的🔒图标')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showLockIcon)
+				.onChange(async (value) => {
+					this.plugin.settings.showLockIcon = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示图片大小')
+			.setDesc('在图片卡片上显示文件大小')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showImageSize)
+				.onChange(async (value) => {
+					this.plugin.settings.showImageSize = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示图片尺寸')
+			.setDesc('在图片卡片上显示宽度×高度')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showImageDimensions)
+				.onChange(async (value) => {
+					this.plugin.settings.showImageDimensions = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示图片序号')
+			.setDesc('在图片卡片右上角显示序号（例如：1/100, 2/100...），方便快速定位')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showImageIndex)
+				.onChange(async (value) => {
+					this.plugin.settings.showImageIndex = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
 		// 默认值设置（二级标题）
-		const defaultsTitle = homeSection.contentEl.createEl('h4', { text: '⚙️ 默认值' });
+		const defaultsTitle = displaySection.contentEl.createEl('h4', { text: '⚙️ 默认值' });
 		defaultsTitle.style.marginTop = '20px';
 		defaultsTitle.style.marginBottom = '12px';
 		defaultsTitle.style.paddingBottom = '8px';
 		defaultsTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
 
-		new Setting(homeSection.contentEl)
+		new Setting(displaySection.contentEl)
 			.setName('默认排序方式')
 			.setDesc('图片列表的默认排序依据')
 			.addDropdown(dropdown => dropdown
@@ -361,7 +618,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(homeSection.contentEl)
+		new Setting(displaySection.contentEl)
 			.setName('默认排序顺序')
 			.setDesc('升序（A-Z，小到大）或降序（Z-A，大到小）')
 			.addDropdown(dropdown => dropdown
@@ -373,7 +630,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(homeSection.contentEl)
+		new Setting(displaySection.contentEl)
 			.setName('默认筛选类型')
 			.setDesc('默认显示哪种格式的图片')
 			.addDropdown(dropdown => dropdown
@@ -390,125 +647,14 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-
-
-		// 3. 图片卡片设置
-		const cardSection = { contentEl: this.tabPanels.get('card')! };
-
-		new Setting(cardSection.contentEl)
-			.setName('纯净画廊')
-			.setDesc('开启后只显示图片，隐藏所有信息（文件名、大小、尺寸、锁定图标、选择框等）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.pureGallery)
-				.onChange(async (value) => {
-					this.plugin.settings.pureGallery = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('自适应图片大小')
-			.setDesc('图片按原始宽高比自适应显示（类似 Notion 效果），关闭则固定高度显示')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.adaptiveImageSize)
-				.onChange(async (value) => {
-					this.plugin.settings.adaptiveImageSize = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示图片名称')
-			.setDesc('在图片卡片上显示文件名')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showImageName)
-				.onChange(async (value) => {
-					this.plugin.settings.showImageName = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('图片名称换行')
-			.setDesc('当图片名称过长时允许换行显示')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.imageNameWrap)
-				.onChange(async (value) => {
-					this.plugin.settings.imageNameWrap = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示锁定图标')
-			.setDesc('显示被锁定文件右上角的🔒图标')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showLockIcon)
-				.onChange(async (value) => {
-					this.plugin.settings.showLockIcon = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示图片大小')
-			.setDesc('在图片卡片上显示文件大小')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showImageSize)
-				.onChange(async (value) => {
-					this.plugin.settings.showImageSize = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示图片尺寸')
-			.setDesc('在图片卡片上显示宽度×高度')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showImageDimensions)
-				.onChange(async (value) => {
-					this.plugin.settings.showImageDimensions = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示图片序号')
-			.setDesc('在图片卡片右上角显示序号（例如：1/100, 2/100...），方便快速定位')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showImageIndex)
-				.onChange(async (value) => {
-					this.plugin.settings.showImageIndex = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
 		// 3. 删除设置
 		const deleteSection = { contentEl: this.tabPanels.get('delete')! };
+		
+		// 添加一级标题
+		const deleteTitle = deleteSection.contentEl.createEl('h2', { text: '🗑️ 回收站' });
+		deleteTitle.style.marginTop = '24px';
+		deleteTitle.style.marginBottom = '20px';
+		deleteTitle.style.fontSize = '1.6em';
 
 		// 删除设置说明
 		const deleteIntro = deleteSection.contentEl.createDiv();
@@ -822,6 +968,12 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 // 5. 重命名设置
 		const pathNamingSection = { contentEl: this.tabPanels.get('path-naming')! };
+		
+		// 添加一级标题
+		const pathNamingTitle = pathNamingSection.contentEl.createEl('h2', { text: '🔄 重命名设置' });
+		pathNamingTitle.style.marginTop = '24px';
+		pathNamingTitle.style.marginBottom = '20px';
+		pathNamingTitle.style.fontSize = '1.6em';
 
 		new Setting(pathNamingSection.contentEl)
 			.setName('自动生成文件名')
@@ -833,17 +985,58 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(pathNamingSection.contentEl)
+		const pathNamingDepthSetting = new Setting(pathNamingSection.contentEl)
 			.setName('笔记路径深度')
-			.setDesc('重命名时使用笔记路径的层级数（1-5级，例如：父目录_子目录_笔记_1.png）')
-			.addSlider(slider => slider
+			.setDesc('重命名时使用笔记路径的层级数（1-5级，例如：父目录_子目录_笔记_1.png）');
+		
+		let pathNamingDepthText: any;
+		let pathNamingDepthSlider: any;
+		
+		pathNamingDepthSetting.addSlider(slider => {
+			pathNamingDepthSlider = slider;
+			slider
 				.setLimits(1, 5, 1)
 				.setValue(this.plugin.settings.pathNamingDepth)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.pathNamingDepth = value;
+					if (pathNamingDepthText) {
+						pathNamingDepthText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		pathNamingDepthSetting.addText(text => {
+			pathNamingDepthText = text;
+			text
+				.setValue(this.plugin.settings.pathNamingDepth.toString())
+				.setPlaceholder('1-5')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 5) {
+					this.plugin.settings.pathNamingDepth = numValue;
+					if (pathNamingDepthSlider) {
+						pathNamingDepthSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
 		new Setting(pathNamingSection.contentEl)
 			.setName('重名处理方式')
@@ -885,6 +1078,12 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		// 6. 性能优化
 		const performanceSection = { contentEl: this.tabPanels.get('performance')! };
+		
+		// 添加一级标题
+		const performanceTitle = performanceSection.contentEl.createEl('h2', { text: '⚡ 性能优化' });
+		performanceTitle.style.marginTop = '24px';
+		performanceTitle.style.marginBottom = '20px';
+		performanceTitle.style.fontSize = '1.6em';
 
 		new Setting(performanceSection.contentEl)
 			.setName('启用懒加载')
@@ -896,56 +1095,226 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(performanceSection.contentEl)
+		const lazyLoadDelaySetting = new Setting(performanceSection.contentEl)
 			.setName('懒加载延迟')
-			.setDesc('图片懒加载的延迟时间（毫秒，范围：0-1000）')
-			.addSlider(slider => slider
+			.setDesc('图片懒加载的延迟时间（毫秒，范围：0-1000）');
+		
+		let lazyLoadDelayText: any;
+		let lazyLoadDelaySlider: any;
+		
+		lazyLoadDelaySetting.addSlider(slider => {
+			lazyLoadDelaySlider = slider;
+			slider
 				.setLimits(0, 1000, 50)
 				.setValue(this.plugin.settings.lazyLoadDelay)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.lazyLoadDelay = value;
+					if (lazyLoadDelayText) {
+						lazyLoadDelayText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		lazyLoadDelaySetting.addText(text => {
+			lazyLoadDelayText = text;
+			text
+				.setValue(this.plugin.settings.lazyLoadDelay.toString())
+				.setPlaceholder('0-1000')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 0 && numValue <= 1000) {
+					this.plugin.settings.lazyLoadDelay = numValue;
+					if (lazyLoadDelaySlider) {
+						lazyLoadDelaySlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(performanceSection.contentEl)
+		const maxCacheSizeSetting = new Setting(performanceSection.contentEl)
 			.setName('最大缓存数量')
-			.setDesc('最多缓存多少张图片的数据（范围：50-500）')
-			.addSlider(slider => slider
+			.setDesc('最多缓存多少张图片的数据（范围：50-500）');
+		
+		let maxCacheSizeText: any;
+		let maxCacheSizeSlider: any;
+		
+		maxCacheSizeSetting.addSlider(slider => {
+			maxCacheSizeSlider = slider;
+			slider
 				.setLimits(50, 500, 10)
 				.setValue(this.plugin.settings.maxCacheSize)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.maxCacheSize = value;
+					if (maxCacheSizeText) {
+						maxCacheSizeText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		maxCacheSizeSetting.addText(text => {
+			maxCacheSizeText = text;
+			text
+				.setValue(this.plugin.settings.maxCacheSize.toString())
+				.setPlaceholder('50-500')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 50 && numValue <= 500) {
+					this.plugin.settings.maxCacheSize = numValue;
+					if (maxCacheSizeSlider) {
+						maxCacheSizeSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
 		// 10. 批量操作设置
 		const batchSection = { contentEl: this.tabPanels.get('batch')! };
+		
+		// 添加一级标题
+		const batchTitle = batchSection.contentEl.createEl('h2', { text: '📦 批量操作' });
+		batchTitle.style.marginTop = '24px';
+		batchTitle.style.marginBottom = '20px';
+		batchTitle.style.fontSize = '1.6em';
 
-		new Setting(batchSection.contentEl)
+		const maxBatchOperationsSetting = new Setting(batchSection.contentEl)
 			.setName('批量操作最大数量')
-			.setDesc('一次批量操作最多处理多少个文件（范围：100-5000）')
-			.addSlider(slider => slider
+			.setDesc('一次批量操作最多处理多少个文件（范围：100-5000）');
+		
+		let maxBatchOperationsText: any;
+		let maxBatchOperationsSlider: any;
+		
+		maxBatchOperationsSetting.addSlider(slider => {
+			maxBatchOperationsSlider = slider;
+			slider
 				.setLimits(100, 5000, 100)
 				.setValue(this.plugin.settings.maxBatchOperations)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.maxBatchOperations = value;
+					if (maxBatchOperationsText) {
+						maxBatchOperationsText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		maxBatchOperationsSetting.addText(text => {
+			maxBatchOperationsText = text;
+			text
+				.setValue(this.plugin.settings.maxBatchOperations.toString())
+				.setPlaceholder('100-5000')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 100 && numValue <= 5000) {
+					this.plugin.settings.maxBatchOperations = numValue;
+					if (maxBatchOperationsSlider) {
+						maxBatchOperationsSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(batchSection.contentEl)
+		const batchConfirmThresholdSetting = new Setting(batchSection.contentEl)
 			.setName('批量确认阈值')
-			.setDesc('批量操作超过此数量时需要二次确认（范围：5-100）')
-			.addSlider(slider => slider
+			.setDesc('批量操作超过此数量时需要二次确认（范围：5-100）');
+		
+		let batchConfirmThresholdText: any;
+		let batchConfirmThresholdSlider: any;
+		
+		batchConfirmThresholdSetting.addSlider(slider => {
+			batchConfirmThresholdSlider = slider;
+			slider
 				.setLimits(5, 100, 5)
 				.setValue(this.plugin.settings.batchConfirmThreshold)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.batchConfirmThreshold = value;
+					if (batchConfirmThresholdText) {
+						batchConfirmThresholdText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		batchConfirmThresholdSetting.addText(text => {
+			batchConfirmThresholdText = text;
+			text
+				.setValue(this.plugin.settings.batchConfirmThreshold.toString())
+				.setPlaceholder('5-100')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 5 && numValue <= 100) {
+					this.plugin.settings.batchConfirmThreshold = numValue;
+					if (batchConfirmThresholdSlider) {
+						batchConfirmThresholdSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
 		new Setting(batchSection.contentEl)
 			.setName('显示批量操作进度')
@@ -959,6 +1328,12 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		// 11. 移动端适配
 		const mobileSection = { contentEl: this.tabPanels.get('mobile')! };
+		
+		// 添加一级标题
+		const mobileTitle = mobileSection.contentEl.createEl('h2', { text: '📱 移动端适配' });
+		mobileTitle.style.marginTop = '24px';
+		mobileTitle.style.marginBottom = '20px';
+		mobileTitle.style.fontSize = '1.6em';
 
 		// 移动端适配说明
 		const mobileIntro = mobileSection.contentEl.createDiv();
@@ -978,17 +1353,58 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			</ul>
 		`;
 
-		new Setting(mobileSection.contentEl)
+		const mobileImagesPerRowSetting = new Setting(mobileSection.contentEl)
 			.setName('移动端每行图片数量')
-			.setDesc('自定义移动端显示的图片列数（1-5），留空则根据屏幕宽度自动调整')
-			.addSlider(slider => slider
+			.setDesc('自定义移动端显示的图片列数（1-5），留空则根据屏幕宽度自动调整');
+		
+		let mobileImagesPerRowText: any;
+		let mobileImagesPerRowSlider: any;
+		
+		mobileImagesPerRowSetting.addSlider(slider => {
+			mobileImagesPerRowSlider = slider;
+			slider
 				.setLimits(1, 5, 1)
 				.setValue(this.plugin.settings.mobileImagesPerRow || 3)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.mobileImagesPerRow = value;
+					if (mobileImagesPerRowText) {
+						mobileImagesPerRowText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		mobileImagesPerRowSetting.addText(text => {
+			mobileImagesPerRowText = text;
+			text
+				.setValue((this.plugin.settings.mobileImagesPerRow || 3).toString())
+				.setPlaceholder('1-5')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 5) {
+					this.plugin.settings.mobileImagesPerRow = numValue;
+					if (mobileImagesPerRowSlider) {
+						mobileImagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
 		new Setting(mobileSection.contentEl)
 			.setName('启用紧凑工具栏')
@@ -1010,44 +1426,173 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(mobileSection.contentEl)
+		const tabletImagesPerRowSetting = new Setting(mobileSection.contentEl)
 			.setName('平板端每行图片数量')
-			.setDesc('平板设备（768-1199px）上每行显示的图片数量')
-			.addSlider(slider => slider
+			.setDesc('平板设备（768-1199px）上每行显示的图片数量');
+		
+		let tabletImagesPerRowText: any;
+		let tabletImagesPerRowSlider: any;
+		
+		tabletImagesPerRowSetting.addSlider(slider => {
+			tabletImagesPerRowSlider = slider;
+			slider
 				.setLimits(1, 5, 1)
 				.setValue(this.plugin.settings.tabletImagesPerRow || 3)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.tabletImagesPerRow = value;
+					if (tabletImagesPerRowText) {
+						tabletImagesPerRowText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		tabletImagesPerRowSetting.addText(text => {
+			tabletImagesPerRowText = text;
+			text
+				.setValue((this.plugin.settings.tabletImagesPerRow || 3).toString())
+				.setPlaceholder('1-5')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 5) {
+					this.plugin.settings.tabletImagesPerRow = numValue;
+					if (tabletImagesPerRowSlider) {
+						tabletImagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(mobileSection.contentEl)
+		const phoneLandscapeImagesPerRowSetting = new Setting(mobileSection.contentEl)
 			.setName('手机横屏每行图片数量')
-			.setDesc('手机横屏（480-767px）时每行显示的图片数量')
-			.addSlider(slider => slider
+			.setDesc('手机横屏（480-767px）时每行显示的图片数量');
+		
+		let phoneLandscapeImagesPerRowText: any;
+		let phoneLandscapeImagesPerRowSlider: any;
+		
+		phoneLandscapeImagesPerRowSetting.addSlider(slider => {
+			phoneLandscapeImagesPerRowSlider = slider;
+			slider
 				.setLimits(1, 5, 1)
 				.setValue(this.plugin.settings.phoneLandscapeImagesPerRow || 2)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.phoneLandscapeImagesPerRow = value;
+					if (phoneLandscapeImagesPerRowText) {
+						phoneLandscapeImagesPerRowText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		phoneLandscapeImagesPerRowSetting.addText(text => {
+			phoneLandscapeImagesPerRowText = text;
+			text
+				.setValue((this.plugin.settings.phoneLandscapeImagesPerRow || 2).toString())
+				.setPlaceholder('1-5')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 5) {
+					this.plugin.settings.phoneLandscapeImagesPerRow = numValue;
+					if (phoneLandscapeImagesPerRowSlider) {
+						phoneLandscapeImagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(mobileSection.contentEl)
+		const phonePortraitImagesPerRowSetting = new Setting(mobileSection.contentEl)
 			.setName('手机竖屏每行图片数量')
-			.setDesc('手机竖屏（< 480px）时每行显示的图片数量')
-			.addSlider(slider => slider
+			.setDesc('手机竖屏（< 480px）时每行显示的图片数量');
+		
+		let phonePortraitImagesPerRowText: any;
+		let phonePortraitImagesPerRowSlider: any;
+		
+		phonePortraitImagesPerRowSetting.addSlider(slider => {
+			phonePortraitImagesPerRowSlider = slider;
+			slider
 				.setLimits(1, 2, 1)
 				.setValue(this.plugin.settings.phonePortraitImagesPerRow || 1)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.phonePortraitImagesPerRow = value;
+					if (phonePortraitImagesPerRowText) {
+						phonePortraitImagesPerRowText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		phonePortraitImagesPerRowSetting.addText(text => {
+			phonePortraitImagesPerRowText = text;
+			text
+				.setValue((this.plugin.settings.phonePortraitImagesPerRow || 1).toString())
+				.setPlaceholder('1-2')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 2) {
+					this.plugin.settings.phonePortraitImagesPerRow = numValue;
+					if (phonePortraitImagesPerRowSlider) {
+						phonePortraitImagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
 		// 12. 扩展
 		const extensionSection = { contentEl: this.tabPanels.get('extension')! };
+		
+		// 添加一级标题
+		const extensionTitle = extensionSection.contentEl.createEl('h2', { text: '🧩 扩展功能' });
+		extensionTitle.style.marginTop = '24px';
+		extensionTitle.style.marginBottom = '20px';
+		extensionTitle.style.fontSize = '1.6em';
 
 		// 12.1 库统计
 		new Setting(extensionSection.contentEl)
@@ -1124,6 +1669,12 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		// 10. 锁定文件
 		const ignoredFilesSection = { contentEl: this.tabPanels.get('ignored-files')! };
+		
+		// 添加一级标题
+		const ignoredFilesTitle = ignoredFilesSection.contentEl.createEl('h2', { text: '🔒 锁定文件' });
+		ignoredFilesTitle.style.marginTop = '24px';
+		ignoredFilesTitle.style.marginBottom = '20px';
+		ignoredFilesTitle.style.fontSize = '1.6em';
 
 		// 锁定文件说明
 		const ignoredFilesIntro = ignoredFilesSection.contentEl.createDiv();
@@ -1642,6 +2193,12 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 	// 12. 图床上传设置
 	const uploadSection = { contentEl: this.tabPanels.get('upload')! };
+	
+	// 添加一级标题
+	const uploadTitle = uploadSection.contentEl.createEl('h2', { text: '☁️ 网络图片' });
+	uploadTitle.style.marginTop = '24px';
+	uploadTitle.style.marginBottom = '20px';
+	uploadTitle.style.fontSize = '1.6em';
 
 	// 网图设置说明
 	const remoteImageIntro = uploadSection.contentEl.createDiv();
@@ -1679,17 +2236,58 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			}));
 
 	// 云端图片加载超时
-	const timeoutSetting = new Setting(uploadSection.contentEl)
-		.setName('云端图片加载超时')
-		.setDesc('云端图片加载的超时时间（毫秒，范围：3000-30000）')
-		.addSlider(slider => slider
-			.setLimits(3000, 30000, 1000)
-			.setValue(this.plugin.settings.remoteImageTimeout ?? 10000)
-			.setDynamicTooltip()
-			.onChange(async (value) => {
-				this.plugin.settings.remoteImageTimeout = value;
-				await this.plugin.saveSettings();
-			}));
+		const timeoutSetting = new Setting(uploadSection.contentEl)
+			.setName('云端图片加载超时')
+			.setDesc('云端图片加载的超时时间（毫秒，范围：3000-30000）');
+		
+		let remoteImageTimeoutText: any;
+		let remoteImageTimeoutSlider: any;
+		
+		timeoutSetting.addSlider(slider => {
+			remoteImageTimeoutSlider = slider;
+			slider
+				.setLimits(3000, 30000, 1000)
+				.setValue(this.plugin.settings.remoteImageTimeout ?? 10000)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.remoteImageTimeout = value;
+					if (remoteImageTimeoutText) {
+						remoteImageTimeoutText.setValue(value.toString());
+					}
+					await this.plugin.saveSettings();
+				});
+		});
+		
+		timeoutSetting.addText(text => {
+			remoteImageTimeoutText = text;
+			text
+				.setValue((this.plugin.settings.remoteImageTimeout ?? 10000).toString())
+				.setPlaceholder('3000-30000')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 3000 && numValue <= 30000) {
+					this.plugin.settings.remoteImageTimeout = numValue;
+					if (remoteImageTimeoutSlider) {
+						remoteImageTimeoutSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
 	// 自动重试代理加载
 	const retrySetting = new Setting(uploadSection.contentEl)
@@ -1741,8 +2339,8 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 图床设置分割线
 	const uploadDivider = uploadSection.contentEl.createEl('div');
 	uploadDivider.style.cssText = 'margin: 24px 0 12px 0; padding-top: 12px; border-top: 1px solid var(--background-modifier-border);';
-	const uploadTitle = uploadDivider.createEl('h4', { text: '☁️ 图床上传配置' });
-	uploadTitle.style.cssText = 'margin: 0 0 8px 0; font-size: 0.95em; font-weight: 600; color: var(--text-normal);';
+	const uploadSubTitle = uploadDivider.createEl('h4', { text: '☁️ 图床上传配置' });
+	uploadSubTitle.style.cssText = 'margin: 0 0 8px 0; font-size: 0.95em; font-weight: 600; color: var(--text-normal);';
 
 	new Setting(uploadSection.contentEl)
 			.setName('图床类型')
@@ -1880,6 +2478,12 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		// 13. 操作日志
 		const logsSection = { contentEl: this.tabPanels.get('logs')! };
+		
+		// 添加一级标题
+		const logsTitle = logsSection.contentEl.createEl('h2', { text: '📋 操作日志' });
+		logsTitle.style.marginTop = '24px';
+		logsTitle.style.marginBottom = '20px';
+		logsTitle.style.fontSize = '1.6em';
 
 		// 说明文字
 		const logIntro = logsSection.contentEl.createDiv();
@@ -1974,6 +2578,12 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		// 12. 键盘快捷键（放在最后，高级设置）
 		const shortcutsSection = { contentEl: this.tabPanels.get('shortcuts')! };
+		
+		// 添加一级标题
+		const shortcutsMainTitle = shortcutsSection.contentEl.createEl('h2', { text: '⌨️ 键盘快捷键' });
+		shortcutsMainTitle.style.marginTop = '24px';
+		shortcutsMainTitle.style.marginBottom = '20px';
+		shortcutsMainTitle.style.fontSize = '1.6em';
 
 		// 说明文字
 		const shortcutsIntro = shortcutsSection.contentEl.createDiv();
@@ -2150,9 +2760,10 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		this.containerEl.querySelectorAll('.settings-tab-btn').forEach((btn) => {
 			btn.classList.toggle('is-active', (btn as HTMLElement).dataset.tabId === id);
 		});
-		this.tabPanels.forEach((panel, pid) => {
+		// 正确切换标签页显示状态
+		for (const [pid, panel] of this.tabPanels) {
 			panel.style.display = pid === id ? 'block' : 'none';
-		});
+		}
 	}
 
 	/**

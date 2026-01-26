@@ -1,19 +1,17 @@
 /**
  * 空链接检测模态框模块
  * 
- * 提供检测和修复笔记中空链接（指向不存在图片的链接）的功能。
- * 支持从操作日志中恢复链接。
+ * 提供检测和显示笔记中空链接（指向不存在图片的链接）的功能。
  * 
  * 功能特性：
  * - 点击跳转：点击空链接跳转到笔记并选中链接
- * - 智能恢复：从操作日志中查找重命名/移动记录，自动修复链接
+ * - 搜索过滤：支持搜索文件路径、链接文本
+ * - 分类显示：区分网络链接错误和本地链接错误
  */
 
 import { App, Modal, Notice, TFile } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { OperationType, LogEntry } from '../utils/logger';
-import { parseWikiLink, buildWikiLink, WikiLinkParts } from '../utils/reference-manager';
-import { makeModalResizable } from '../utils/resizable-modal';
 import { makeModalResizable } from '../utils/resizable-modal';
 
 /**
@@ -56,9 +54,8 @@ interface BrokenLinkInfo {
  * 
  * 功能：
  * - 显示笔记中指向不存在图片的链接
- * - 从操作日志中查找可能的恢复信息
- * - 支持自动修复链接（基于重命名/移动记录）
- * - 支持手动删除空链接
+ * - 支持搜索和过滤链接
+ * - 点击链接跳转到对应笔记
  */
 export class BrokenLinksModal extends Modal {
 	/** 空链接列表（可选，如果提供则直接显示，否则需要检测） */
@@ -73,6 +70,12 @@ export class BrokenLinksModal extends Modal {
 	private listContainer?: HTMLElement;
 	/** 是否正在检测中 */
 	private isDetecting: boolean = false;
+	/** 当前搜索查询 */
+	private searchQuery: string = '';
+	/** 当前激活的过滤器ID */
+	private activeFilterId: string | null = null;
+	/** DOM元素缓存 */
+	private cachedElements: Map<string, HTMLElement | null> = new Map();
 
 	constructor(
 		app: App, 
@@ -256,10 +259,53 @@ export class BrokenLinksModal extends Modal {
 			minHeight: 500,
 		});
 
-		// 标题
-		const title = contentEl.createEl('h2', { text: '🈳 空链接的图片链接' });
-		title.style.flexShrink = '0';
-		title.style.marginBottom = '16px';
+		// 标题和工具栏
+		const headerContainer = contentEl.createDiv();
+		headerContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; gap: 12px;';
+		
+		const title = headerContainer.createEl('h2', { text: '🈳 空链接的图片链接' });
+		title.style.margin = '0';
+		title.style.flex = '1';
+		
+		// 工具栏按钮组
+		const toolbar = headerContainer.createDiv();
+		toolbar.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+		
+		// 刷新按钮
+		const refreshBtn = toolbar.createEl('button', { text: '🔄 刷新' });
+		refreshBtn.style.cssText = `
+			padding: 6px 12px;
+			border-radius: 4px;
+			border: 1px solid var(--background-modifier-border);
+			background: var(--background-secondary);
+			color: var(--text-normal);
+			cursor: pointer;
+			font-size: 0.85em;
+			transition: all 0.2s ease;
+		`;
+		refreshBtn.addEventListener('click', async () => {
+			if (this.isDetecting) {
+				new Notice('正在检测中，请稍候...');
+				return;
+			}
+			// 清空缓存和列表
+			this.brokenLinks = [];
+			this.enhancedLinks = [];
+			this.searchQuery = '';
+			// 重新检测
+			const contentArea = contentEl.querySelector('div[style*="flex-direction: column"]') as HTMLElement;
+			if (contentArea) {
+				contentArea.empty();
+				await this.detectBrokenLinks(contentArea);
+			}
+		});
+		refreshBtn.addEventListener('mouseenter', () => {
+			refreshBtn.style.background = 'var(--background-modifier-hover)';
+		});
+		refreshBtn.addEventListener('mouseleave', () => {
+			refreshBtn.style.background = 'var(--background-secondary)';
+		});
+		
 
 		// 创建内容区域（包含统计信息和列表）
 		const contentArea = contentEl.createDiv();
@@ -267,6 +313,42 @@ export class BrokenLinksModal extends Modal {
 		contentArea.style.display = 'flex';
 		contentArea.style.flexDirection = 'column';
 		contentArea.style.overflow = 'hidden';
+		
+		// 添加搜索框
+		const searchContainer = contentArea.createDiv();
+		searchContainer.style.cssText = 'margin-bottom: 12px; flex-shrink: 0;';
+		
+		const searchInput = searchContainer.createEl('input', {
+			type: 'text',
+			placeholder: '🔍 搜索文件路径、链接文本...',
+			cls: 'broken-links-search-input'
+		});
+		searchInput.style.cssText = `
+			width: 100%;
+			padding: 8px 12px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 6px;
+			background: var(--background-secondary);
+			color: var(--text-normal);
+			font-size: 0.9em;
+			box-sizing: border-box;
+		`;
+		
+		// 搜索防抖
+		let searchTimeout: NodeJS.Timeout | null = null;
+		searchInput.addEventListener('input', (e) => {
+			const query = (e.target as HTMLInputElement).value.trim();
+			this.searchQuery = query;
+			
+			if (searchTimeout) {
+				clearTimeout(searchTimeout);
+			}
+			
+			searchTimeout = setTimeout(() => {
+				this.filterAndRenderLinks();
+			}, 300);
+		});
+		
 
 		// 先加载并显示缓存的空链接
 		const cachedLinks = this.plugin?.data.brokenLinks || [];
@@ -363,8 +445,6 @@ export class BrokenLinksModal extends Modal {
 		// 按类型分组新链接
 		const remoteErrors: BrokenLinkInfo[] = [];
 		const localErrors: BrokenLinkInfo[] = [];
-		const recoverableLinks: BrokenLinkInfo[] = [];
-		const nonRecoverableLinks: BrokenLinkInfo[] = [];
 
 		for (const link of newEnhancedLinks) {
 			if (link.isRemoteError) {
@@ -372,19 +452,12 @@ export class BrokenLinksModal extends Modal {
 			} else {
 				localErrors.push(link);
 			}
-			
-			if (link.recoveryInfo) {
-				recoverableLinks.push(link);
-			} else {
-				nonRecoverableLinks.push(link);
-			}
 		}
 
 		// 更新按钮计数
 		const filterGroups = [
 			{ id: 'remote', title: '🌐 网络链接错误', links: remoteErrors },
-			{ id: 'local', title: '📁 本地链接错误', links: localErrors },
-			{ id: 'nonRecoverable', title: '❌ 不可恢复的链接', links: nonRecoverableLinks }
+			{ id: 'local', title: '📁 本地链接错误', links: localErrors }
 		];
 
 		for (const group of filterGroups) {
@@ -395,9 +468,6 @@ export class BrokenLinksModal extends Modal {
 			if (button) {
 				const currentCount = parseInt(button.textContent?.match(/\((\d+)\)/)?.[1] || '0');
 				button.textContent = `${group.title} (${currentCount + group.links.length})`;
-			} else {
-				// 如果按钮不存在，需要创建（这种情况应该很少，因为按钮应该在初始渲染时创建）
-				// 这里暂时跳过，因为需要重新渲染整个按钮组
 			}
 		}
 
@@ -417,83 +487,6 @@ export class BrokenLinksModal extends Modal {
 				for (const link of localErrors) {
 					this.renderLinkItem(contentContainer, link);
 				}
-			} else if (activeFilterId === 'nonRecoverable' && nonRecoverableLinks.length > 0) {
-				for (const link of nonRecoverableLinks) {
-					this.renderLinkItem(contentContainer, link);
-				}
-			}
-		}
-
-		// 处理可恢复的链接（单独显示，不参与切换）
-		if (recoverableLinks.length > 0) {
-			let recoverableContainer = this.listContainer.querySelector('.broken-links-recoverable-group') as HTMLElement;
-			if (!recoverableContainer) {
-				// 如果可恢复链接容器不存在，创建它
-				recoverableContainer = this.listContainer.createDiv('broken-links-recoverable-group');
-				recoverableContainer.style.cssText = `
-					margin-top: 24px;
-					padding-top: 16px;
-					border-top: 2px solid var(--background-modifier-border);
-				`;
-
-				const recoverableHeader = recoverableContainer.createDiv('broken-links-group-header');
-				recoverableHeader.style.cssText = `
-					display: flex;
-					align-items: center;
-					justify-content: space-between;
-					padding: 8px 12px;
-					background: var(--background-secondary);
-					border-radius: 6px;
-					margin-bottom: 8px;
-					cursor: pointer;
-					transition: all 0.2s ease;
-				`;
-
-				const headerLeft = recoverableHeader.createDiv();
-				headerLeft.style.cssText = 'display: flex; align-items: center; gap: 8px; flex: 1;';
-
-				const groupTitle = headerLeft.createSpan();
-				groupTitle.style.cssText = 'font-weight: 600; font-size: 0.95em; color: var(--text-normal);';
-				groupTitle.textContent = `✅ 可恢复的链接 (${recoverableLinks.length})`;
-
-				const collapseIcon = headerLeft.createSpan();
-				collapseIcon.textContent = '▼';
-				collapseIcon.style.cssText = 'font-size: 0.8em; color: var(--text-muted); transition: transform 0.2s ease;';
-
-				const groupContent = recoverableContainer.createDiv('broken-links-group-content');
-				groupContent.style.cssText = 'display: block;';
-
-				let isExpanded = true;
-				recoverableHeader.addEventListener('click', () => {
-					isExpanded = !isExpanded;
-					groupContent.style.display = isExpanded ? 'block' : 'none';
-					collapseIcon.textContent = isExpanded ? '▼' : '▶';
-				});
-
-				recoverableHeader.addEventListener('mouseenter', () => {
-					recoverableHeader.style.backgroundColor = 'var(--background-modifier-hover)';
-				});
-				recoverableHeader.addEventListener('mouseleave', () => {
-					recoverableHeader.style.backgroundColor = 'var(--background-secondary)';
-				});
-
-				for (const link of recoverableLinks) {
-					this.renderLinkItem(groupContent, link);
-				}
-			} else {
-				// 更新计数并添加新链接
-				const groupTitle = recoverableContainer.querySelector('.broken-links-group-header span') as HTMLElement;
-				if (groupTitle) {
-					const currentCount = parseInt(groupTitle.textContent?.match(/\((\d+)\)/)?.[1] || '0');
-					groupTitle.textContent = `✅ 可恢复的链接 (${currentCount + recoverableLinks.length})`;
-				}
-
-				const groupContent = recoverableContainer.querySelector('.broken-links-group-content') as HTMLElement;
-				if (groupContent) {
-					for (const link of recoverableLinks) {
-						this.renderLinkItem(groupContent, link);
-					}
-				}
 			}
 		}
 	}
@@ -510,39 +503,8 @@ export class BrokenLinksModal extends Modal {
 		const statsEl = this.listContainer.parentElement?.querySelector('.broken-links-stats') as HTMLElement;
 		if (!statsEl) return;
 
-		const recoverableCount = this.enhancedLinks.filter(l => l.recoveryInfo).length;
-		const countText = recoverableCount > 0 
-			? `共找到 ${this.enhancedLinks.length} 个空链接的图片，其中 ${recoverableCount} 个可恢复`
-			: `共找到 ${this.enhancedLinks.length} 个空链接的图片`;
+		const countText = `共找到 ${this.enhancedLinks.length} 个空链接的图片`;
 		statsEl.textContent = countText;
-
-		// 更新一键恢复按钮
-		const batchRecoverBtn = this.listContainer.parentElement?.querySelector('button.mod-cta') as HTMLElement;
-		if (batchRecoverBtn && recoverableCount > 0) {
-			batchRecoverBtn.textContent = `🔄 一键恢复全部 (${recoverableCount})`;
-		} else if (recoverableCount === 0 && batchRecoverBtn) {
-			batchRecoverBtn.remove();
-		} else if (recoverableCount > 0 && !batchRecoverBtn) {
-			// 创建一键恢复按钮
-			const btn = this.listContainer.parentElement?.createEl('button', { 
-				text: `🔄 一键恢复全部 (${recoverableCount})`,
-				cls: 'mod-cta'
-			});
-			if (btn) {
-				btn.style.cssText = `
-					margin-bottom: 16px;
-					padding: 8px 16px;
-					border-radius: 6px;
-					cursor: pointer;
-					flex-shrink: 0;
-				`;
-				btn.addEventListener('click', async () => {
-					await this.recoverAllLinks();
-				});
-				// 插入到统计信息后面
-				statsEl.insertAdjacentElement('afterend', btn);
-			}
-		}
 	}
 
 	/**
@@ -562,13 +524,8 @@ export class BrokenLinksModal extends Modal {
 			return;
 		}
 
-		// 统计可恢复的数量
-		const recoverableCount = this.enhancedLinks.filter(l => l.recoveryInfo).length;
-
-		// 显示总数和可恢复数量（添加 class 以便后续更新）
-		const countText = recoverableCount > 0 
-			? `共找到 ${this.enhancedLinks.length} 个空链接的图片，其中 ${recoverableCount} 个可恢复`
-			: `共找到 ${this.enhancedLinks.length} 个空链接的图片`;
+		// 显示总数（添加 class 以便后续更新）
+		const countText = `共找到 ${this.enhancedLinks.length} 个空链接的图片`;
 		
 		// 查找或创建统计信息元素（放在内容区域顶部）
 		let countEl = containerEl.querySelector('.broken-links-stats') as HTMLElement;
@@ -582,31 +539,6 @@ export class BrokenLinksModal extends Modal {
 			});
 		} else {
 			countEl.textContent = countText;
-		}
-
-		// 如果有可恢复的链接，显示一键恢复按钮
-		let batchRecoverBtn = containerEl.querySelector('button.mod-cta') as HTMLElement;
-		if (recoverableCount > 0) {
-			if (!batchRecoverBtn) {
-				batchRecoverBtn = containerEl.createEl('button', { 
-					text: `🔄 一键恢复全部 (${recoverableCount})`,
-					cls: 'mod-cta'
-				});
-				batchRecoverBtn.style.cssText = `
-					margin-bottom: 16px;
-					padding: 8px 16px;
-					border-radius: 6px;
-					cursor: pointer;
-					flex-shrink: 0;
-				`;
-				batchRecoverBtn.addEventListener('click', async () => {
-					await this.recoverAllLinks();
-				});
-			} else {
-				batchRecoverBtn.textContent = `🔄 一键恢复全部 (${recoverableCount})`;
-			}
-		} else if (batchRecoverBtn) {
-			batchRecoverBtn.remove();
 		}
 
 		// 创建可滚动的内容容器（如果不存在）
@@ -638,8 +570,6 @@ export class BrokenLinksModal extends Modal {
 		// 按类型分组链接
 		const remoteErrors: BrokenLinkInfo[] = [];
 		const localErrors: BrokenLinkInfo[] = [];
-		const recoverableLinks: BrokenLinkInfo[] = [];
-		const nonRecoverableLinks: BrokenLinkInfo[] = [];
 
 		for (const link of this.enhancedLinks) {
 			if (link.isRemoteError) {
@@ -647,19 +577,12 @@ export class BrokenLinksModal extends Modal {
 			} else {
 				localErrors.push(link);
 			}
-			
-			if (link.recoveryInfo) {
-				recoverableLinks.push(link);
-			} else {
-				nonRecoverableLinks.push(link);
-			}
 		}
 
-		// 定义分类组（只包含需要显示为按钮的3个分类）
+		// 定义分类组（只包含网络和本地两类）
 		const filterGroups = [
 			{ id: 'remote', title: '🌐 网络链接错误', links: remoteErrors, icon: '🌐' },
-			{ id: 'local', title: '📁 本地链接错误', links: localErrors, icon: '📁' },
-			{ id: 'nonRecoverable', title: '❌ 不可恢复的链接', links: nonRecoverableLinks, icon: '❌' }
+			{ id: 'local', title: '📁 本地链接错误', links: localErrors, icon: '📁' }
 		];
 
 		// 创建按钮组容器
@@ -683,19 +606,10 @@ export class BrokenLinksModal extends Modal {
 			box-sizing: border-box;
 		`;
 
-		// 当前选中的分类ID
-		let activeFilterId: string | null = null;
+		// 当前选中的分类ID（使用实例变量）
+		this.activeFilterId = null;
 
-		// 渲染分类内容
-		const renderContent = (filterId: string) => {
-			contentContainer.empty();
-			const group = filterGroups.find(g => g.id === filterId);
-			if (!group || group.links.length === 0) return;
-
-			for (const link of group.links) {
-				this.renderLinkItem(contentContainer, link);
-			}
-		};
+		// 渲染分类内容（已改为在filterAndRenderLinks中处理）
 
 		// 创建按钮并绑定点击事件
 		for (const group of filterGroups) {
@@ -722,7 +636,7 @@ export class BrokenLinksModal extends Modal {
 			// 点击切换
 			button.addEventListener('click', () => {
 				// 如果点击的是当前激活的按钮，不做任何操作
-				if (activeFilterId === group.id) return;
+				if (this.activeFilterId === group.id) return;
 
 				// 更新所有按钮状态
 				const allButtons = buttonContainer.querySelectorAll('.broken-links-filter-btn');
@@ -738,20 +652,20 @@ export class BrokenLinksModal extends Modal {
 				button.style.color = 'var(--text-on-accent)';
 
 				// 更新激活状态
-				activeFilterId = group.id;
+				this.activeFilterId = group.id;
 
-				// 渲染内容
-				renderContent(group.id);
+				// 渲染内容（应用搜索和排序）
+				this.filterAndRenderLinks();
 			});
 
 			// 悬停效果
 			button.addEventListener('mouseenter', () => {
-				if (activeFilterId !== group.id) {
+				if (this.activeFilterId !== group.id) {
 					button.style.background = 'var(--background-modifier-hover)';
 				}
 			});
 			button.addEventListener('mouseleave', () => {
-				if (activeFilterId !== group.id) {
+				if (this.activeFilterId !== group.id) {
 					button.style.background = 'var(--background-secondary)';
 				}
 			});
@@ -762,64 +676,14 @@ export class BrokenLinksModal extends Modal {
 		if (firstGroup) {
 			const firstButton = buttonContainer.querySelector(`[data-filter-id="${firstGroup.id}"]`) as HTMLElement;
 			if (firstButton) {
-				firstButton.click();
+				this.activeFilterId = firstGroup.id;
+				firstButton.style.background = 'var(--interactive-accent)';
+				firstButton.style.borderColor = 'var(--interactive-accent)';
+				firstButton.style.color = 'var(--text-on-accent)';
+				this.filterAndRenderLinks();
 			}
 		}
 
-		// 如果有可恢复的链接，单独显示（不参与切换）
-		if (recoverableLinks.length > 0) {
-			const recoverableContainer = listContainer.createDiv('broken-links-recoverable-group');
-			recoverableContainer.style.cssText = `
-				margin-top: 24px;
-				padding-top: 16px;
-				border-top: 2px solid var(--background-modifier-border);
-			`;
-
-			const recoverableHeader = recoverableContainer.createDiv('broken-links-group-header');
-			recoverableHeader.style.cssText = `
-				display: flex;
-				align-items: center;
-				justify-content: space-between;
-				padding: 8px 12px;
-				background: var(--background-secondary);
-				border-radius: 6px;
-				margin-bottom: 8px;
-				cursor: pointer;
-				transition: all 0.2s ease;
-			`;
-
-			const headerLeft = recoverableHeader.createDiv();
-			headerLeft.style.cssText = 'display: flex; align-items: center; gap: 8px; flex: 1;';
-
-			const groupTitle = headerLeft.createSpan();
-			groupTitle.style.cssText = 'font-weight: 600; font-size: 0.95em; color: var(--text-normal);';
-			groupTitle.textContent = `✅ 可恢复的链接 (${recoverableLinks.length})`;
-
-			const collapseIcon = headerLeft.createSpan();
-			collapseIcon.textContent = '▼';
-			collapseIcon.style.cssText = 'font-size: 0.8em; color: var(--text-muted); transition: transform 0.2s ease;';
-
-			const groupContent = recoverableContainer.createDiv('broken-links-group-content');
-			groupContent.style.cssText = 'display: block;';
-
-			let isExpanded = true;
-			recoverableHeader.addEventListener('click', () => {
-				isExpanded = !isExpanded;
-				groupContent.style.display = isExpanded ? 'block' : 'none';
-				collapseIcon.textContent = isExpanded ? '▼' : '▶';
-			});
-
-			recoverableHeader.addEventListener('mouseenter', () => {
-				recoverableHeader.style.backgroundColor = 'var(--background-modifier-hover)';
-			});
-			recoverableHeader.addEventListener('mouseleave', () => {
-				recoverableHeader.style.backgroundColor = 'var(--background-secondary)';
-			});
-
-			for (const link of recoverableLinks) {
-				this.renderLinkItem(groupContent, link);
-			}
-		}
 	}
 
 	/**
@@ -827,6 +691,7 @@ export class BrokenLinksModal extends Modal {
 	 */
 	private renderLinkItem(containerEl: HTMLElement, link: BrokenLinkInfo) {
 		const linkItem = containerEl.createDiv('broken-link-item');
+		linkItem.setAttribute('data-link-key', `${link.filePath}:${link.lineNumber}:${link.linkText}`);
 		linkItem.style.padding = '12px';
 		linkItem.style.marginBottom = '8px';
 		linkItem.style.backgroundColor = 'var(--background-secondary)';
@@ -898,64 +763,6 @@ export class BrokenLinksModal extends Modal {
 			}
 		}
 
-		// 如果有恢复信息，显示恢复按钮
-		if (link.recoveryInfo) {
-			const recoverySection = linkItem.createDiv();
-			recoverySection.style.cssText = `
-				margin-top: 8px;
-				padding-top: 8px;
-				border-top: 1px dashed var(--background-modifier-border);
-			`;
-
-			// 恢复信息提示
-			const recoveryInfo = recoverySection.createDiv();
-			recoveryInfo.style.cssText = `
-				font-size: 0.85em;
-				color: var(--text-success);
-				margin-bottom: 6px;
-			`;
-			
-			// 根据恢复类型显示不同的提示
-			const { recoveryType, oldName, newName, oldPath, newPath, logTimestamp } = link.recoveryInfo;
-			const timeStr = new Date(logTimestamp).toLocaleString('zh-CN');
-			let recoveryText = '';
-			
-			if (recoveryType === 'rename') {
-				recoveryText = `✅ 可恢复 (重命名): <code>${oldName}</code> → <code>${newName}</code>`;
-			} else if (recoveryType === 'move') {
-				recoveryText = `✅ 可恢复 (移动): <code>${oldPath}</code> → <code>${newPath}</code>`;
-			} else {
-				recoveryText = `✅ 可恢复 (重命名+移动): <code>${oldName}</code> → <code>${newName}</code>`;
-			}
-			recoveryText += `<br><span style="color: var(--text-muted); font-size: 0.8em;">操作时间: ${timeStr}</span>`;
-			recoveryInfo.innerHTML = recoveryText;
-
-			// 按钮区域
-			const btnSection = recoverySection.createDiv();
-			btnSection.style.cssText = `
-				display: flex;
-				align-items: center;
-				justify-content: flex-end;
-				gap: 8px;
-			`;
-
-			// 恢复按钮
-			const recoverBtn = btnSection.createEl('button', { text: '🔄 恢复链接' });
-			recoverBtn.style.cssText = `
-				padding: 4px 12px;
-				border-radius: 4px;
-				font-size: 0.85em;
-				cursor: pointer;
-				background-color: var(--interactive-accent);
-				color: var(--text-on-accent);
-				border: none;
-				flex-shrink: 0;
-			`;
-			recoverBtn.addEventListener('click', async (e) => {
-				e.stopPropagation();
-				await this.recoverLink(link, linkItem);
-			});
-		}
 
 		// 点击跳转到对应笔记
 		mainContent.addEventListener('click', async () => {
@@ -1038,304 +845,6 @@ export class BrokenLinksModal extends Modal {
 		});
 	}
 
-	/**
-	 * 恢复单个链接
-	 */
-	private async recoverLink(link: BrokenLinkInfo, linkItem: HTMLElement): Promise<boolean> {
-		if (!link.recoveryInfo) return false;
-
-		try {
-			const file = this.app.vault.getAbstractFileByPath(link.filePath);
-			if (!file || !(file instanceof TFile)) {
-				new Notice('找不到笔记文件');
-				return false;
-			}
-
-			const content = await this.app.vault.read(file);
-			const lines = content.split('\n');
-			const lineIndex = link.lineNumber - 1;
-
-			if (lineIndex < 0 || lineIndex >= lines.length) {
-				new Notice('行号无效');
-				return false;
-			}
-
-			const oldLine = lines[lineIndex];
-			let newLine = oldLine;
-
-			// 根据链接格式进行替换
-			const { oldName, newName, oldPath, newPath, recoveryType } = link.recoveryInfo;
-			let newLinkText = '';
-
-			// Wiki 格式
-			if (link.linkText.includes('[[')) {
-				const parsed = parseWikiLink(link.linkText);
-				const newParts: WikiLinkParts = {
-					path: newPath,
-					displayText: parsed.displayText,
-					width: parsed.width,
-					height: parsed.height
-				};
-				const hasExclam = link.linkText.startsWith('!');
-				newLinkText = buildWikiLink(newParts, hasExclam);
-				newLine = oldLine.replace(link.linkText, newLinkText);
-			}
-			// Markdown 格式
-			else if (link.linkText.match(/!\[[^\]]*\]\([^)]+\)/)) {
-				const altMatch = link.linkText.match(/!\[([^\]]*)\]/);
-				const alt = altMatch ? altMatch[1] : '';
-				newLinkText = `![${alt}](${newPath})`;
-				newLine = oldLine.replace(link.linkText, newLinkText);
-			}
-			// HTML 格式
-			else if (link.linkText.includes('<img')) {
-				newLinkText = link.linkText.replace(
-					new RegExp(`src\\s*=\\s*["'][^"']*["']`),
-					`src="${newPath}"`
-				);
-				newLine = oldLine.replace(link.linkText, newLinkText);
-			}
-
-			if (newLine !== oldLine) {
-				lines[lineIndex] = newLine;
-				await this.app.vault.modify(file, lines.join('\n'));
-
-				// 构建详细的日志消息
-				let logMessage = `恢复链接: ${newName}`;
-				
-				// 恢复类型说明
-				if (recoveryType === 'rename') {
-					logMessage += `\n恢复原因: 文件重命名 (${oldName} → ${newName})`;
-				} else if (recoveryType === 'move') {
-					logMessage += `\n恢复原因: 文件移动 (${oldPath} → ${newPath})`;
-				} else {
-					logMessage += `\n恢复原因: 文件重命名+移动 (${oldName} → ${newName})`;
-				}
-				
-				logMessage += `\n更新链接: ${link.linkText} → ${newLinkText}`;
-				logMessage += `\n更新笔记: ${link.filePath} (第${link.lineNumber}行)`;
-
-				// 记录日志
-				if (this.plugin?.logger) {
-					await this.plugin.logger.info(
-						OperationType.UPDATE_REFERENCE,
-						logMessage,
-						{
-							imagePath: newPath,
-							imageName: newName,
-							details: {
-								recoveryType: recoveryType,
-								notePath: link.filePath,
-								lineNumber: link.lineNumber,
-								oldLink: link.linkText,
-								newLink: newLinkText,
-								oldImagePath: oldPath,
-								newImagePath: newPath,
-								oldImageName: oldName,
-								newImageName: newName,
-								originalLogTimestamp: link.recoveryInfo.logTimestamp
-							}
-						}
-					);
-				}
-
-				// 更新 UI
-				linkItem.style.opacity = '0.5';
-				linkItem.style.pointerEvents = 'none';
-				const successBadge = linkItem.createDiv();
-				successBadge.style.cssText = `
-					position: absolute;
-					top: 50%;
-					left: 50%;
-					transform: translate(-50%, -50%);
-					background: var(--background-modifier-success);
-					color: var(--text-on-accent);
-					padding: 4px 12px;
-					border-radius: 4px;
-					font-weight: 600;
-				`;
-				successBadge.textContent = '✓ 已恢复';
-				linkItem.style.position = 'relative';
-
-				new Notice(`已恢复链接: ${oldName} → ${newName}`);
-				return true;
-			} else {
-				new Notice('链接内容未变化，可能已被手动修复');
-			}
-		} catch (error) {
-			if (this.plugin?.logger) {
-				await this.plugin.logger.error(OperationType.FIX_BROKEN_LINK, '恢复链接失败', {
-					error: error instanceof Error ? error : new Error(String(error))
-				});
-			}
-			new Notice(`恢复失败: ${error}`);
-		}
-
-		return false;
-	}
-
-	/**
-	 * 一键恢复所有可恢复的链接
-	 */
-	private async recoverAllLinks(): Promise<void> {
-		const recoverableLinks = this.enhancedLinks.filter(l => l.recoveryInfo);
-		if (recoverableLinks.length === 0) {
-			new Notice('没有可恢复的链接');
-			return;
-		}
-
-		let successCount = 0;
-		let failCount = 0;
-		const recoveredDetails: Array<{
-			notePath: string;
-			lineNumber: number;
-			oldLink: string;
-			newLink: string;
-			recoveryType: RecoveryType;
-		}> = [];
-
-		// 按文件分组，减少文件读写次数
-		const linksByFile = new Map<string, BrokenLinkInfo[]>();
-		for (const link of recoverableLinks) {
-			const existing = linksByFile.get(link.filePath) || [];
-			existing.push(link);
-			linksByFile.set(link.filePath, existing);
-		}
-
-		for (const [filePath, links] of linksByFile) {
-			try {
-				const file = this.app.vault.getAbstractFileByPath(filePath);
-				if (!file || !(file instanceof TFile)) {
-					failCount += links.length;
-					continue;
-				}
-
-				const content = await this.app.vault.read(file);
-				const lines = content.split('\n');
-				let modified = false;
-
-				// 按行号从大到小排序，避免行号偏移
-				links.sort((a, b) => b.lineNumber - a.lineNumber);
-
-				for (const link of links) {
-					if (!link.recoveryInfo) continue;
-
-					const lineIndex = link.lineNumber - 1;
-					if (lineIndex < 0 || lineIndex >= lines.length) {
-						failCount++;
-						continue;
-					}
-
-					const oldLine = lines[lineIndex];
-					let newLine = oldLine;
-					const { oldName, newName, oldPath, newPath, recoveryType } = link.recoveryInfo;
-					let newLinkText = '';
-
-					// Wiki 格式
-					if (link.linkText.includes('[[')) {
-						const parsed = parseWikiLink(link.linkText);
-						const newParts: WikiLinkParts = {
-							path: newPath,
-							displayText: parsed.displayText,
-							width: parsed.width,
-							height: parsed.height
-						};
-						const hasExclam = link.linkText.startsWith('!');
-						newLinkText = buildWikiLink(newParts, hasExclam);
-						newLine = oldLine.replace(link.linkText, newLinkText);
-					}
-					// Markdown 格式
-					else if (link.linkText.match(/!\[[^\]]*\]\([^)]+\)/)) {
-						const altMatch = link.linkText.match(/!\[([^\]]*)\]/);
-						const alt = altMatch ? altMatch[1] : '';
-						newLinkText = `![${alt}](${newPath})`;
-						newLine = oldLine.replace(link.linkText, newLinkText);
-					}
-					// HTML 格式
-					else if (link.linkText.includes('<img')) {
-						newLinkText = link.linkText.replace(
-							new RegExp(`src\\s*=\\s*["'][^"']*["']`),
-							`src="${newPath}"`
-						);
-						newLine = oldLine.replace(link.linkText, newLinkText);
-					}
-
-					if (newLine !== oldLine) {
-						lines[lineIndex] = newLine;
-						modified = true;
-						successCount++;
-						recoveredDetails.push({
-							notePath: filePath,
-							lineNumber: link.lineNumber,
-							oldLink: link.linkText,
-							newLink: newLinkText,
-							recoveryType: recoveryType
-						});
-					} else {
-						failCount++;
-					}
-				}
-
-				if (modified) {
-					await this.app.vault.modify(file, lines.join('\n'));
-				}
-			} catch (error) {
-				if (this.plugin?.logger) {
-					await this.plugin.logger.error(OperationType.FIX_BROKEN_LINK, `恢复文件 ${filePath} 中的链接失败`, {
-						filePath,
-						error: error instanceof Error ? error : new Error(String(error))
-					});
-				}
-				failCount += links.length;
-			}
-		}
-
-		// 构建详细的日志消息
-		let logMessage = `批量恢复空链接: 成功 ${successCount} 个，失败 ${failCount} 个`;
-		if (recoveredDetails.length > 0) {
-			// 按笔记分组显示
-			const byNote = new Map<string, typeof recoveredDetails>();
-			for (const detail of recoveredDetails) {
-				const existing = byNote.get(detail.notePath) || [];
-				existing.push(detail);
-				byNote.set(detail.notePath, existing);
-			}
-			
-			const noteList = Array.from(byNote.entries()).map(([notePath, details], index) => {
-				const lineNumbers = details.map(d => d.lineNumber).join(', ');
-				return `${index + 1}. ${notePath} (第${lineNumbers}行)`;
-			}).join('\n');
-			logMessage += `\n更新笔记:\n${noteList}`;
-		}
-
-		// 记录日志
-		if (this.plugin?.logger) {
-			await this.plugin.logger.info(
-				OperationType.UPDATE_REFERENCE,
-				logMessage,
-				{
-					details: {
-						successCount,
-						failCount,
-						totalCount: recoverableLinks.length,
-						affectedNotes: Array.from(linksByFile.keys()),
-						recoveredLinks: recoveredDetails.map(d => ({
-							notePath: d.notePath,
-							lineNumber: d.lineNumber,
-							oldLink: d.oldLink,
-							newLink: d.newLink,
-							recoveryType: d.recoveryType
-						}))
-					}
-				}
-			);
-		}
-
-		new Notice(`恢复完成！成功 ${successCount} 个，失败 ${failCount} 个`);
-
-		// 刷新模态框
-		this.close();
-	}
 
 	/**
 	 * 转义正则表达式特殊字符
@@ -1344,7 +853,111 @@ export class BrokenLinksModal extends Modal {
 		return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 	}
 
+
+	/**
+	 * 过滤和渲染链接（根据搜索查询和排序）
+	 */
+	private filterAndRenderLinks(): void {
+		if (!this.listContainer) return;
+		
+		// 获取当前激活的过滤器对应的链接
+		let baseLinks: BrokenLinkInfo[] = [];
+		
+		if (this.activeFilterId) {
+			// 按类型分组链接
+			const remoteErrors: BrokenLinkInfo[] = [];
+			const localErrors: BrokenLinkInfo[] = [];
+			
+			for (const link of this.enhancedLinks) {
+				if (link.isRemoteError) {
+					remoteErrors.push(link);
+				} else {
+					localErrors.push(link);
+				}
+			}
+			
+			// 根据激活的过滤器选择对应的链接
+			switch (this.activeFilterId) {
+				case 'remote':
+					baseLinks = remoteErrors;
+					break;
+				case 'local':
+					baseLinks = localErrors;
+					break;
+				default:
+					baseLinks = this.enhancedLinks;
+			}
+		} else {
+			baseLinks = this.enhancedLinks;
+		}
+		
+		// 应用搜索过滤
+		let filteredLinks = baseLinks;
+		if (this.searchQuery) {
+			const query = this.searchQuery.toLowerCase();
+			filteredLinks = baseLinks.filter(link => {
+				const filePath = link.filePath.toLowerCase();
+				const linkText = link.linkText.toLowerCase();
+				const extractedPath = (link.extractedPath || '').toLowerCase();
+				return filePath.includes(query) || linkText.includes(query) || extractedPath.includes(query);
+			});
+		}
+		
+		// 应用默认排序（按文件路径升序，然后按行号升序）
+		filteredLinks.sort((a, b) => {
+			// 先按文件路径排序
+			const pathComparison = a.filePath.localeCompare(b.filePath);
+			if (pathComparison !== 0) {
+				return pathComparison;
+			}
+			// 如果文件路径相同，按行号排序
+			return a.lineNumber - b.lineNumber;
+		});
+		
+		// 重新渲染内容容器
+		const contentContainer = this.listContainer.querySelector('.broken-links-content-container') as HTMLElement;
+		if (contentContainer) {
+			contentContainer.empty();
+			
+			if (filteredLinks.length === 0) {
+				const emptyMsg = contentContainer.createDiv({
+					text: this.searchQuery ? '没有找到匹配的链接' : '暂无链接',
+					attr: { style: 'text-align: center; padding: 40px; color: var(--text-muted);' }
+				});
+			} else {
+				for (const link of filteredLinks) {
+					this.renderLinkItem(contentContainer, link);
+				}
+			}
+		}
+	}
+
+	/**
+	 * 获取缓存的DOM元素（避免重复查询）
+	 */
+	private getCachedElement(key: string, queryFn: () => HTMLElement | null): HTMLElement | null {
+		if (this.cachedElements.has(key)) {
+			const cached = this.cachedElements.get(key);
+			if (cached && document.body.contains(cached)) {
+				return cached;
+			}
+			this.cachedElements.delete(key);
+		}
+		
+		const element = queryFn();
+		this.cachedElements.set(key, element);
+		return element;
+	}
+
+	/**
+	 * 清除DOM缓存
+	 */
+	private clearCache(): void {
+		this.cachedElements.clear();
+	}
+
 	onClose() {
+		this.clearCache();
 		const {contentEl} = this;
 		contentEl.empty();
 	}
