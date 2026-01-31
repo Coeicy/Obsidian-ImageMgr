@@ -1113,8 +1113,15 @@ export class ImageManagerView extends ItemView {
 			}
 			
 			// 按位置类型筛选（云端/本地）
+			// 如果关闭了云端图片扫描，跳过云端图片筛选
+			const scanRemoteImagesDisabled = this.plugin.settings.scanRemoteImages === false;
 			if (this.filterOptions.locationFilter && this.filterOptions.locationFilter !== 'all') {
 				const isRemote = image.isRemote === true;
+				// 如果关闭了云端图片扫描，且筛选的是云端图片，但当前图片不是云端图片，返回false
+				// 同时允许已缓存的云端图片正常显示
+				if (scanRemoteImagesDisabled && this.filterOptions.locationFilter === 'remote' && !isRemote) {
+					return false;
+				}
 				if (this.filterOptions.locationFilter === 'remote' && !isRemote) {
 					return false;
 				}
@@ -2361,8 +2368,11 @@ export class ImageManagerView extends ItemView {
                     return;
                 }
                 
-                // 根据 isRemote 属性分组
-                img.group = img.isRemote === true ? '🌩️ 云端图片' : '💾 本地图片';
+				// 根据 isRemote 属性分组
+				// 如果关闭了云端图片扫描，已缓存的云端图片仍然保持云端分组，但不再扫描新的云端图片
+				const scanRemoteImagesDisabled = this.plugin.settings.scanRemoteImages === false;
+				// 已存在的云端图片保持云端分组，新的云端图片扫描被禁用
+				img.group = img.isRemote === true ? '🌩️ 云端图片' : '💾 本地图片';
             });
         }
     }
@@ -3003,7 +3013,9 @@ export class ImageManagerView extends ItemView {
 		const brokenLinks: Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string}> = [];
 		
 		// 1. 优先从网络图片缓存系统获取已标记为 broken 的图片（增量显示）
-		if (this.plugin.networkImageAPI) {
+		// 如果关闭了云端图片扫描，跳过网络图片相关的检测
+		const scanRemoteImagesDisabled = this.plugin.settings.scanRemoteImages === false;
+		if (this.plugin.networkImageAPI && !scanRemoteImagesDisabled) {
 			try {
 				// 获取所有 broken 状态的图片（这些已经验证过并记录在数据库中）
 				const brokenImagesResult = await this.plugin.networkImageAPI.searchImagesByStatus('broken');
@@ -3107,7 +3119,7 @@ export class ImageManagerView extends ItemView {
 		
 		// 获取已扫描的文件列表（用于增量扫描）
 		const scannedFiles = new Set<string>();
-		if (this.plugin.networkImageAPI) {
+		if (this.plugin.networkImageAPI && !scanRemoteImagesDisabled) {
 			try {
 				const db = this.plugin.networkImageDBManager.getDB();
 				const tx = db.transaction([ObjectStore.FILES], 'readonly');
@@ -3252,23 +3264,28 @@ export class ImageManagerView extends ItemView {
 					for (const embed of cache.embeds) {
 						const linkPath = embed.link;
 						
-						// 检查是否是网络链接
-						if (isRemoteLink(linkPath)) {
-							// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
-							if (cachedUrls.has(linkPath)) {
-								continue;
-							}
-							
-							const lineIndex = embed.position.start.line;
-							const fullLine = lines[lineIndex];
-							remoteLinksToValidate.push({
-								filePath: file.path,
-								lineNumber: lineIndex + 1,
-								linkText: fullLine,
-								url: linkPath
-							});
+					// 检查是否是网络链接
+					if (isRemoteLink(linkPath)) {
+						// 如果关闭了云端图片扫描，跳过网络链接的验证
+						if (scanRemoteImagesDisabled) {
 							continue;
 						}
+						
+						// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
+						if (cachedUrls.has(linkPath)) {
+							continue;
+						}
+						
+						const lineIndex = embed.position.start.line;
+						const fullLine = lines[lineIndex];
+						remoteLinksToValidate.push({
+							filePath: file.path,
+							lineNumber: lineIndex + 1,
+							linkText: fullLine,
+							url: linkPath
+						});
+						continue;
+					}
 						
 						// 本地链接：尝试解析链接目标
 						const destFile = metadataCache.getFirstLinkpathDest(linkPath, file.path);
@@ -4534,20 +4551,42 @@ export class ImageManagerView extends ItemView {
 				return;
 			}
 
-			// 切换锁定
-			const toggleLockKey = shortcuts['manager-toggle-lock'] || SHORTCUT_DEFINITIONS['manager-toggle-lock'].defaultKey;
-			if (matchesShortcut(e, toggleLockKey)) {
-				e.preventDefault();
-				const selectedImages = this.getSelectedImages();
-				if (selectedImages.length > 0) {
-					await this.toggleSelectedImagesLock(selectedImages);
-				} else {
-					new Notice('请先选中要锁定/解锁的图片');
-				}
-				return;
+		// 切换锁定
+		const toggleLockKey = shortcuts['manager-toggle-lock'] || SHORTCUT_DEFINITIONS['manager-toggle-lock'].defaultKey;
+		if (matchesShortcut(e, toggleLockKey)) {
+			e.preventDefault();
+			const selectedImages = this.getSelectedImages();
+			if (selectedImages.length > 0) {
+				await this.toggleSelectedImagesLock(selectedImages);
+			} else {
+				new Notice('请先选中要锁定/解锁的图片');
 			}
+			return;
+		}
 
-			// 键盘导航（仅当没有选中图片时）
+		// 新增快捷键：快速操作
+		const toggleSidebarKey = shortcuts['manager-toggle-sidebar'] || SHORTCUT_DEFINITIONS['manager-toggle-sidebar'].defaultKey;
+		if (matchesShortcut(e, toggleSidebarKey)) {
+			e.preventDefault();
+			this.toggleSidebar();
+			return;
+		}
+
+		const refreshKey = shortcuts['manager-refresh'] || SHORTCUT_DEFINITIONS['manager-refresh'].defaultKey;
+		if (matchesShortcut(e, refreshKey)) {
+			e.preventDefault();
+			this.refreshImages();
+			return;
+		}
+
+		const toggleSelectionKey = shortcuts['manager-toggle-selection'] || SHORTCUT_DEFINITIONS['manager-toggle-selection'].defaultKey;
+		if (matchesShortcut(e, toggleSelectionKey)) {
+			e.preventDefault();
+			this.toggleSelectionMode();
+			return;
+		}
+
+		// 键盘导航（仅当没有选中图片时）
 			const selectedImages = this.getSelectedImages();
 			if (selectedImages.length === 0 && this.filteredImages.length > 0) {
 				if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
@@ -4574,6 +4613,55 @@ export class ImageManagerView extends ItemView {
 		};
 
 		window.addEventListener('keydown', this.keyboardHandler);
+	}
+
+	/**
+	 * 切换侧边栏显示状态
+	 */
+	private toggleSidebar(): void {
+		const sidebar = this.containerEl.querySelector('.image-manager-sidebar');
+		if (sidebar) {
+			const isVisible = sidebar.style.display !== 'none';
+			sidebar.style.display = isVisible ? 'none' : 'block';
+			const sidebarToggleBtn = this.containerEl.querySelector('.toggle-sidebar-btn');
+			if (sidebarToggleBtn) {
+				sidebarToggleBtn.setAttribute('data-state', isVisible ? 'collapsed' : 'expanded');
+			}
+			new Notice(isVisible ? '📱 侧边栏已隐藏' : '📱 侧边栏已显示');
+		}
+	}
+
+	/**
+	 * 刷新图片列表
+	 */
+	private refreshImages(): void {
+		this.plugin.scanAllImages()
+			.then(() => {
+				this.images = this.plugin.images;
+				this.filterImages();
+				new Notice('🔄 图片列表已刷新');
+			})
+			.catch(error => {
+				console.error('刷新图片列表失败:', error);
+				new Notice('❌ 刷新失败，请检查控制台');
+			});
+	}
+
+	/**
+	 * 切换选择模式（单选/多选）
+	 */
+	private toggleSelectionMode(): void {
+		// 检查是否有选中的图片
+		const selectedImages = this.getSelectedImages();
+		if (selectedImages.length > 0) {
+			// 清空选择，切换到单选模式
+			this.clearSelection();
+			new Notice('🖱️ 切换到单选模式');
+		} else {
+			// 全选，切换到多选模式
+			this.selectAllImages();
+			new Notice('🖱️ 切换到多选模式');
+		}
 	}
 
 	/**

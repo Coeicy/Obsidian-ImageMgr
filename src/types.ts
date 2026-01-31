@@ -350,8 +350,6 @@ export interface ImageManagerSettings {
 	ignoredHashMetadata?: Record<string, { fileName: string; filePath: string; addedTime: number }>;
 	
 	// ==================== 性能设置 ====================
-	/** 是否启用懒加载 */
-	enableLazyLoading: boolean;
 	/** 懒加载延迟时间（毫秒） */
 	lazyLoadDelay: number;
 	/** 最大缓存数量 */

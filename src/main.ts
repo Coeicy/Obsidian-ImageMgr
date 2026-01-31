@@ -307,7 +307,13 @@ export default class ImageManagementPlugin extends Plugin {
 							try {
 								// 延迟扫描，避免在文件创建时立即扫描（文件可能还未完全写入）
 								setTimeout(async () => {
-									await this.networkImageAPI.quickScan(file.path);
+									// 自动扫描时使用静默模式，不输出控制台日志
+									await this.networkImageAPI.scan({
+										path: file.path,
+										incremental: true,
+										validateImages: false,
+										quiet: true // 静默模式，不输出控制台日志
+									});
 								}, 1000);
 							} catch (error) {
 								// 静默失败，不影响主流程
@@ -404,7 +410,13 @@ export default class ImageManagementPlugin extends Plugin {
 							try {
 								// 延迟扫描，避免频繁触发
 								setTimeout(async () => {
-									await this.networkImageAPI.quickScan(file.path);
+									// 自动扫描时使用静默模式，不输出控制台日志
+									await this.networkImageAPI.scan({
+										path: file.path,
+										incremental: true,
+										validateImages: false,
+										quiet: true // 静默模式，不输出控制台日志
+									});
 								}, 2000);
 							} catch (error) {
 								// 静默失败，不影响主流程
@@ -506,7 +518,7 @@ export default class ImageManagementPlugin extends Plugin {
 	/**
 	 * 扫描网络图片（使用缓存系统）
 	 */
-	async scanNetworkImages(path?: string): Promise<any[]> {
+	async scanNetworkImages(path?: string, options?: { quiet?: boolean }): Promise<any[]> {
 		// 检查是否启用网络图片扫描
 		if (!this.settings.scanRemoteImages) {
 			new Notice('❌ 网络图片扫描功能未启用\n请在设置中开启"扫描网络图片"选项');
@@ -521,36 +533,37 @@ export default class ImageManagementPlugin extends Plugin {
 			return await this.scanNetworkImagesLegacy(path);
 		}
 
-		try {
-			if (this.logger) {
-				await this.logger.info(OperationType.SCAN, `Scanning network images${path ? ` in ${path}` : ''}...`);
-			}
-			
-			// 显示进度提示
-			const notice = new Notice('正在扫描网络图片...', 0);
-			
-			// 执行增量扫描
-			const result = await this.networkImageAPI.scan({
-				path,
-				incremental: true,
-				validateImages: false
-			});
-			
-			// 更新通知
-			notice.hide();
-			
-			const message = `扫描完成！\n` +
-			              `共发现 ${result.totalImages} 张图片\n` +
-			              `新增: ${result.newImages} 张\n` +
-			              `更新: ${result.updatedImages} 张\n` +
-			              `缓存: ${result.cachedImages} 张\n` +
-			              `耗时: ${(result.duration / 1000).toFixed(2)} 秒\n` +
-			              `缓存命中率: ${result.cacheHitRate.toFixed(1)}%`;
-			
-			new Notice(message, 5000);
-			
-// 记录性能指标
-		if (this.logger) {
+			try {
+				// 显示进度提示（仅非静默模式）
+				const notice = new Notice('正在扫描网络图片...', 0);
+				
+				// 执行增量扫描（支持静默模式）
+				const quiet = options?.quiet || false;
+				const result = await this.networkImageAPI.scan({
+					path,
+					incremental: true,
+					validateImages: false,
+					quiet: quiet
+				});
+				
+				// 更新通知
+				notice.hide();
+				
+				// 仅非静默模式显示通知
+				if (!quiet) {
+					const message = `扫描完成！\n` +
+					              `共发现 ${result.totalImages} 张图片\n` +
+					              `新增: ${result.newImages} 张\n` +
+					              `更新: ${result.updatedImages} 张\n` +
+					              `缓存: ${result.cachedImages} 张\n` +
+					              `耗时: ${(result.duration / 1000).toFixed(2)} 秒\n` +
+					              `缓存命中率: ${result.cacheHitRate.toFixed(1)}%`;
+					
+					new Notice(message, 5000);
+				}
+				
+		// 记录性能指标（仅非静默模式）
+		if (this.logger && !quiet) {
 			await this.logger.info(OperationType.SCAN, `Network image scan completed: ${JSON.stringify(result)}`);
 		}
 		
@@ -906,7 +919,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 					'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
 					'defaultWheelMode', 'showImageName', 'showImageSize', 
 					'showImageDimensions', 'showLockIcon', 'imageNameWrap', 'adaptiveImageSize',
-					'enableLazyLoading', 'lazyLoadDelay', 'maxCacheSize', 'cardBorderRadius',
+					'lazyLoadDelay', 'maxCacheSize', 'cardBorderRadius',
 					'cardSpacing', 'fixedImageHeight', 'enableHoverEffect', 'showImageIndex',
 					'confirmBeforeDelete', 'moveToSystemTrash', 'enablePluginTrash', 'trashRestorePath',
 					'logLevel', 'enableConsoleLog', 'enableDebugLog', 'keyboardShortcuts',
@@ -1001,7 +1014,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 				'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
 				'defaultWheelMode', 'showImageName', 'showImageSize', 
 				'showImageDimensions', 'showLockIcon', 'imageNameWrap', 'adaptiveImageSize',
-				'enableLazyLoading', 'lazyLoadDelay', 'maxCacheSize', 'cardBorderRadius',
+				'lazyLoadDelay', 'maxCacheSize', 'cardBorderRadius',
 				'cardSpacing', 'fixedImageHeight', 'enableHoverEffect', 'showImageIndex',
 				'confirmBeforeDelete', 'moveToSystemTrash', 'enablePluginTrash', 'trashRestorePath',
 				'logLevel', 'enableConsoleLog', 'enableDebugLog', 'keyboardShortcuts',

@@ -136,7 +136,9 @@ export class ImageDetailModal extends Modal {
 		this.plugin = plugin;
 		this.isTrashFile = isTrashFile;
 		// 判断是否为云端图片
-		this.isRemoteImage = image.isRemote === true || image.path.startsWith('http://') || image.path.startsWith('https://');
+		// 如果关闭了云端图片扫描，所有图片都视为本地图片
+		const scanRemoteImagesDisabled = plugin?.settings.scanRemoteImages === false;
+		this.isRemoteImage = scanRemoteImagesDisabled ? false : (image.isRemote === true || image.path.startsWith('http://') || image.path.startsWith('https://'));
 		
 		// 初始化管理器 - 使用 plugin 中已有的实例，避免重复注册事件监听器
 		if (plugin) {
@@ -259,74 +261,75 @@ export class ImageDetailModal extends Modal {
 						this.showPreviousImage();
 						} else {
 						this.showNextImage();
+						}
 					}
-				}
-			},
-			() => {
-				// 拖拽开始
-				this.isDragging = true;
-			},
-			(translateX: number, translateY: number) => {
-				// 拖拽移动
-				// 计算边界限制，防止图片被拖拽出可视区域
-				if (this.imgElement && this.scale > 1) {
-					const imgRect = this.imgElement.getBoundingClientRect();
-					const containerRect = this.imgElement.parentElement?.getBoundingClientRect();
-					
-					if (containerRect) {
-						// 计算图片缩放后的尺寸
-						const scaledWidth = imgRect.width;
-						const scaledHeight = imgRect.height;
-						const containerWidth = containerRect.width;
-						const containerHeight = containerRect.height;
+				},
+				() => {
+					// 拖拽开始
+					this.isDragging = true;
+				},
+				(translateX: number, translateY: number) => {
+					// 拖拽移动
+					// 计算边界限制，防止图片被拖拽出可视区域
+					if (this.imgElement && this.scale > 1) {
+						const imgRect = this.imgElement.getBoundingClientRect();
+						const containerRect = this.imgElement.parentElement?.getBoundingClientRect();
 						
-						// 计算允许的最大偏移量（图片边缘不能超出容器中心）
-						const maxTranslateX = Math.max(0, (scaledWidth - containerWidth / 2) / 2);
-						const maxTranslateY = Math.max(0, (scaledHeight - containerHeight / 2) / 2);
-						const minTranslateX = -maxTranslateX;
-						const minTranslateY = -maxTranslateY;
-						
-						// 限制平移范围
-						this.translateX = Math.max(minTranslateX, Math.min(maxTranslateX, translateX));
-						this.translateY = Math.max(minTranslateY, Math.min(maxTranslateY, translateY));
+						if (containerRect) {
+							// 计算图片缩放后的尺寸
+							const scaledWidth = imgRect.width;
+							const scaledHeight = imgRect.height;
+							const containerWidth = containerRect.width;
+							const containerHeight = containerRect.height;
+							
+							// 计算允许的最大偏移量（图片边缘不能超出容器中心）
+							const maxTranslateX = Math.max(0, (scaledWidth - containerWidth / 2) / 2);
+							const maxTranslateY = Math.max(0, (scaledHeight - containerHeight / 2) / 2);
+							const minTranslateX = -maxTranslateX;
+							const minTranslateY = -maxTranslateY;
+							
+							// 限制平移范围
+							this.translateX = Math.max(minTranslateX, Math.min(maxTranslateX, translateX));
+							this.translateY = Math.max(minTranslateY, Math.min(maxTranslateY, translateY));
+						} else {
+							this.translateX = translateX;
+							this.translateY = translateY;
+						}
 					} else {
 						this.translateX = translateX;
 						this.translateY = translateY;
 					}
-				} else {
-					this.translateX = translateX;
-					this.translateY = translateY;
-				}
-				
-				this.updateTransform();
-			},
-			() => {
-				// 拖拽结束
-				this.isDragging = false;
-			},
-			() => {
-				// 获取当前平移
-				return { x: this.translateX, y: this.translateY };
-			},
-			() => {
-				// 获取当前缩放
-				return this.scale;
-			},
-			this.isTrashFile, // 传递 isTrashFile 参数
-			(imgEl: HTMLImageElement) => {
-				// 图片加载完成后的回调（用于回收站文件）
-				this.imgElement = imgEl;
-			},
-			async (message: string, error?: any) => {
-				// Logger 回调
-				if (this.plugin?.logger) {
-					await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, message, {
-						imagePath: this.image.path,
-						error: error instanceof Error ? error : new Error(String(error))
-					});
-				}
-			}
-		);
+					
+					this.updateTransform();
+				},
+				() => {
+					// 拖拽结束
+					this.isDragging = false;
+				},
+				() => {
+					// 获取当前平移
+					return { x: this.translateX, y: this.translateY };
+				},
+				() => {
+					// 获取当前缩放
+					return this.scale;
+				},
+				this.isTrashFile, // 传递 isTrashFile 参数
+				(imgEl: HTMLImageElement) => {
+					// 图片加载完成后的回调（用于回收站文件）
+					this.imgElement = imgEl;
+				},
+				async (message: string, error?: any) => {
+					// Logger 回调
+					if (this.plugin?.logger) {
+						await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, message, {
+							imagePath: this.image.path,
+							error: error instanceof Error ? error : new Error(String(error))
+						});
+					}
+				},
+				this.plugin // 传递插件实例
+			);
 		
 		// 更新图片元素引用
 		this.imgElement = this.previewPanel.getImageElement();

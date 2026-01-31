@@ -1,847 +1,769 @@
-# API Documentation
+# ImageMgr API 文档
 
-## Table of Contents
-
-- [Core Plugin API](#core-plugin-api)
-- [Logger API](#logger-api)
-- [Reference Manager API](#reference-manager-api)
-- [Trash Manager API](#trash-manager-api)
-- [Lock List Manager API](#lock-list-manager-api)
-- [History Manager API](#history-manager-api)
-- [Image Scanner API](#image-scanner-api)
-- [Event System](#event-system)
+**版本:** v1.0.1  
+**最后更新:** 2025-01-31  
+**适用对象:** 开发者、高级用户、贡献者
 
 ---
 
-## Core Plugin API
+## 📚 目录
 
-### Class: `ImageManagementPlugin`
-
-The main plugin class that orchestrates all functionality.
-
-#### Properties
-
-```typescript
-// Core Managers
-settings: ImageManagementSettings          // Plugin settings
-logger: Logger                            // Log manager
-errorHandler: ErrorHandler                // Error handler
-data: PluginData                         // Plugin persistent data
-referenceManager: ReferenceManager       // Reference relationship manager
-trashManager: TrashManager               // Trash management
-historyManager: HistoryManager           // Operation history
-lockListManager: LockListManager         // File lock management
-
-// Cache Systems
-displayTextCache: Map<string, Map<number, string>>  // Wiki link display text cache
-fullLineCache: Map<string, Map<number, string>>     // Full line content cache
-deletedFiles: Map<string, {file: TFile, content: ArrayBuffer}>  // Deleted files for undo
-referenceCache: Map<string, Set<string>>           // Image reference cache
-recentlyRenamedImages: Map<string, {timestamp: number, referencedFiles: string[]}>  // Recent rename tracking
-```
-
-#### Methods
-
-##### `async onload(): Promise<void>`
-
-Plugin lifecycle method - called when plugin loads.
-
-**Flow Diagram:**
-```
-Plugin Load
-    ↓
-Load Data & Settings
-    ↓
-Initialize Managers (Logger, ErrorHandler, Reference, Trash, Lock, History)
-    ↓
-Register Views & Commands
-    ↓
-Setup Event Listeners (file create/rename/delete/metadata changes)
-    ↓
-Delayed Initialization (Reference Cache after 5s, Mark as initialized after 3s)
-```
-
-**Event Listeners Registered:**
-- `metadataCache.on('changed')` - Detect display text and reference changes
-- `vault.on('create')` - Detect new image files
-- `vault.on('rename')` - Detect renamed image files
-- `vault.on('delete')` - Detect deleted image files
-- `workspace.on('file-menu')` - Add context menu items
-
-##### `async activateView(): Promise<void>`
-
-Activate the image manager view in the workspace.
-
-**Returns:** `Promise<void>`
-
-##### `async scanImages(folderPath?: string): Promise<ImageInfo[]>`
-
-Scan for images in the specified folder.
-
-**Parameters:**
-- `folderPath?: string` - Optional folder path to scan. If not provided, uses default image folder.
-
-**Returns:** `Promise<ImageInfo[]>` - Array of scanned image information
-
-**Algorithm:**
-1. Validate folder path using `PathValidator`
-2. Use `ImageScanner` to scan directory recursively
-3. Apply file filters (ignore patterns, extensions)
-4. Calculate MD5 hashes if deduplication enabled
-5. Cache results and update data
-6. Log operation
-
-##### `async renameImage(oldPath: string, newPath: string): Promise<boolean>`
-
-Rename an image file and update all references.
-
-**Parameters:**
-- `oldPath: string` - Current image path
-- `newPath: string` - New image path
-
-**Returns:** `Promise<boolean>` - Success status
-
-**Flow:**
-```
-Validate Paths → Check Lock Status → Rename File → Update References → Log Operation → Save History
-```
-
-##### `async deleteImage(imagePath: string, permanent: boolean = false): Promise<boolean>`
-
-Delete an image file.
-
-**Parameters:**
-- `imagePath: string` - Image path to delete
-- `permanent: boolean` - Whether to permanently delete (skip trash)
-
-**Returns:** `Promise<boolean>` - Success status
-
-**Features:**
-- Respects lock status (locked files cannot be deleted)
-- Supports system trash and plugin trash
-- Records operation in history
-- Updates reference cache
+1. [快速开始](#快速开始)
+2. [核心API](#核心api)
+3. [类型定义](#类型定义)
+4. [事件系统](#事件系统)
+5. [使用示例](#使用示例)
+6. [最佳实践](#最佳实践)
+7. [故障排除](#故障排除)
 
 ---
 
-## Logger API
+## 快速开始
 
-### Class: `Logger`
-
-Comprehensive logging system for tracking all plugin operations.
-
-#### Properties
+### 获取插件实例
 
 ```typescript
-plugin: ImageManagementPlugin           // Plugin instance
-logs: any[]                            // In-memory log storage
-isDevMode: boolean                     // Development mode flag
-saveQueue: Promise<void> | null       // Batch save queue
-needsSave: boolean                    // Flag indicating save needed
-```
-
-#### Methods
-
-##### `async log(level: LogLevel, operation: OperationType, message: string, context?: LogContext): Promise<void>`
-
-Main logging method.
-
-**Parameters:**
-- `level: LogLevel` - Log level (DEBUG, INFO, WARNING, ERROR)
-- `operation: OperationType` - Operation type from enum
-- `message: string` - Log message
-- `context?: LogContext` - Additional context data
-
-**Context Data Structure:**
-```typescript
-interface LogContext {
-    imagePath?: string;           // Image path
-    oldPath?: string;             // Old path (for rename/move)
-    newPath?: string;             // New path (for rename/move)
-    referencedFiles?: string[];   // Affected note files
-    lineNumber?: number;          // Line number in note
-    oldDisplayText?: string;      // Old display text (Wiki links)
-    newDisplayText?: string;      // New display text (Wiki links)
-    details?: Record<string, any>; // Additional details
-}
-```
-
-**Batch Save Mechanism:**
-- Logs are queued for 100ms before saving
-- Multiple logs within 100ms are batched together
-- Reduces disk I/O for high-frequency operations
-
-##### `async getLogs(filter?: LogFilter): Promise<LogEntry[]>`
-
-Retrieve logs with optional filtering.
-
-**Parameters:**
-- `filter?: LogFilter` - Filter options
-
-**Filter Options:**
-```typescript
-interface LogFilter {
-    level?: LogLevel;              // Minimum log level
-    operation?: OperationType;     // Specific operation type
-    imagePath?: string;            // Filter by image path
-    startTime?: number;            // Start timestamp
-    endTime?: number;              // End timestamp
-    maxCount?: number;             // Maximum number of logs
-}
-```
-
-##### `async exportLogs(format: 'json' | 'csv' = 'json'): Promise<string>`
-
-Export logs in specified format.
-
-**Parameters:**
-- `format: 'json' | 'csv'` - Export format
-
-**Returns:** `Promise<string>` - Exported data as string
-
----
-
-## Reference Manager API
-
-### Class: `ReferenceManager`
-
-Manages image reference relationships across notes.
-
-#### Methods
-
-##### `async findAllReferences(imagePath: string, forceRefresh: boolean = false): Promise<ImageReferenceInfo[]>`
-
-Find all references to an image.
-
-**Parameters:**
-- `imagePath: string` - Image path to search for
-- `forceRefresh: boolean` - Force cache refresh
-
-**Returns:** `Promise<ImageReferenceInfo[]>` - Array of reference information
-
-**Algorithm:**
-```
-1. Check cache first (if not forceRefresh)
-2. Scan all markdown files in vault
-3. Parse each file content line by line
-4. Detect image links (Wiki/Markdown/HTML)
-5. Match against target image path
-6. Cache results
-7. Return reference info array
-```
-
-**Supported Link Formats:**
-- Wiki: `![[image.png]]`, `![[image.png|text]]`, `![[image.png|100x200]]`
-- Markdown: `![alt](image.png)`
-- HTML: `<img src="image.png">`, `<img src="image.png" width="100">`
-
-##### `async updateReferences(oldPath: string, newPath: string, displayText?: string): Promise<UpdateReferenceResult>`
-
-Update all references when an image is renamed.
-
-**Parameters:**
-- `oldPath: string` - Old image path
-- `newPath: string` - New image path
-- `displayText?: string` - Optional new display text
-
-**Returns:** `Promise<UpdateReferenceResult>`
-
-**Result Structure:**
-```typescript
-interface UpdateReferenceResult {
-    success: boolean;                    // Overall success
-    updatedFiles: string[];              // Successfully updated files
-    failedFiles: string[];               // Failed to update files
-    totalReferences: number;             // Total references found
-    updatedReferences: number;           // Successfully updated references
-}
-```
-
-**Update Process:**
-```
-For each referencing file:
-  1. Read file content
-  2. Find all links to oldPath
-  3. Replace with newPath
-  4. Preserve display text and dimensions
-  5. Write updated content
-  6. Log each update
-```
-
-##### `async detectDisplayTextChanges(file: TFile): Promise<void>`
-
-Detect and log changes to Wiki link display text.
-
-**Parameters:**
-- `file: TFile` - File to check
-
-**Process:**
-1. Read current file content
-2. Compare with cached version
-3. Detect display text changes
-4. Update cache
-5. Log changes
-
----
-
-## Trash Manager API
-
-### Class: `TrashManager`
-
-Manages deleted images with restore capability.
-
-#### Methods
-
-##### `async moveToTrash(imagePath: string, options?: TrashOptions): Promise<boolean>`
-
-Move an image to trash.
-
-**Parameters:**
-- `imagePath: string` - Image path to trash
-- `options?: TrashOptions` - Trash options
-
-**Options:**
-```typescript
-interface TrashOptions {
-    permanent?: boolean;      // Skip trash, permanently delete
-    moveToSystemTrash?: boolean; // Use system trash
-    metadata?: Record<string, any>; // Additional metadata
-}
-```
-
-**Returns:** `Promise<boolean>` - Success status
-
-##### `async restoreFromTrash(imagePath: string, restorePath?: string): Promise<boolean>`
-
-Restore an image from trash.
-
-**Parameters:**
-- `imagePath: string` - Image path in trash
-- `restorePath?: string` - Optional custom restore path
-
-**Returns:** `Promise<boolean>` - Success status
-
-##### `async getTrashedImages(): Promise<TrashedImageInfo[]>`
-
-Get list of all trashed images.
-
-**Returns:** `Promise<TrashedImageInfo[]>` - Array of trashed image info
-
-**Trashed Image Structure:**
-```typescript
-interface TrashedImageInfo {
-    path: string;              // Original path
-    trashPath: string;         // Path in trash
-    size: number;              // File size
-    deletedAt: number;         // Deletion timestamp
-    metadata?: Record<string, any>; // Additional metadata
-}
-```
-
----
-
-## Lock List Manager API
-
-### Class: `LockListManager`
-
-Manages file locking to prevent accidental modifications.
-
-#### Locking Mechanism
-
-Locks are based on **three-factor authentication:**
-1. **MD5 Hash** - File content hash
-2. **File Name** - Exact filename match
-3. **File Path** - Exact path match
-
-This ensures that even if a file is renamed or moved, the lock won't accidentally apply to a different file.
-
-#### Methods
-
-##### `async lockFile(imagePath: string): Promise<boolean>`
-
-Lock a file to prevent modifications.
-
-**Parameters:**
-- `imagePath: string` - Image path to lock
-
-**Returns:** `Promise<boolean>` - Success status
-
-**Process:**
-1. Calculate MD5 hash of file
-2. Store hash, filename, and path
-3. Add to lock list
-4. Log operation
-5. Save to persistent storage
-
-##### `async unlockFile(imagePath: string): Promise<boolean>`
-
-Unlock a previously locked file.
-
-**Parameters:**
-- `imagePath: string` - Image path to unlock
-
-**Returns:** `Promise<boolean>` - Success status
-
-##### `isFileLocked(imagePath: string): boolean`
-
-Check if a file is locked.
-
-**Parameters:**
-- `imagePath: string` - Image path to check
-
-**Returns:** `boolean` - Locked status
-
-**Validation:**
-```
-1. Check if path exists in lock list
-2. Verify current file MD5 matches stored MD5
-3. Verify filename matches
-4. If any check fails, file is NOT locked
-```
-
-##### `async getLockedFiles(): Promise<LockedFileInfo[]>`
-
-Get list of all locked files.
-
-**Returns:** `Promise<LockedFileInfo[]>` - Array of locked file information
-
----
-
-## History Manager API
-
-### Class: `HistoryManager`
-
-Manages operation history for undo/redo functionality.
-
-#### Methods
-
-##### `async recordOperation(operation: OperationRecord): Promise<void>`
-
-Record an operation in history.
-
-**Parameters:**
-- `operation: OperationRecord` - Operation to record
-
-**Record Structure:**
-```typescript
-interface OperationRecord {
-    id: string;                   // Unique operation ID
-    type: OperationType;          // Operation type
-    timestamp: number;            // Operation timestamp
-    imagePath: string;            // Affected image path
-    oldValue?: any;               // Old value (for undo)
-    newValue?: any;               // New value
-    metadata?: Record<string, any>; // Additional metadata
-}
-```
-
-##### `async getHistory(imagePath?: string): Promise<OperationRecord[]>`
-
-Get operation history.
-
-**Parameters:**
-- `imagePath?: string` - Optional filter by image path
-
-**Returns:** `Promise<OperationRecord[]>` - Array of operation records
-
-##### `async undo(operationId: string): Promise<boolean>`
-
-Undo a specific operation.
-
-**Parameters:**
-- `operationId: string` - Operation ID to undo
-
-**Returns:** `Promise<boolean>` - Success status
-
----
-
-## Image Scanner API
-
-### Class: `ImageScanner`
-
-Scans and indexes images in the vault.
-
-#### Methods
-
-##### `async scanDirectory(folderPath: string, options?: ScanOptions): Promise<ImageInfo[]>`
-
-Scan a directory for images.
-
-**Parameters:**
-- `folderPath: string` - Directory to scan
-- `options?: ScanOptions` - Scan options
-
-**Options:**
-```typescript
-interface ScanOptions {
-    recursive?: boolean;          // Scan subdirectories
-    includeRemote?: boolean;      // Include remote images
-    calculateHashes?: boolean;    // Calculate MD5 hashes
-    maxFileSize?: number;         // Max file size to scan
-    extensions?: string[];        // File extensions to include
-}
-```
-
-**Returns:** `Promise<ImageInfo[]>` - Array of scanned images
-
-**Scanning Algorithm:**
-```
-1. Validate folder path
-2. Read directory contents
-3. For each file:
-   a. Check if it's an image (extension check)
-   b. Check file size limits
-   c. Check ignore patterns
-   d. Calculate MD5 if enabled (with cache check)
-   e. Extract metadata (dimensions if possible)
-   f. Add to results
-4. For each subdirectory (if recursive):
-   a. Recursively scan
-5. Return all results
-6. Cache scan results
-```
-
-##### `async getImageInfo(imagePath: string): Promise<ImageInfo | null>`
-
-Get detailed information about a specific image.
-
-**Parameters:**
-- `imagePath: string` - Image path
-
-**Returns:** `Promise<ImageInfo | null>` - Image information or null if not found
-
-**Image Info Structure:**
-```typescript
-interface ImageInfo {
-    path: string;                 // Full path
-    name: string;                 // Filename
-    size: number;                 // File size in bytes
-    width?: number;               // Image width
-    height?: number;              // Image height
-    modified: number;             // Last modified timestamp
-    md5?: string;                 // MD5 hash
-    group?: string;               // Group name
-    references?: ImageReferenceInfo[]; // References
-    referenceCount?: number;      // Number of references
-    isRemote?: boolean;           // Is remote image
-}
-```
-
----
-
-## Event System
-
-The plugin emits events for various operations. Subscribe to these events to extend functionality.
-
-### Event Types
-
-```typescript
-enum PluginEvent {
-    IMAGE_SCANNED = 'image-scanned',              // Image scanned
-    IMAGE_RENAMED = 'image-renamed',              // Image renamed
-    IMAGE_DELETED = 'image-deleted',              // Image deleted
-    REFERENCE_UPDATED = 'reference-updated',      // Reference updated
-    SETTINGS_CHANGED = 'settings-changed',        // Settings changed
-    LOG_ENTRY_ADDED = 'log-entry-added',          // New log entry
-    FILE_LOCKED = 'file-locked',                  // File locked
-    FILE_UNLOCKED = 'file-unlocked',              // File unlocked
-    BATCH_OPERATION_STARTED = 'batch-started',    // Batch operation started
-    BATCH_OPERATION_COMPLETED = 'batch-completed' // Batch operation completed
-}
-```
-
-### Subscribing to Events
-
-```typescript
-// Subscribe to an event
-plugin.on(PluginEvent.IMAGE_RENAMED, (data) => {
-    console.log('Image renamed:', data);
-});
-
-// Event data structure for IMAGE_RENAMED
-interface ImageRenameEventData {
-    oldPath: string;
-    newPath: string;
-    updatedReferences: number;
-    timestamp: number;
-}
-```
-
----
-
-## Error Handling
-
-### Class: `ErrorHandler`
-
-Centralized error handling and reporting.
-
-#### Methods
-
-##### `async handle(error: Error, operation: OperationType, context?: string): Promise<void>`
-
-Handle an error.
-
-**Parameters:**
-- `error: Error` - Error object
-- `operation: OperationType` - Operation that caused the error
-- `context?: string` - Additional context
-
-**Features:**
-- Logs error to logger
-- Shows user-friendly error notice
-- In dev mode, logs to console
-- Sends error reports (if configured)
-
----
-
-## Usage Examples
-
-### Example 1: Scan Images
-
-```typescript
-// Get plugin instance
+// 在 Obsidian 插件环境中获取 ImageMgr 实例
 const plugin = app.plugins.plugins['imagemgr'];
 
-// Scan default folder
-const images = await plugin.scanImages();
-console.log(`Found ${images.length} images`);
-
-// Scan specific folder
-const folderImages = await plugin.scanImages('Assets/Images');
-```
-
-### Example 2: Rename Image with Reference Updates
-
-```typescript
-const plugin = app.plugins.plugins['imagemgr'];
-
-// Rename and update all references
-const result = await plugin.renameImage(
-    'old-image.png',
-    'new-image.png'
-);
-
-if (result) {
-    console.log('Rename successful');
-} else {
-    console.log('Rename failed');
-}
-```
-
-### Example 3: Log Custom Operation
-
-```typescript
-const plugin = app.plugins.plugins['imagemgr'];
-
-// Log a custom operation
-await plugin.logger.info(
-    OperationType.CUSTOM,
-    'Custom operation completed',
-    {
-        imagePath: 'image.png',
-        details: { customData: 'value' }
-    }
-);
-```
-
-### Example 4: Subscribe to Events
-
-```typescript
-const plugin = app.plugins.plugins['imagemgr'];
-
-// Listen for image deletions
-plugin.on('image-deleted', (data) => {
-    console.log(`Image deleted: ${data.imagePath}`);
-    
-    // Perform custom cleanup
-    cleanupRelatedData(data.imagePath);
-});
-```
-
----
-
-## Best Practices
-
-### 1. Always Check Lock Status
-
-Before modifying images, check if they're locked:
-
-```typescript
-if (plugin.lockListManager.isFileLocked(imagePath)) {
-    console.log('File is locked, cannot modify');
+if (!plugin) {
+    console.error('ImageMgr 插件未安装或未启用');
     return;
 }
 ```
 
-### 2. Use Batch Operations for Multiple Files
-
-For operations on multiple files, use batch operations:
+### 基本使用流程
 
 ```typescript
-// Good - batch operation
-await plugin.performBatchOperation('rename', selectedImages);
+// 1. 扫描图片
+const images = await plugin.scanImages();
 
-// Avoid - individual operations in loop
-for (const image of selectedImages) {
-    await plugin.renameImage(image.oldPath, image.newPath); // Slow!
+// 2. 获取图片引用
+const references = await plugin.referenceManager.findAllReferences('path/to/image.png');
+
+// 3. 重命名图片（自动更新引用）
+await plugin.renameImage('old-name.png', 'new-name.png');
+```
+
+---
+
+## 核心API
+
+### ImageManagementPlugin 主类
+
+插件主类，负责协调所有功能模块。
+
+#### 属性
+
+| 属性名 | 类型 | 描述 |
+|--------|------|------|
+| `settings` | `ImageManagementSettings` | 插件设置对象 |
+| `logger` | `Logger` | 日志管理器 |
+| `errorHandler` | `ErrorHandler` | 错误处理器 |
+| `referenceManager` | `ReferenceManager` | 引用关系管理器 |
+| `trashManager` | `TrashManager` | 回收站管理器 |
+| `lockListManager` | `LockListManager` | 锁定列表管理器 |
+| `historyManager` | `HistoryManager` | 历史记录管理器 |
+
+#### 核心方法
+
+##### scanImages(folderPath?: string): Promise<ImageInfo[]>
+
+扫描指定文件夹中的图片文件。
+
+**参数:**
+- `folderPath` (可选): 要扫描的文件夹路径，默认为仓库根目录
+
+**返回值:**
+- `Promise<ImageInfo[]>`: 扫描到的图片信息数组
+
+**示例:**
+```typescript
+// 扫描整个仓库
+const allImages = await plugin.scanImages();
+
+// 扫描特定文件夹
+const folderImages = await plugin.scanImages('assets/images');
+
+// 处理扫描结果
+for (const image of allImages) {
+    console.log(`图片: ${image.name}, 大小: ${image.size} bytes`);
 }
 ```
 
-### 3. Handle Errors Gracefully
+##### renameImage(oldPath: string, newPath: string): Promise<boolean>
 
-Always wrap operations in try-catch:
+重命名图片文件并自动更新所有引用。
+
+**参数:**
+- `oldPath`: 原图片路径
+- `newPath`: 新图片路径
+
+**返回值:**
+- `Promise<boolean>`: 重命名是否成功
+
+**示例:**
+```typescript
+try {
+    const success = await plugin.renameImage(
+        'old-image.png',
+        'new-image.png'
+    );
+    if (success) {
+        new Notice('重命名成功');
+    }
+} catch (error) {
+    console.error('重命名失败:', error);
+}
+```
+
+##### deleteImage(imagePath: string, permanent?: boolean): Promise<boolean>
+
+删除图片文件。
+
+**参数:**
+- `imagePath`: 图片路径
+- `permanent` (可选): 是否永久删除，默认为 false（移至回收站）
+
+**返回值:**
+- `Promise<boolean>`: 删除是否成功
+
+**示例:**
+```typescript
+// 移至回收站
+await plugin.deleteImage('image.png', false);
+
+// 永久删除
+await plugin.deleteImage('image.png', true);
+```
+
+##### moveImage(imagePath: string, targetFolder: string): Promise<boolean>
+
+移动图片到指定文件夹。
+
+**参数:**
+- `imagePath`: 图片路径
+- `targetFolder`: 目标文件夹路径
+
+**返回值:**
+- `Promise<boolean>`: 移动是否成功
+
+**示例:**
+```typescript
+await plugin.moveImage('image.png', 'assets/archive');
+```
+
+---
+
+### ReferenceManager 引用管理器
+
+管理图片在笔记中的引用关系。
+
+#### 方法
+
+##### findAllReferences(imagePath: string, forceRefresh?: boolean): Promise<ImageReferenceInfo[]>
+
+查找图片的所有引用。
+
+**参数:**
+- `imagePath`: 图片路径
+- `forceRefresh` (可选): 是否强制刷新缓存
+
+**返回值:**
+- `Promise<ImageReferenceInfo[]>`: 引用信息数组
+
+**示例:**
+```typescript
+const references = await plugin.referenceManager.findAllReferences('image.png');
+
+console.log(`图片被 ${references.length} 个笔记引用`);
+
+for (const ref of references) {
+    console.log(`- ${ref.filePath}:${ref.lineNumber}`);
+}
+```
+
+##### updateReferences(oldPath: string, newPath: string, displayText?: string): Promise<void>
+
+更新所有引用中的图片路径。
+
+**参数:**
+- `oldPath`: 原图片路径
+- `newPath`: 新图片路径
+- `displayText` (可选): Wiki 链接的显示文本
+
+**示例:**
+```typescript
+await plugin.referenceManager.updateReferences(
+    'old-image.png',
+    'new-image.png',
+    '新图片名称'
+);
+```
+
+##### findBrokenLinks(): Promise<BrokenLinkInfo[]>
+
+查找所有指向不存在图片的链接。
+
+**返回值:**
+- `Promise<BrokenLinkInfo[]>`: 空链接信息数组
+
+**示例:**
+```typescript
+const brokenLinks = await plugin.referenceManager.findBrokenLinks();
+
+for (const link of brokenLinks) {
+    console.log(`空链接: ${link.linkText} 在 ${link.filePath}:${link.lineNumber}`);
+}
+```
+
+---
+
+### Logger 日志管理器
+
+记录所有操作的日志系统。
+
+#### 日志级别
+
+```typescript
+enum LogLevel {
+    DEBUG = 0,    // 调试信息
+    INFO = 1,     // 一般信息
+    WARNING = 2,  // 警告信息
+    ERROR = 3     // 错误信息
+}
+```
+
+#### 方法
+
+##### log(level: LogLevel, operation: OperationType, message: string, details?: any): Promise<void>
+
+记录日志。
+
+**参数:**
+- `level`: 日志级别
+- `operation`: 操作类型
+- `message`: 日志消息
+- `details` (可选): 详细信息
+
+**示例:**
+```typescript
+// 记录信息日志
+await plugin.logger.info(
+    OperationType.IMAGE_RENAME,
+    '图片重命名成功',
+    { oldPath: 'old.png', newPath: 'new.png' }
+);
+
+// 记录错误日志
+await plugin.logger.error(
+    OperationType.IMAGE_DELETE,
+    '删除图片失败',
+    { error: error.message }
+);
+```
+
+##### getLogs(filter?: LogFilter): Promise<LogEntry[]>
+
+获取日志记录。
+
+**参数:**
+- `filter` (可选): 过滤条件
+
+**示例:**
+```typescript
+// 获取所有错误日志
+const errorLogs = await plugin.logger.getLogs({
+    level: LogLevel.ERROR
+});
+
+// 获取特定操作的日志
+const renameLogs = await plugin.logger.getLogs({
+    operation: OperationType.IMAGE_RENAME
+});
+```
+
+---
+
+### TrashManager 回收站管理器
+
+管理已删除的文件。
+
+#### 方法
+
+##### moveToTrash(file: TFile): Promise<boolean>
+
+将文件移至回收站。
+
+**示例:**
+```typescript
+const file = app.vault.getAbstractFileByPath('image.png');
+if (file instanceof TFile) {
+    await plugin.trashManager.moveToTrash(file);
+}
+```
+
+##### restoreFromTrash(trashPath: string): Promise<boolean>
+
+从回收站恢复文件。
+
+**示例:**
+```typescript
+await plugin.trashManager.restoreFromTrash('.trash/image.png');
+```
+
+##### getTrashItems(): Promise<TrashItem[]>
+
+获取回收站中的所有项目。
+
+**示例:**
+```typescript
+const items = await plugin.trashManager.getTrashItems();
+console.log(`回收站中有 ${items.length} 个项目`);
+```
+
+---
+
+### LockListManager 锁定列表管理器
+
+管理被保护的文件。
+
+#### 方法
+
+##### isLocked(imagePath: string, md5?: string): boolean
+
+检查文件是否被锁定。
+
+**示例:**
+```typescript
+const isLocked = plugin.lockListManager.isLocked('image.png');
+if (isLocked) {
+    console.log('文件已被锁定，无法操作');
+}
+```
+
+##### addToLockList(imagePath: string, md5: string): Promise<void>
+
+将文件添加到锁定列表。
+
+**示例:**
+```typescript
+await plugin.lockListManager.addToLockList('important.png', 'abc123...');
+```
+
+##### removeFromLockList(imagePath: string): Promise<void>
+
+从锁定列表移除文件。
+
+**示例:**
+```typescript
+await plugin.lockListManager.removeFromLockList('image.png');
+```
+
+---
+
+## 类型定义
+
+### ImageInfo 图片信息
+
+```typescript
+interface ImageInfo {
+    /** 图片完整路径 */
+    path: string;
+    /** 图片文件名 */
+    name: string;
+    /** 文件大小（字节） */
+    size: number;
+    /** 图片宽度（像素） */
+    width?: number;
+    /** 图片高度（像素） */
+    height?: number;
+    /** 修改时间戳 */
+    modified: number;
+    /** MD5 哈希值 */
+    md5?: string;
+    /** 引用列表 */
+    references?: ImageReferenceInfo[];
+    /** 引用数量 */
+    referenceCount?: number;
+    /** 是否为网络图片 */
+    isRemote?: boolean;
+}
+```
+
+### ImageReferenceInfo 图片引用信息
+
+```typescript
+interface ImageReferenceInfo {
+    /** 引用该图片的笔记路径 */
+    filePath: string;
+    /** 引用所在的行号 */
+    lineNumber: number;
+    /** 显示文本（Wiki 链接中的别名） */
+    displayText?: string;
+    /** 完整的引用行内容 */
+    fullLine?: string;
+    /** 链接格式类型 */
+    matchType?: string;
+    /** 链接路径格式 */
+    linkPathFormat?: 'shortest' | 'relative' | 'absolute';
+}
+```
+
+### LinkFormatStats 链接格式统计
+
+```typescript
+interface LinkFormatStats {
+    wiki: number;        // Wiki 格式链接数量
+    markdown: number;    // Markdown 格式链接数量
+    html: number;        // HTML 格式链接数量
+    shortest: number;    // 最短路径格式数量
+    relative: number;    // 相对路径格式数量
+    absolute: number;    // 绝对路径格式数量
+    remote: number;      // 网络图片链接数量
+    total: number;       // 总链接数量
+}
+```
+
+---
+
+## 事件系统
+
+### 可用事件
+
+| 事件名 | 触发时机 | 数据 |
+|--------|----------|------|
+| `image-scanned` | 图片扫描完成 | `{ images: ImageInfo[], count: number }` |
+| `image-renamed` | 图片重命名 | `{ oldPath: string, newPath: string }` |
+| `image-deleted` | 图片删除 | `{ path: string, permanent: boolean }` |
+| `image-moved` | 图片移动 | `{ oldPath: string, newPath: string }` |
+| `reference-updated` | 引用更新 | `{ imagePath: string, references: ImageReferenceInfo[] }` |
+| `trash-changed` | 回收站变更 | `{ items: TrashItem[] }` |
+
+### 订阅事件
+
+```typescript
+// 订阅图片重命名事件
+plugin.on('image-renamed', (data) => {
+    console.log(`图片已从 ${data.oldPath} 重命名为 ${data.newPath}`);
+});
+
+// 订阅扫描完成事件
+plugin.on('image-scanned', (data) => {
+    new Notice(`扫描完成，发现 ${data.count} 张图片`);
+});
+```
+
+---
+
+## 使用示例
+
+### 示例1: 批量重命名图片
+
+```typescript
+/**
+ * 批量重命名图片
+ * @param images 要重命名的图片列表
+ * @param pattern 命名模式，如 "image_{index}"
+ */
+async function batchRename(images: ImageInfo[], pattern: string): Promise<void> {
+    for (let i = 0; i < images.length; i++) {
+        const image = images[i];
+        const extension = image.name.split('.').pop();
+        const newName = pattern.replace('{index}', String(i + 1).padStart(3, '0'));
+        const newPath = `${image.path.substring(0, image.path.lastIndexOf('/'))}/${newName}.${extension}`;
+        
+        try {
+            await plugin.renameImage(image.path, newPath);
+            console.log(`✓ ${image.name} -> ${newName}.${extension}`);
+        } catch (error) {
+            console.error(`✗ ${image.name} 重命名失败:`, error);
+        }
+    }
+}
+
+// 使用示例
+const images = await plugin.scanImages('assets/to-rename');
+await batchRename(images, 'screenshot_{index}');
+```
+
+### 示例2: 查找未使用的图片
+
+```typescript
+/**
+ * 查找未被任何笔记引用的图片
+ * @returns 未使用图片列表
+ */
+async function findUnusedImages(): Promise<ImageInfo[]> {
+    const allImages = await plugin.scanImages();
+    const unusedImages: ImageInfo[] = [];
+    
+    for (const image of allImages) {
+        const references = await plugin.referenceManager.findAllReferences(image.path);
+        if (references.length === 0) {
+            unusedImages.push(image);
+        }
+    }
+    
+    return unusedImages;
+}
+
+// 使用示例
+const unused = await findUnusedImages();
+console.log(`发现 ${unused.length} 张未使用的图片`);
+```
+
+### 示例3: 批量删除未使用图片
+
+```typescript
+/**
+ * 批量删除未使用的图片（带确认）
+ */
+async function deleteUnusedImages(): Promise<void> {
+    const unused = await findUnusedImages();
+    
+    if (unused.length === 0) {
+        new Notice('没有发现未使用的图片');
+        return;
+    }
+    
+    // 过滤掉锁定的文件
+    const deletable = unused.filter(img => !plugin.lockListManager.isLocked(img.path));
+    
+    if (deletable.length === 0) {
+        new Notice('所有未使用图片都已被锁定');
+        return;
+    }
+    
+    // 显示确认对话框
+    const confirmed = confirm(`确定要删除 ${deletable.length} 张未使用的图片吗？`);
+    if (!confirmed) return;
+    
+    // 批量删除
+    let successCount = 0;
+    for (const image of deletable) {
+        try {
+            await plugin.deleteImage(image.path, false); // 移至回收站
+            successCount++;
+        } catch (error) {
+            console.error(`删除 ${image.name} 失败:`, error);
+        }
+    }
+    
+    new Notice(`成功删除 ${successCount}/${deletable.length} 张图片`);
+}
+```
+
+### 示例4: 导出图片引用报告
+
+```typescript
+/**
+ * 导出图片引用报告为 Markdown
+ */
+async function exportReferenceReport(): Promise<string> {
+    const images = await plugin.scanImages();
+    let report = '# 图片引用报告\n\n';
+    report += `生成时间: ${new Date().toLocaleString()}\n\n`;
+    report += `总计图片: ${images.length} 张\n\n`;
+    
+    report += '## 图片引用详情\n\n';
+    report += '| 图片 | 大小 | 引用数 | 引用位置 |\n';
+    report += '|------|------|--------|----------|\n';
+    
+    for (const image of images) {
+        const references = await plugin.referenceManager.findAllReferences(image.path);
+        const size = formatFileSize(image.size);
+        const refCount = references.length;
+        const refLocations = references.map(r => r.filePath).join(', ');
+        
+        report += `| ${image.name} | ${size} | ${refCount} | ${refLocations || '无'} |\n`;
+    }
+    
+    return report;
+}
+
+// 辅助函数：格式化文件大小
+function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// 使用示例
+const report = await exportReferenceReport();
+await app.vault.create('图片引用报告.md', report);
+new Notice('报告已生成');
+```
+
+### 示例5: 监控文件变化
+
+```typescript
+/**
+ * 设置文件变化监控
+ */
+function setupFileMonitoring(): void {
+    // 监听图片重命名
+    plugin.on('image-renamed', async (data) => {
+        await plugin.logger.info(
+            OperationType.IMAGE_RENAME,
+            `图片重命名: ${data.oldPath} -> ${data.newPath}`
+        );
+    });
+    
+    // 监听图片删除
+    plugin.on('image-deleted', async (data) => {
+        const type = data.permanent ? '永久删除' : '移至回收站';
+        await plugin.logger.info(
+            OperationType.IMAGE_DELETE,
+            `图片${type}: ${data.path}`
+        );
+    });
+    
+    // 监听扫描完成
+    plugin.on('image-scanned', (data) => {
+        new Notice(`扫描完成: ${data.count} 张图片`);
+    });
+}
+
+// 在插件加载时调用
+setupFileMonitoring();
+```
+
+---
+
+## 最佳实践
+
+### 1. 错误处理
+
+始终使用 try-catch 包裹 API 调用：
 
 ```typescript
 try {
     await plugin.renameImage(oldPath, newPath);
 } catch (error) {
-    await plugin.errorHandler.handle(
-        error,
-        OperationType.RENAME,
-        'Failed to rename image'
+    // 记录错误
+    await plugin.logger.error(
+        OperationType.IMAGE_RENAME,
+        '重命名失败',
+        { error: error.message }
     );
+    // 通知用户
+    new Notice(`重命名失败: ${error.message}`);
 }
 ```
 
-### 4. Respect User Settings
+### 2. 批量操作优化
 
-Check user settings before performing operations:
+对于大量文件操作，使用批量处理：
 
 ```typescript
-if (plugin.settings.confirmBeforeDelete) {
-    const confirmed = await showConfirmationDialog();
-    if (!confirmed) return;
+const batchSize = 10;
+for (let i = 0; i < images.length; i += batchSize) {
+    const batch = images.slice(i, i + batchSize);
+    await Promise.all(batch.map(img => processImage(img)));
+    // 让出控制权，避免阻塞 UI
+    await new Promise(resolve => setTimeout(resolve, 0));
 }
 ```
 
-### 5. Use Logger for Important Operations
+### 3. 缓存利用
 
-Log all significant operations:
+利用引用缓存避免重复计算：
 
 ```typescript
-await plugin.logger.info(
-    OperationType.CUSTOM_BATCH,
-    'Batch processing completed',
-    {
-        imageCount: processedImages.length,
-        successCount: successCount,
-        failedCount: failedCount
-    }
+// 首次查询会计算并缓存
+const refs1 = await plugin.referenceManager.findAllReferences('image.png');
+
+// 后续查询使用缓存，速度更快
+const refs2 = await plugin.referenceManager.findAllReferences('image.png');
+
+// 强制刷新缓存
+const refs3 = await plugin.referenceManager.findAllReferences('image.png', true);
+```
+
+### 4. 锁定保护
+
+在执行批量操作前检查锁定状态：
+
+```typescript
+const images = await plugin.scanImages();
+const deletable = images.filter(img => 
+    !plugin.lockListManager.isLocked(img.path)
 );
 ```
 
 ---
 
-## Performance Considerations
+## 故障排除
 
-### 1. Cache Utilization
+### 常见问题
 
-The plugin uses extensive caching. Use cache when possible:
+#### Q: 插件实例获取失败
 
 ```typescript
-// Check cache first
-const cached = plugin.referenceCache.get(imagePath);
-if (cached) {
-    return cached;
+const plugin = app.plugins.plugins['imagemgr'];
+if (!plugin) {
+    console.error('插件未启用');
+    return;
 }
-
-// Fetch and cache
-const references = await plugin.referenceManager.findAllReferences(imagePath);
-plugin.referenceCache.set(imagePath, new Set(references.map(r => r.filePath)));
 ```
 
-### 2. Debounce Frequent Operations
+#### Q: 扫描返回空数组
 
-For operations that may be called frequently, use debouncing:
-
+检查文件夹路径是否正确：
 ```typescript
-const debouncedScan = debounce(() => {
-    plugin.scanImages();
-}, 1000);
-
-// Call multiple times - only executes once after 1s
-debouncedScan();
-debouncedScan();
-debouncedScan();
-```
-
-### 3. Lazy Loading
-
-Enable lazy loading for better performance with many images:
-
-```typescript
-// In settings
-plugin.settings.enableLazyLoading = true;
-plugin.settings.lazyLoadDelay = 200; // ms
-```
-
----
-
-## Troubleshooting
-
-### Issue: "File is locked" error
-
-**Cause:** File is protected by lock list
-
-**Solution:**
-```typescript
-// Check lock status
-if (plugin.lockListManager.isFileLocked(imagePath)) {
-    // Unlock first
-    await plugin.lockListManager.unlockFile(imagePath);
+const folder = app.vault.getAbstractFileByPath('assets/images');
+if (!folder) {
+    console.error('文件夹不存在');
+    return;
 }
-// Then perform operation
 ```
 
-### Issue: References not updating after rename
+#### Q: 重命名失败但无错误
 
-**Cause:** Cache may be stale
-
-**Solution:**
+检查文件是否被锁定：
 ```typescript
-// Force refresh cache
-const references = await plugin.referenceManager.findAllReferences(
-    imagePath,
-    true // forceRefresh = true
-);
+if (plugin.lockListManager.isLocked(imagePath)) {
+    console.error('文件已被锁定');
+    return;
+}
 ```
 
-### Issue: High memory usage
+### 调试技巧
 
-**Cause:** Large image library with full caching
+1. **启用 DEBUG 日志**
+   ```typescript
+   plugin.settings.logLevel = 'DEBUG';
+   await plugin.saveSettings();
+   ```
 
-**Solution:**
-```typescript
-// Reduce cache size
-plugin.settings.maxCacheSize = 50; // Default is 100
+2. **查看缓存状态**
+   ```typescript
+   console.log('引用缓存:', plugin.referenceCache);
+   console.log('显示文本缓存:', plugin.displayTextCache);
+   ```
 
-// Enable lazy loading
-plugin.settings.enableLazyLoading = true;
-```
-
----
-
-## API Version History
-
-### v1.0.0 (Current)
-
-- Initial API release
-- Core functionality: scanning, renaming, references, trash, locks
-- Logger system with batch save
-- Event system
-- Error handling
+3. **监控性能**
+   ```typescript
+   console.time('scan');
+   await plugin.scanImages();
+   console.timeEnd('scan');
+   ```
 
 ---
 
-## Support
+## 更新日志
 
-For API questions or issues:
+### v1.0.1 (2025-01-31)
+- 完善 API 文档，添加详细示例
+- 添加故障排除指南
+- 优化类型定义说明
 
-1. Check the [README](./README.md) for usage examples
-2. Review the [Development Review](./DEVELOPMENT_REVIEW.md) for architecture details
-3. Open an issue on GitHub
-4. Check existing issues for similar questions
+### v1.0.0 (2025-01-24)
+- 初始版本发布
+- 核心 API 稳定
 
 ---
 
-*Generated for ImageMgr Plugin v1.0.0*
+**文档维护:** ImageMgr 开发团队  
+**问题反馈:** [GitHub Issues](https://github.com/Coeris/Obsidian-ImageMgr/issues)

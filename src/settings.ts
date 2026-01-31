@@ -86,8 +86,6 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	pureGallery: false,
 
 	// ==================== 性能设置 ====================
-	/** 是否启用懒加载 - 只加载可见区域的图片，提高性能 */
-	enableLazyLoading: true,
 	/** 懒加载延迟（毫秒） - 延迟多久后加载图片 */
 	lazyLoadDelay: 200,
 	/** 最大缓存图片数 - 内存中保留的最大缓存图片数量 */

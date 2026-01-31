@@ -6,7 +6,7 @@
  */
 
 import { ScanError, ScanErrorType, ErrorContext, RetryOptions } from './types';
-import { isRetryableError, retryOperation as utilsRetryOperation } from './utils';
+import { retryOperation as genericRetryOperation, GenericErrorHandler } from '../utils/retry-utils';
 
 /**
  * 扫描错误处理器
@@ -75,7 +75,11 @@ export class ScanErrorHandler {
             message.includes('econnreset') ||
             message.includes('econnrefused') ||
             message.includes('dns') ||
-            message.includes('internet')
+            message.includes('internet') ||
+            message.includes('http2') ||
+            message.includes('protocol') ||
+            message.includes('ssl') ||
+            message.includes('tls')
         ) {
             return ScanErrorType.NETWORK_ERROR;
         }
@@ -285,8 +289,8 @@ export class ScanErrorHandler {
 }
 
 /**
- * 带重试机制执行异步操作
- * @param operation - 要执行的操作
+ * 带重试机制执行异步操作（使用通用版本）
+ * @param operation - 要执行的操作函数
  * @param options - 重试选项
  * @param errorHandler - 错误处理器实例（可选）
  * @returns 操作结果
@@ -296,45 +300,18 @@ export async function retryOperation<T>(
     options: RetryOptions,
     errorHandler?: ScanErrorHandler
 ): Promise<T> {
-    const { maxRetries, initialDelay, maxDelay, backoffMultiplier } = options;
+    // 创建适配器函数，将 ScanErrorHandler 转换为通用错误处理回调
+    const genericErrorHandler: GenericErrorHandler | undefined = errorHandler ? 
+        (error: Error, attempt: number) => {
+            errorHandler.handleError(error, {});
+        } : undefined;
     
-    let lastError: Error;
-    let delay = initialDelay;
+    // 创建可重试检查函数，优先使用错误处理器的检查方法
+    const isRetryableCheck = errorHandler ? 
+        (error: Error) => errorHandler['isRetryable'](error) : 
+        undefined;
     
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-            // 尝试执行操作
-            return await operation();
-        } catch (error) {
-            lastError = error as Error;
-            
-            // 使用错误处理器记录错误（如果有）
-            if (errorHandler) {
-                errorHandler.handleError(lastError, {});
-            }
-            
-            // 检查是否可重试
-            const isRetryable = errorHandler ? 
-                errorHandler['isRetryable'](lastError) : 
-                isRetryableError(lastError);
-            
-            if (!isRetryable || attempt === maxRetries - 1) {
-                // 不可重试或已到达最大重试次数
-                break;
-            }
-            
-            console.warn(`Operation failed (attempt ${attempt + 1}/${maxRetries}): ${lastError.message}. Retrying in ${delay}ms...`);
-            
-            // 等待后重试
-            await new Promise(resolve => setTimeout(resolve, delay));
-            
-            // 计算下一次的延迟（指数退避）
-            delay = Math.min(delay * backoffMultiplier, maxDelay);
-        }
-    }
-    
-    // 所有重试都失败，抛出最后一次错误
-    throw lastError!;
+    return await genericRetryOperation(operation, options, genericErrorHandler, isRetryableCheck);
 }
 
 export default ScanErrorHandler;

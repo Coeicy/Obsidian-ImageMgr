@@ -462,7 +462,7 @@ Below is the complete feature list and implementation status of the plugin.
 - **Uniform Card Height**: All cards use same height
 - **Show Name/Size/Dimensions/Index/Lock Icon**: Control info displayed on cards
 - **Name Wrap**: Filename auto-wrap
-- **Hover Effect**: Animation effect on mouse hover
+- **Mouse Hover Animation**: Enable elegant floating effect when hovering over image thumbnails
 
 ### 🗑️ Delete & Trash
 - **Confirm Before Delete**: Show confirmation dialog before deleting files

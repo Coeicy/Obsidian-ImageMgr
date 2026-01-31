@@ -58,11 +58,13 @@ export class IncrementalNetworkImageScanner {
      * 增量扫描网络图片
      * @param path - 扫描路径（可选）
      * @param incremental - 是否启用增量扫描
+     * @param quiet - 静默模式，不输出控制台日志
      * @returns 扫描结果
      */
     async scan(
         path?: string,
-        incremental: boolean = true
+        incremental: boolean = true,
+        quiet: boolean = false
     ): Promise<IncrementalScanResult> {
         const startTime = Date.now();
         const result: IncrementalScanResult = {
@@ -78,8 +80,10 @@ export class IncrementalNetworkImageScanner {
         };
         
         try {
-            // 使用 console.debug 减少日志输出
-            console.debug(`Starting ${incremental ? 'incremental' : 'full'} scan${path ? ` of ${path}` : ''}...`);
+            // 仅在非静默模式下输出扫描开始的关键信息
+            if (!quiet) {
+                console.log(`Starting ${incremental ? 'incremental' : 'full'} scan${path ? ` of ${path}` : ''}...`);
+            }
             
             // 1. 获取所有 Markdown 文件
             const allFiles = this.app.vault.getMarkdownFiles();
@@ -88,10 +92,8 @@ export class IncrementalNetworkImageScanner {
                 : allFiles;
             
             result.scannedFiles = targetFiles.length;
-            console.debug(`Found ${targetFiles.length} files to process`);
             
             if (targetFiles.length === 0) {
-                console.debug('No files to scan');
                 return result;
             }
             
@@ -126,9 +128,6 @@ export class IncrementalNetworkImageScanner {
                     console.warn('File status check failed:', checkResult.reason);
                 }
             }
-            
-            // 使用 console.debug 减少日志输出
-            console.debug(`Files to scan: ${filesToScan.length}, skip: ${filesToSkip.length}, cleanup: ${filesToCleanup.length}`);
             
             result.cachedImages = skippedImageCount;
             
@@ -175,10 +174,15 @@ export class IncrementalNetworkImageScanner {
                 ? (result.cachedImages / result.totalImages) * 100 
                 : 0;
             
-            // 只在有重要变化时输出日志（新增或更新图片数量 > 0）
+            // 只在非静默模式且有重要变化时输出日志（新增或更新图片数量 > 0）
             // 避免在无变化时产生大量日志
-            if (result.newImages > 0 || result.updatedImages > 0 || result.deletedImages > 0) {
-                console.log(`Scan completed: ${JSON.stringify(result)}`);
+            if (!quiet) {
+                if (result.newImages > 0 || result.updatedImages > 0 || result.deletedImages > 0) {
+                    console.log(`Scan completed: ${JSON.stringify(result)}`);
+                } else {
+                    // 无变化时只输出简洁的完成信息
+                    console.log(`Scan completed: no changes detected`);
+                }
             }
             
         } catch (error) {
@@ -217,7 +221,6 @@ export class IncrementalNetworkImageScanner {
             
             if (!cachedFile) {
                 // 文件从未扫描过
-                console.debug(`File never scanned: ${file.path}`);
                 return {
                     action: 'scan',
                     file,
@@ -228,7 +231,6 @@ export class IncrementalNetworkImageScanner {
             // 检查文件是否被删除
             const exists = await this.app.vault.adapter.exists(file.path);
             if (!exists) {
-                console.debug(`File deleted: ${file.path}`);
                 return {
                     action: 'cleanup',
                     file,
@@ -238,7 +240,6 @@ export class IncrementalNetworkImageScanner {
             
             if (!incremental) {
                 // 非增量模式，重新扫描所有文件
-                console.debug(`Full scan mode: ${file.path}`);
                 return {
                     action: 'scan',
                     file,
@@ -250,7 +251,6 @@ export class IncrementalNetworkImageScanner {
             const isModified = await this.isFileModified(file, cachedFile);
             
             if (isModified) {
-                console.debug(`File modified: ${file.path}`);
                 return {
                     action: 'scan',
                     file,
@@ -290,11 +290,8 @@ export class IncrementalNetworkImageScanner {
         let updatedImages = 0;
         
         try {
-            console.debug(`Scanning file: ${file.path}`);
-            
             // 1. 扫描文件中的网络图片
             const images = await this.scanner.scan(file.path);
-            console.debug(`Found ${images.length} images in ${file.path}`);
             
             // 2. 计算内容哈希
             const contentHash = await this.calculateContentHash(file);
@@ -311,7 +308,6 @@ export class IncrementalNetworkImageScanner {
                 
                 // 检查是否在黑名单中，如果是则跳过
                 if (blacklistSet.has(imageId)) {
-                    console.debug(`Skipping blacklisted URL: ${image.url}`);
                     continue;
                 }
                 
@@ -337,13 +333,8 @@ export class IncrementalNetworkImageScanner {
             // 5. 标记文件的其他图片为删除状态
             await this.markDeletedImages(file.path, imageIds);
             
-            // 只在有变化时输出单个文件的扫描日志（减少日志量）
-            // 如果 newImages 和 updatedImages 都为 0，说明文件无变化，不输出日志
-            if (newImages > 0 || updatedImages > 0) {
-                // 使用 console.debug 而不是 console.log，减少控制台输出
-                // 用户可以在浏览器开发者工具中过滤这些日志
-                console.debug(`File scan completed: ${file.path} (new: ${newImages}, updated: ${updatedImages})`);
-            }
+            // 不再输出单个文件的扫描日志，只在控制台显示开始和结束信息
+            // 详细结果记录到插件日志中
             
         } catch (error) {
             console.error(`Failed to scan file ${file.path}:`, error);
@@ -388,20 +379,17 @@ export class IncrementalNetworkImageScanner {
         try {
             // 检查修改时间
             if (file.stat.mtime !== cachedFile.mtime) {
-                console.debug(`File mtime changed: ${file.path} (${cachedFile.mtime} -> ${file.stat.mtime})`);
                 return true;
             }
             
             // 检查文件大小
             if (file.stat.size !== cachedFile.size) {
-                console.log(`File size changed: ${file.path} (${cachedFile.size} -> ${file.stat.size})`);
                 return true;
             }
             
             // 检查内容哈希（更精确）
             const currentHash = await this.calculateContentHash(file);
             if (currentHash && currentHash !== cachedFile.contentHash) {
-                console.debug(`File content hash changed: ${file.path}`);
                 return true;
             }
             
@@ -489,7 +477,7 @@ export class IncrementalNetworkImageScanner {
         const store = tx.objectStore(ObjectStore.IMAGES);
         await store.put(record);
         
-        console.debug(`Cached new image: ${image.url} (${file.path})`);
+
     }
     
     /**
@@ -520,7 +508,7 @@ export class IncrementalNetworkImageScanner {
         const store = tx.objectStore(ObjectStore.IMAGES);
         await store.put(cachedImage);
         
-        console.debug(`Updated cached image: ${cachedImage.url} (${file.path})`);
+
     }
     
     /**
@@ -559,7 +547,7 @@ export class IncrementalNetworkImageScanner {
         const store = tx.objectStore(ObjectStore.FILES);
         await store.put(record);
         
-        console.debug(`Updated file cache: ${file.path} (${imageIds.length} images)`);
+
     }
     
     /**
@@ -584,7 +572,7 @@ export class IncrementalNetworkImageScanner {
                 image.status = 'deleted';
                 image.updatedAt = Date.now();
                 await store.put(image);
-                console.debug(`Marked image as deleted: ${image.url} (${filePath})`);
+
             }
         }
     }
@@ -612,7 +600,7 @@ export class IncrementalNetworkImageScanner {
                 deletedCount++;
             }
             
-            console.debug(`Clean up images for deleted file: ${filePath} (${fileImages.length} images)`);
+
         }
         
         return deletedCount;
@@ -624,8 +612,6 @@ export class IncrementalNetworkImageScanner {
      */
     private async cleanupOrphanedImages(): Promise<void> {
         try {
-            console.debug('Checking for orphaned images...');
-            
             const tx = this.db.transaction([ObjectStore.IMAGES, ObjectStore.FILES], 'readwrite');
             const imageStore = tx.objectStore(ObjectStore.IMAGES);
             const fileStore = tx.objectStore(ObjectStore.FILES);
@@ -651,7 +637,6 @@ export class IncrementalNetworkImageScanner {
             
             // 标记孤立图片为删除状态
             if (orphaned.length > 0) {
-                console.debug(`Found ${orphaned.length} orphaned images, marking as deleted`);
                 for (const imageId of orphaned) {
                     const image = await this.getCachedImage(imageId);
                     if (image) {
@@ -660,8 +645,6 @@ export class IncrementalNetworkImageScanner {
                         await imageStore.put(image);
                     }
                 }
-            } else {
-                console.debug('No orphaned images found');
             }
         } catch (error) {
             console.warn('Failed to cleanup orphaned images:', error);
@@ -715,7 +698,8 @@ export class IncrementalNetworkImageScanner {
                 updatedAt: Date.now()
             });
             
-            console.debug('Metadata updated:', metadata);
+            // 元数据更新日志改为 debug 级别，不在控制台显示
+            // 详细日志记录到插件日志中
         } catch (error) {
             console.warn('Failed to update metadata:', error);
         }

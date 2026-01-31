@@ -14,10 +14,11 @@
 .settings-tab-bar {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 0;
+	gap: 8px;
 	margin-bottom: 0;
 	padding: 0;
 	overflow-x: auto;
+	row-gap: 8px;
 }
 
 .settings-tab-btn {

@@ -49,12 +49,15 @@ export class ImagePreviewPanel {
 		private getScale?: () => number,
 		private isTrashFile: boolean = false,
 		private onImageLoaded?: (img: HTMLImageElement) => void,
-		logger?: (message: string, error?: any) => void
+		logger?: (message: string, error?: any) => void,
+		private plugin?: any // 添加插件实例参数
 	) {
 		this.container = container;
 		this.logger = logger;
 		// 判断是否为云端图片
-		this.isRemoteImage = image.isRemote === true || image.path.startsWith('http://') || image.path.startsWith('https://');
+		// 如果关闭了云端图片扫描，所有图片都视为本地图片
+		const scanRemoteImagesDisabled = plugin?.settings?.scanRemoteImages === false;
+		this.isRemoteImage = scanRemoteImagesDisabled ? false : (image.isRemote === true || image.path.startsWith('http://') || image.path.startsWith('https://'));
 		this.render();
 	}
 

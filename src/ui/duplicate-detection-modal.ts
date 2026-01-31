@@ -137,15 +137,28 @@ export class DuplicateDetectionModal extends Modal {
 		const remoteImagesToCheck = this.images.filter(img => img.isRemote && !img.md5);
 		const hasRemoteToCheck = remoteImagesToCheck.length > 0;
 		
+		// 检查是否关闭了云端图片扫描
+		const scanRemoteImagesDisabled = this.plugin?.settings.scanRemoteImages === false;
+		
 		// 如果有需要检测的云端图片，显示"正在检查重复云端图片"提示
 		let loadingEl: HTMLElement | null = null;
-		if (hasRemoteToCheck) {
+		if (hasRemoteToCheck && !scanRemoteImagesDisabled) {
 			loadingEl = containerEl.createDiv({ text: '正在检测重复云端图片，重启页面更新结果' });
 			loadingEl.style.textAlign = 'center';
 			loadingEl.style.padding = '20px';
 			loadingEl.style.color = 'var(--text-muted)';
 			loadingEl.style.fontSize = '0.9em';
 			loadingEl.id = 'duplicate-remote-loading';
+		}
+		
+		// 如果关闭了云端图片扫描，显示提示信息
+		if (scanRemoteImagesDisabled && remoteImagesToCheck.length > 0) {
+			const disabledInfoEl = containerEl.createDiv({ cls: 'setting-item-description' });
+			disabledInfoEl.innerHTML = `
+				<p style="margin: 0 0 12px 0; font-size: 0.9em; color: var(--text-muted);">
+					💡 当前已关闭云端图片扫描，重复检测将仅针对本地图片
+				</p>
+			`;
 		}
 
 		try {
@@ -190,9 +203,8 @@ export class DuplicateDetectionModal extends Modal {
 					}
 				});
 
-			// 并行计算云端图片的哈希值（云端图片的哈希值通常不在预扫描中）
-			// 使用批量处理，减少内存峰值（每批3个，因为需要下载完整图片内容）
-			const remoteImagesToHash = remoteImages.filter(imageInfo => !imageInfo.md5);
+			// 如果关闭了云端图片扫描，跳过云端图片的哈希计算
+			const remoteImagesToHash = scanRemoteImagesDisabled ? [] : remoteImages.filter(imageInfo => !imageInfo.md5);
 			const REMOTE_BATCH_SIZE = 3; // 减少批次大小，因为需要下载完整图片
 			const remoteHashResults: Array<{ hash: string; imageInfo: ImageInfo } | null> = [];
 
@@ -494,7 +506,7 @@ export class DuplicateDetectionModal extends Modal {
 		});
 	}
 
-	renderImageItem(containerEl: HTMLElement, image: ImageInfo, group: DuplicateGroup) {
+		renderImageItem(containerEl: HTMLElement, image: ImageInfo, group: DuplicateGroup) {
 		const imageItem = containerEl.createDiv('image-item');
 		imageItem.style.cssText = `
 			position: relative;
@@ -505,7 +517,20 @@ export class DuplicateDetectionModal extends Modal {
 			display: flex;
 			flex-direction: column;
 			height: 100%; /* 确保所有卡片高度一致 */
+			transition: transform 0.2s ease, box-shadow 0.2s ease;
 		`;
+
+		// 添加悬停效果 - 根据设置决定是否启用
+		if (this.plugin?.settings.enableHoverEffect) {
+			imageItem.addEventListener('mouseenter', () => {
+				imageItem.style.transform = 'translateY(-2px)';
+				imageItem.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+			});
+			imageItem.addEventListener('mouseleave', () => {
+				imageItem.style.transform = 'translateY(0)';
+				imageItem.style.boxShadow = 'none';
+			});
+		}
 
 		// 图片预览
 		const imagePreview = imageItem.createEl('img', {

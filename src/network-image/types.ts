@@ -347,6 +347,9 @@ export interface ScanOptions {
     
     /** 最大并发数 */
     maxConcurrency?: number;
+    
+    /** 静默模式，不输出控制台日志 */
+    quiet?: boolean;
 }
 
 /**

@@ -157,15 +157,39 @@ export class NetworkImageModal extends Modal {
                 this.updateUploadButton();
             };
 
-            // Preview
-            const previewCell = row.createEl('td');
-            const imgEl = previewCell.createEl('img');
-            // 尝试直接加载
-            imgEl.src = img.url;
-            imgEl.referrerPolicy = 'no-referrer';
-            imgEl.style.maxHeight = '50px';
-            imgEl.style.maxWidth = '50px';
-            imgEl.style.objectFit = 'contain';
+			// Preview
+			const previewCell = row.createEl('td');
+			previewCell.style.cssText = `
+				padding: 8px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				height: 70px;
+				border-radius: 4px;
+				border: 1px solid var(--background-modifier-border);
+				background: var(--background-primary);
+				transition: transform 0.2s ease, box-shadow 0.2s ease;
+			`;
+			
+			// 添加悬停效果 - 根据设置决定是否启用
+			if (this.plugin?.settings.enableHoverEffect) {
+				previewCell.addEventListener('mouseenter', () => {
+					previewCell.style.transform = 'translateY(-2px)';
+					previewCell.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+				});
+				previewCell.addEventListener('mouseleave', () => {
+					previewCell.style.transform = 'translateY(0)';
+					previewCell.style.boxShadow = 'none';
+				});
+			}
+			
+			const imgEl = previewCell.createEl('img');
+			// 尝试直接加载
+			imgEl.src = img.url;
+			imgEl.referrerPolicy = 'no-referrer';
+			imgEl.style.maxHeight = '50px';
+			imgEl.style.maxWidth = '50px';
+			imgEl.style.objectFit = 'contain';
             
             // 错误处理与重试机制
             imgEl.onerror = async () => {

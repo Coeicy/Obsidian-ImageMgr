@@ -8,10 +8,11 @@
 |---------|--------|----------|----------|
 | 📖 用户指南 | 2个 | 安装、使用、FAQ | 所有用户 |
 | 🔧 API文档 | 2个 | 接口说明、示例代码 | 开发者 |
+| 💡 使用示例 | 1个 | 详细教程、代码示例 | 所有用户 |
 | 🏗️ 技术指南 | 2个 | 架构设计、流程图 | 贡献者 |
 | 📋 问题总结 | 1个 | 问题分析、修复记录 | 开发者 |
 | 📄 审查报告 | 1个 | 代码审查、文档完善 | 开发者 |
-| **总计** | **8个** | **完整文档体系** | **全角色** |
+| **总计** | **10个** | **完整文档体系** | **全角色** |
 
 ---
 
@@ -59,7 +60,29 @@
 
 ---
 
-### 3. [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) - 技术架构指南
+### 3. [EXAMPLES.md](./EXAMPLES.md) - 使用示例与教程
+**目标读者：** 所有用户（初级→高级）
+**内容：**
+- 快速入门指南
+- 10+ 个详细代码示例
+- 从基础到高级的渐进式教程
+- 完整项目案例
+- 故障排除指南
+
+**示例涵盖：**
+- 列出所有图片
+- 查找图片引用
+- 批量重命名
+- 清理未使用图片
+- 生成图片报告
+- 事件监听
+- 自定义脚本
+
+**建议：** 学习使用插件时参考，包含可直接运行的代码
+
+---
+
+### 4. [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) - 技术架构指南
 **目标读者：** 开发者、贡献者
 **内容：**
 - 系统架构图
@@ -84,7 +107,7 @@
 
 ---
 
-### 4. [CHANGELOG.md](./CHANGELOG.md) - 更新日志
+### 5. [CHANGELOG.md](./CHANGELOG.md) - 更新日志
 **目标读者：** 所有用户
 **内容：**
 - 版本发布历史
@@ -97,7 +120,26 @@
 
 ---
 
-### 5. [LICENSE](./LICENSE) - 许可证
+### 6. [LICENSE](./LICENSE) - 许可证
+**内容：** MIT许可证文本
+
+---
+
+### 7. [ISSUES_SUMMARY.md](./ISSUES_SUMMARY.md) - 代码问题总结报告
+**目标读者：** 开发者、贡献者
+**内容：**
+- 代码审查发现的问题汇总
+- 问题分类（严重/重要/中等/轻微）
+- 修复状态和进度
+- 代码质量指标
+- 修复优先级建议
+
+**关键信息：**
+- 严重问题：已全部修复 ✅
+- 待处理问题：61个（非严重）
+- 代码质量：持续改进中
+
+**建议：** 贡献代码前阅读，了解当前代码状况
 **内容：** MIT许可证文本
 
 ---
@@ -110,6 +152,8 @@ README.md (用户指南)
     ↓
 快速开始章节
     ↓
+EXAMPLES.md (使用示例)
+    ↓
 功能详解章节
     ↓
 常见问题
@@ -121,7 +165,11 @@ README.md (项目结构)
     ↓
 API_DOCUMENTATION.md (接口文档)
     ↓
+EXAMPLES.md (使用示例)
+    ↓
 TECHNICAL_GUIDE.md (架构详解)
+    ↓
+ISSUES_SUMMARY.md (代码问题)
     ↓
 源码注释
 ```
@@ -141,25 +189,29 @@ API文档 - 错误处理 (API_DOCUMENTATION.md)
 
 ### 普通用户
 1. **首次使用**：阅读 [README.md](./README.md) 的"快速开始"章节
-2. **了解功能**：阅读 [README.md](./README.md) 的"功能详解"章节
-3. **遇到问题**：查看 [README.md](./README.md) 的"常见问题"
+2. **学习使用**：阅读 [EXAMPLES.md](./EXAMPLES.md) 的示例代码
+3. **了解功能**：阅读 [README.md](./README.md) 的"功能详解"章节
+4. **遇到问题**：查看 [README.md](./README.md) 的"常见问题"
 
 ### 高级用户
 1. **自定义设置**：阅读 [README.md](./README.md) 的"设置选项"
 2. **快捷键**：查看 [README.md](./README.md) 的"快捷键"表格
-3. **故障排查**：查看 [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) 的"故障排查"
+3. **高级用法**：查看 [EXAMPLES.md](./EXAMPLES.md) 的进阶示例
+4. **故障排查**：查看 [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) 的"故障排查"
 
 ### 插件开发者
 1. **了解架构**：阅读 [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) 的"架构概述"
 2. **API接口**：查阅 [API_DOCUMENTATION.md](./API_DOCUMENTATION.md)
-3. **事件系统**：查看 [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) 的"Event System"
-4. **代码实现**：阅读源码中的JSDoc注释
+3. **使用示例**：查看 [EXAMPLES.md](./EXAMPLES.md) 的代码示例
+4. **事件系统**：查看 [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) 的"Event System"
+5. **代码实现**：阅读源码中的JSDoc注释
 
 ### 贡献者
 1. **开发环境**：阅读 [README.md](./README.md) 的"开发"章节
 2. **代码规范**：查看 [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) 的"代码规范"
-3. **测试策略**：查看 [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) 的"测试策略"
-4. **提交PR**：阅读 [README.md](./README.md) 的"贡献"指南
+3. **代码状况**：查看 [ISSUES_SUMMARY.md](./ISSUES_SUMMARY.md) 了解待处理问题
+4. **测试策略**：查看 [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) 的"测试策略"
+5. **提交PR**：阅读 [README.md](./README.md) 的"贡献"指南
 
 ## 🔍 快速查找
 
@@ -191,9 +243,11 @@ API文档 - 错误处理 (API_DOCUMENTATION.md)
 | 文档 | 字数 | 代码示例 | 流程图 | 目标读者 |
 |------|------|----------|--------|----------|
 | README.md | ~15,000 | 20+ | 1 | 终端用户 |
-| API_DOCUMENTATION.md | ~12,000 | 30+ | 0 | 开发者 |
+| API_DOCUMENTATION.md | ~15,000 | 40+ | 0 | 开发者 |
+| EXAMPLES.md | ~12,000 | 30+ | 0 | 所有用户 |
 | TECHNICAL_GUIDE.md | ~18,000 | 15+ | 10+ | 贡献者 |
-| 总计 | ~45,000 | 65+ | 11+ | - |
+| ISSUES_SUMMARY.md | ~5,000 | 0 | 0 | 开发者 |
+| 总计 | ~65,000 | 105+ | 11+ | - |
 
 ## 🔄 文档更新
 
@@ -205,8 +259,9 @@ API文档 - 错误处理 (API_DOCUMENTATION.md)
 
 ### 版本同步
 所有文档都与代码版本保持同步：
-- 当前版本：v1.0.0
-- 最后更新：2025-01-24
+- 当前版本：v1.0.1
+- 最后更新：2025-01-31
+- 最新更新：完善API文档、新增使用示例教程、更新文档导航
 
 ### 贡献指南
 如需更新文档：
@@ -235,7 +290,9 @@ API文档 - 错误处理 (API_DOCUMENTATION.md)
 ImageMgr插件提供了完整的文档体系：
 - **用户指南** (README.md): 帮助用户快速上手
 - **API文档** (API_DOCUMENTATION.md): 帮助开发者集成扩展
+- **使用示例** (EXAMPLES.md): 提供详细的代码示例和教程
 - **技术指南** (TECHNICAL_GUIDE.md): 帮助贡献者理解架构
+- **问题报告** (ISSUES_SUMMARY.md): 记录代码问题和修复状态
 
 所有文档都采用Markdown格式，易于阅读和维护，并与代码实现保持同步更新。
 
@@ -243,5 +300,5 @@ ImageMgr插件提供了完整的文档体系：
 
 **插件作者：** Coeris  
 **文档维护者：** Coeris  
-**最后更新：** 2025-01-24  
-**文档版本：** v1.0.0
+**最后更新：** 2025-01-31  
+**文档版本：** v1.1.0

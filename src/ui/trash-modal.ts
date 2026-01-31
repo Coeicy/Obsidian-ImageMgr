@@ -714,7 +714,8 @@ export class TrashModal extends Modal {
 				fileIcon.style.cssText = 'font-size: 64px; opacity: 0.4; pointer-events: none; text-align: center;';
 			}
 			
-			// 悬停效果（卡片级别）
+		// 悬停效果（卡片级别）- 根据设置决定是否启用
+		if (this.plugin?.settings.enableHoverEffect) {
 			card.addEventListener('mouseenter', () => {
 				if (!isSelected) {
 					card.style.transform = 'translateY(-2px)';
@@ -727,6 +728,7 @@ export class TrashModal extends Modal {
 					card.style.boxShadow = 'none';
 				}
 			});
+		}
 
 			// 文件信息
 			const infoContainer = card.createDiv('info-container');

@@ -53,7 +53,8 @@ export class IndexedDBManager {
             
             request.onsuccess = () => {
                 this.db = request.result;
-                console.log(`Successfully opened database: ${this.dbName} (version: ${this.dbVersion})`);
+                // 只在调试模式下输出数据库打开信息
+                console.debug(`Successfully opened database: ${this.dbName} (version: ${this.dbVersion})`);
                 resolve(this.db);
             };
             

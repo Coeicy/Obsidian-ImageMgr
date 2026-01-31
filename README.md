@@ -180,9 +180,12 @@ graph TD
 - **倒序清除**：按操作顺序倒序清除搜索、排序、筛选、分组
 
 #### 网络图片支持
+- **智能扫描控制**：支持开启/关闭网络图片扫描功能，关闭后已缓存的云端图片正常显示，未扫描的不再进行扫描
 - **自动扫描**：自动发现笔记中的网络图片引用（http/https）
 - **混合预览**：在主视图中与本地图片混合展示，带🌩️标识
 - **智能加载**：三级容错加载机制（直连 -> 本地代理 -> 公共代理），解决防盗链和跨域问题
+- **静默扫描模式**：自动触发的扫描（文件创建/修改事件）使用静默模式，避免产生控制台日志
+- **简洁日志输出**：用户主动扫描时只显示开始和结束信息，详细结果记录到插件日志中
 - **扫描方式**：
   - 命令面板：按 `Ctrl/Cmd + P`，输入 `扫描网络图片`
   - 文件夹右键：在文件资源管理器中右键文件夹，选择"扫描网络图片"
@@ -341,22 +344,25 @@ graph TD
 |------|----------|----------|------|
 | 📖 **用户指南** | 所有用户 | 安装、使用、设置、FAQ | [README.md](./README.md) |
 | 🔧 **API文档** | 开发者 | API接口、事件系统、示例代码 | [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) |
+| 💡 **使用示例** | 所有用户 | 详细教程、代码示例、最佳实践 | [EXAMPLES.md](./EXAMPLES.md) |
 | 🏗️ **技术指南** | 贡献者 | 架构设计、流程图、性能优化 | [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) |
 | 📋 **更新日志** | 所有用户 | 版本历史、新功能、Bug修复 | [CHANGELOG.md](./CHANGELOG.md) |
+| 📊 **问题报告** | 开发者 | 代码问题分析、修复记录 | [ISSUES_SUMMARY.md](./ISSUES_SUMMARY.md) |
 
 ### 快速导航
 
-- **新用户**：从[用户指南](#快速开始)开始
-- **高级用户**：查看[设置选项](#设置选项)和[快捷键](#快捷键)
-- **开发者**：参考[API文档](./API_DOCUMENTATION.md)
-- **贡献者**：阅读[技术指南](./TECHNICAL_GUIDE.md)
+- **新用户**：从[用户指南](#快速开始)开始，然后查看[使用示例](./EXAMPLES.md)
+- **高级用户**：查看[设置选项](#设置选项)、[快捷键](#快捷键)和[使用示例](./EXAMPLES.md)
+- **开发者**：参考[API文档](./API_DOCUMENTATION.md)和[使用示例](./EXAMPLES.md)
+- **贡献者**：阅读[技术指南](./TECHNICAL_GUIDE.md)和[问题报告](./ISSUES_SUMMARY.md)
 
 ### 文档统计
 
-- 总字数：约45,000字
-- 代码示例：65+
+- 总字数：约50,000字
+- 代码示例：80+
 - 流程图：10+
 - 覆盖功能：50+
+- API接口：20+
 
 ## 📋 完整功能清单
 
@@ -527,7 +533,7 @@ graph TD
 - **统一卡片高度**：所有卡片使用相同高度
 - **显示名称/大小/尺寸/序号/锁定图标**：控制卡片显示的信息
 - **名称换行**：文件名自动换行
-- **悬停效果**：鼠标悬停时的动画效果
+- **鼠标悬停动画**：启用后，鼠标悬停在图片缩略图上时显示优雅的浮动效果
 
 ### 🗑️ 删除与回收站
 - **删除前确认**：删除文件前显示确认对话框
@@ -703,31 +709,49 @@ src/
 │   ├── rename-modal.ts        # 重命名模态框
 │   ├── confirm-modal.ts       # 确认对话框
 │   ├── reference-select-modal.ts  # 引用选择
+│   ├── network-image-modal.ts # 网络图片管理
 │   └── components/            # 可复用组件
 │       ├── image-preview-panel.ts   # 图片预览面板
 │       ├── image-controls-panel.ts  # 图片控制面板
 │       └── image-history-panel.ts   # 操作历史面板
-└── utils/                     # 工具函数
-    ├── logger.ts              # 操作日志系统
+├── utils/                     # 工具函数
+│   ├── logger.ts              # 操作日志系统
+│   ├── error-handler.ts       # 错误处理器
+│   ├── lock-list-manager.ts   # 锁定列表管理
+│   ├── reference-manager.ts   # 引用管理
+│   ├── reference-edit-service.ts  # 引用编辑服务
+│   ├── trash-manager.ts       # 回收站管理
+│   ├── trash-path-parser.ts   # 回收站路径解析
+│   ├── trash-formatter.ts     # 回收站格式化
+│   ├── history-manager.ts     # 历史记录管理
+│   ├── hash-cache-manager.ts  # 哈希缓存管理
+│   ├── image-hash.ts          # MD5 哈希计算
+│   ├── image-scanner.ts       # 图片扫描器
+│   ├── image-processor.ts     # 图片处理
+│   ├── image-optimizer.ts     # 图片优化
+│   ├── file-filter.ts         # 文件过滤
+│   ├── file-edit-service.ts   # 文件编辑服务
+│   ├── path-validator.ts      # 路径验证
+│   ├── keyboard-shortcut-manager.ts  # 快捷键管理
+│   ├── drag-select-manager.ts # 拖拽框选管理
+│   ├── resizable-modal.ts     # 可调整大小的模态框
+│   ├── network-image-scanner.ts  # 网络图片扫描器
+│   ├── network-image-loader.ts   # 网络图片加载器
+│   ├── retry-utils.ts         # 重试工具
+│   ├── settings-io-manager.ts # 设置导入导出
+│   └── uploader/              # 图床上传
+│       ├── uploader-manager.ts
+│       ├── qiniu-uploader.ts
+│       ├── aliyun-uploader.ts
+│       └── crypto-utils.ts
+└── network-image/             # 网络图片缓存系统
+    ├── api.ts                 # 网络图片API
+    ├── cache-manager.ts       # 缓存管理器
     ├── error-handler.ts       # 错误处理器
-    ├── lock-list-manager.ts   # 锁定列表管理
-    ├── reference-manager.ts   # 引用管理
-    ├── reference-edit-service.ts  # 引用编辑服务
-    ├── trash-manager.ts       # 回收站管理
-    ├── trash-path-parser.ts   # 回收站路径解析
-    ├── trash-formatter.ts     # 回收站格式化
-    ├── history-manager.ts     # 历史记录管理
-    ├── hash-cache-manager.ts  # 哈希缓存管理
-    ├── image-hash.ts          # MD5 哈希计算
-    ├── image-scanner.ts       # 图片扫描器
-    ├── image-processor.ts     # 图片处理
-    ├── image-optimizer.ts     # 图片优化
-    ├── file-filter.ts         # 文件过滤
-    ├── file-edit-service.ts   # 文件编辑服务
-    ├── path-validator.ts      # 路径验证
-    ├── keyboard-shortcut-manager.ts  # 快捷键管理
-    ├── drag-select-manager.ts # 拖拽框选管理
-    └── resizable-modal.ts     # 可调整大小的模态框
+    ├── incremental-scanner.ts # 增量扫描器
+    ├── indexeddb-manager.ts   # IndexedDB管理
+    ├── types.ts               # 类型定义
+    └── utils.ts               # 工具函数
 ```
 
 ### 技术栈
@@ -736,7 +760,9 @@ src/
 - **esbuild** - 快速构建
 - **spark-md5** - MD5 哈希计算
 - **HTML5 Canvas** - 图片处理
+- **IndexedDB** - 网络图片缓存存储
 - **Obsidian Plugin API** - 插件框架
+- **Jest** - 单元测试框架
 
 ### 核心模块说明
 
@@ -754,6 +780,9 @@ src/
 - **image-hash.ts** - MD5 哈希计算，支持缓存管理
 - **trash-manager.ts** - 回收站管理，支持恢复和永久删除
 - **lock-list-manager.ts** - 锁定列表管理，支持重复检测和批量操作
+- **network-image-scanner.ts** - 网络图片扫描器，支持 http/https 链接
+- **network-image/cache-manager.ts** - 网络图片缓存管理，IndexedDB 存储
+- **settings-io-manager.ts** - 设置导入导出，支持 JSON 格式
 
 ### 代码规范
 
@@ -772,6 +801,9 @@ src/
 
 - 🗺️ [代码地图](./CODEMAP.md) - 代码结构和开发导航
 - 📋 [开发审查报告](./DEVELOPMENT_REVIEW.md) - 代码质量和功能逻辑审查
+- 🔧 [API文档](./API_DOCUMENTATION.md) - 完整的API接口说明
+- 💡 [使用示例](./EXAMPLES.md) - 详细的代码示例和教程
+- 📊 [问题报告](./ISSUES_SUMMARY.md) - 代码问题分析和修复状态
 
 ## 🤝 贡献
 

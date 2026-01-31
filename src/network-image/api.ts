@@ -60,22 +60,27 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             path: undefined,
             incremental: true,
             validateImages: false,
-            maxConcurrency: 5
+            maxConcurrency: 5,
+            quiet: false // 新增静默模式参数
         };
         
         const scanOptions = { ...defaultOptions, ...options };
         
         try {
-            console.log('Starting scan with options:', scanOptions);
+            // 仅在非静默模式下输出开始信息
+            if (!scanOptions.quiet) {
+                console.log(`Starting ${scanOptions.incremental ? 'incremental' : 'full'} scan${scanOptions.path ? ` of ${scanOptions.path}` : ''}...`);
+            }
             
             const result = await this.scanner.scan(
                 scanOptions.path,
-                scanOptions.incremental
+                scanOptions.incremental,
+                scanOptions.quiet // 传递静默模式给扫描器
             );
             
             // 如果需要验证图片，在扫描后执行验证
             if (scanOptions.validateImages && result.newImages > 0) {
-                console.log(`Validating ${result.newImages} new images...`);
+                // 验证过程不输出控制台日志，详细结果记录到插件日志中
                 await this.validateNewImages(scanOptions.path);
             }
             
@@ -93,8 +98,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      * @returns 扫描结果
      */
     async fullScan(path?: string): Promise<IncrementalScanResult> {
-        console.log('Starting full scan...');
-        
+        // 使用简洁的扫描开始信息，详细日志记录到插件日志中
         return this.scan({
             path,
             incremental: false,
@@ -108,8 +112,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      * @returns 扫描结果
      */
     async quickScan(path?: string): Promise<IncrementalScanResult> {
-        console.log('Starting quick scan...');
-        
+        // 使用简洁的扫描开始信息，详细日志记录到插件日志中
         return this.scan({
             path,
             incremental: true,
@@ -127,7 +130,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             return [];
         }
         
-        console.log(`Validating ${imageIds.length} images...`);
+        // 验证过程不输出控制台日志，详细结果记录到插件日志中
         
         try {
             // 从数据库获取图片记录
@@ -141,7 +144,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             );
             
             if (validImages.length === 0) {
-                console.log('No valid images to validate');
+                // 无有效图片时不输出控制台日志
                 return [];
             }
             
