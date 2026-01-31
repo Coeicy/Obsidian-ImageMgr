@@ -1,6 +1,9 @@
 /**
  * 设置导入导出面板组件
- * 提供用户友好的设置导入导出界面
+ * 提供用户友好的设置导入导出界面，支持JSON配置文件导出和导入
+ * 
+ * @version 1.0.0
+ * @author ImageMgr Plugin
  */
 
 import { App, Setting, Notice } from 'obsidian';
@@ -9,14 +12,21 @@ import { ImportOptions, ExportOptions } from '../utils/settings-io-types';
 
 /**
  * 设置导入导出面板类
+ * 
+ * 功能特性：
+ * - 导出JSON配置文件
+ * - 导入JSON配置文件
+ * - 敏感信息控制
+ * - 导入前备份功能
+ * - 覆盖现有配置选项
  */
 export class SettingsIOPanel {
-  private app: App;
-  private plugin: any;
   private containerEl: HTMLElement;
   private ioManager: SettingsIOManager;
 
-  // 默认选项
+  /**
+   * 导出选项配置
+   */
   private exportOptions: ExportOptions = {
     includeSensitiveData: false,
     compressData: false,
@@ -25,6 +35,9 @@ export class SettingsIOPanel {
     batchMode: false
   };
 
+  /**
+   * 导入选项配置
+   */
   private importOptions: ImportOptions = {
     overwriteExisting: true,
     skipInvalidSettings: true,
@@ -33,6 +46,13 @@ export class SettingsIOPanel {
     batchMode: false
   };
 
+  /**
+   * 构造函数
+   * 
+   * @param app Obsidian应用实例
+   * @param plugin 插件实例
+   * @param containerEl 容器元素
+   */
   constructor(app: App, plugin: any, containerEl: HTMLElement) {
     this.containerEl = containerEl;
     this.ioManager = new SettingsIOManager(app, plugin);
@@ -40,48 +60,78 @@ export class SettingsIOPanel {
 
   /**
    * 渲染设置导入导出面板
+   * 
+   * 创建用户界面，包含说明文本、操作按钮和设置选项
    */
   public render(): void {
-    // 创建说明文本
-    const descriptionEl = this.containerEl.createEl('div', { cls: 'setting-item-description' });
-    descriptionEl.innerHTML = `
-      <p style="margin-bottom: 12px;">
-        备份、恢复或迁移插件设置。支持JSON格式的配置文件导入导出，包含完整的数据校验和错误处理机制。
-      </p>
-    `;
-
-    // 直接渲染导出和导入功能，不使用选项卡
-    this.renderExportSection();
-    this.renderImportSection();
+    this.renderCompactLayout();
   }
 
   /**
-   * 渲染导出部分
+   * 渲染紧凑式布局
+   * 
+   * 创建顶部说明文本和按钮区域，下方为设置选项
    */
-  private renderExportSection(): void {
-    // 导出部分标题
-    const exportTitle = this.containerEl.createEl('h4', { text: '📤 导出设置' });
-    exportTitle.style.marginTop = '20px';
-    exportTitle.style.marginBottom = '12px';
+  private renderCompactLayout(): void {
+    // 创建顶部容器：说明文本和操作按钮
+    this.renderTopSection();
+    
+    // 渲染设置选项区域
+    this.renderSettingsSection();
+  }
 
-    // 导出选项设置
-    new Setting(this.containerEl)
-      .setName('包含敏感信息')
-      .setDesc('导出时是否包含API密钥等敏感信息（不推荐）')
-      .addToggle(toggle => toggle
-        .setValue(false) // 默认不包含敏感信息
-        .onChange(value => {
-          this.exportOptions.includeSensitiveData = value;
-        }));
+  /**
+   * 渲染顶部区域 - 说明文本和操作按钮
+   */
+  private renderTopSection(): void {
+    const topContainer = this.containerEl.createDiv();
+    topContainer.style.display = 'flex';
+    topContainer.style.alignItems = 'center';
+    topContainer.style.justifyContent = 'space-between';
+    topContainer.style.marginBottom = '16px';
 
+    // 功能说明文本
+    this.renderDescription(topContainer);
+    
+    // 操作按钮区域
+    this.renderActionButtons(topContainer);
+  }
 
+  /**
+   * 渲染功能说明文本
+   */
+  private renderDescription(container: HTMLElement): void {
+    const descriptionEl = container.createEl('div', { cls: 'setting-item-description' });
+    descriptionEl.innerHTML = `
+      <p style="margin: 0;">
+        <strong>导出JSON配置文件，备份插件配置。</strong>
+      </p>
+    `;
+  }
+
+  /**
+   * 渲染操作按钮区域
+   */
+  private renderActionButtons(container: HTMLElement): void {
+    const buttonContainer = container.createDiv();
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.gap = '12px';
 
     // 导出按钮
-    const exportButton = this.containerEl.createEl('button', { 
-      text: '📤 导出设置文件',
+    this.createExportButton(buttonContainer);
+    
+    // 导入按钮
+    this.createImportButton(buttonContainer);
+  }
+
+  /**
+   * 创建导出按钮
+   */
+  private createExportButton(container: HTMLElement): void {
+    const exportButton = container.createEl('button', { 
+      text: '📤 导出配置',
       cls: 'mod-cta'
     });
-    exportButton.style.marginTop = '12px';
     exportButton.style.padding = '8px 16px';
     exportButton.style.fontSize = '0.9em';
     exportButton.dataset.action = 'export';
@@ -89,157 +139,121 @@ export class SettingsIOPanel {
     exportButton.addEventListener('click', async () => {
       await this.handleExport();
     });
-
-    // 导出说明
-    const exportInfo = this.containerEl.createDiv({ cls: 'setting-item-description' });
-    exportInfo.innerHTML = `
-      <p style="margin-top: 8px; font-size: 0.85em; color: var(--text-muted);">
-        💡 导出的设置文件包含所有插件配置，可用于备份或迁移到其他设备。
-      </p>
-    `;
-
-    // 添加分隔线
-    const divider = this.containerEl.createEl('hr');
-    divider.style.margin = '20px 0';
-    divider.style.borderColor = 'var(--background-modifier-border)';
   }
 
   /**
-   * 渲染导入部分
+   * 创建导入按钮
    */
-  private renderImportSection(): void {
-    // 导入部分标题
-    const importTitle = this.containerEl.createEl('h4', { text: '📥 导入设置' });
-    importTitle.style.marginTop = '0';
-    importTitle.style.marginBottom = '12px';
+  private createImportButton(container: HTMLElement): void {
+    const importButton = container.createEl('button', { 
+      text: '📥 导入配置',
+      cls: 'mod-cta'
+    });
+    importButton.style.padding = '8px 16px';
+    importButton.style.fontSize = '0.9em';
+    importButton.dataset.action = 'import';
 
+    importButton.addEventListener('click', async () => {
+      this.handleImportButtonClick();
+    });
+  }
+
+  /**
+   * 处理导入按钮点击事件
+   */
+  private handleImportButtonClick(): void {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json';
+    fileInput.style.display = 'none';
+    
+    fileInput.click();
+    
+    fileInput.addEventListener('change', async (event) => {
+      const files = (event.target as HTMLInputElement).files;
+      if (files && files.length > 0) {
+        await this.handleImportDirect(files[0]);
+      }
+    });
+  }
+
+  /**
+   * 渲染设置选项区域
+   */
+  private renderSettingsSection(): void {
+    // 敏感信息控制设置
+    this.renderSensitiveInfoSetting();
+    
     // 导入选项设置
+    this.renderImportOptions();
+  }
+
+  /**
+   * 渲染敏感信息控制设置
+   */
+  private renderSensitiveInfoSetting(): void {
     new Setting(this.containerEl)
-      .setName('覆盖现有设置')
-      .setDesc('导入时是否覆盖当前设置（推荐开启）')
+      .setName('包含敏感信息')
+      .setDesc('控制导出/导入时是否处理API密钥等敏感信息')
+      .addToggle(toggle => toggle
+        .setValue(false)
+        .onChange(value => {
+          this.exportOptions.includeSensitiveData = value;
+          this.importOptions.skipInvalidSettings = !value;
+        }));
+  }
+
+  /**
+   * 渲染导入选项设置
+   * 
+   * 包含覆盖配置和导入前备份两个选项
+   */
+  private renderImportOptions(): void {
+    // 覆盖现有配置选项
+    this.renderOverwriteSetting();
+    
+    // 导入前备份选项
+    this.renderBackupSetting();
+  }
+
+  /**
+   * 渲染覆盖现有配置选项
+   */
+  private renderOverwriteSetting(): void {
+    new Setting(this.containerEl)
+      .setName('覆盖现有配置')
+      .setDesc('导入时是否覆盖当前所有配置项（推荐开启）')
       .addToggle(toggle => toggle
         .setValue(true)
         .onChange(value => {
           this.importOptions.overwriteExisting = value;
         }));
+  }
 
+  /**
+   * 渲染导入前备份选项
+   */
+  private renderBackupSetting(): void {
     new Setting(this.containerEl)
-      .setName('创建备份')
-      .setDesc('导入前自动创建当前设置的备份')
+      .setName('导入前备份')
+      .setDesc('导入前自动备份当前配置到下载文件夹（推荐开启）')
       .addToggle(toggle => toggle
         .setValue(true)
         .onChange(value => {
           this.importOptions.createBackup = value;
         }));
-
-
-
-    // 导入文件选择区域
-    const fileSection = this.containerEl.createDiv({ cls: 'settings-io-file-section' });
-    fileSection.style.marginTop = '16px';
-    fileSection.style.padding = '16px';
-    fileSection.style.border = '1px solid var(--background-modifier-border)';
-    fileSection.style.borderRadius = '8px';
-    fileSection.style.textAlign = 'center';
-    fileSection.style.background = 'var(--background-secondary)';
-
-    const fileInput = fileSection.createEl('input', { 
-      attr: { 
-        type: 'file',
-        accept: '.json',
-        style: 'display: none;'
-      }
-    });
-
-    const fileArea = fileSection.createDiv();
-    fileArea.innerHTML = `
-      <div style="font-size: 1.8em; margin-bottom: 8px;">📁</div>
-      <p style="margin-bottom: 8px; font-weight: 600;">选择设置文件</p>
-      <p style="margin-bottom: 12px; font-size: 0.9em; color: var(--text-muted);">
-        点击选择JSON设置文件
-      </p>
-      <button class="mod-ghost" style="padding: 8px 16px;">选择文件</button>
-    `;
-
-    const selectButton = fileArea.querySelector('button');
-    selectButton?.addEventListener('click', () => {
-      fileInput.click();
-    });
-
-    // 文件选择事件
-    fileInput.addEventListener('change', (event) => {
-      const files = (event.target as HTMLInputElement).files;
-      if (files && files.length > 0) {
-        this.handleFileSelection(files, fileArea);
-      }
-    });
-
-    // 导入按钮容器
-    const importButtonContainer = this.containerEl.createDiv();
-    importButtonContainer.style.marginTop = '12px';
-    importButtonContainer.style.textAlign = 'center';
-
-    // 导入按钮
-    const importButton = importButtonContainer.createEl('button', { 
-      text: '📥 导入设置',
-      cls: 'mod-cta'
-    });
-    importButton.style.padding = '8px 16px';
-    importButton.style.fontSize = '0.9em';
-    importButton.disabled = true;
-    importButton.dataset.action = 'import';
-
-    importButton.addEventListener('click', async () => {
-      await this.handleImport(fileInput);
-    });
-
-    // 导入说明
-    const importInfo = this.containerEl.createDiv({ cls: 'setting-item-description' });
-    importInfo.innerHTML = `
-      <p style="margin-top: 8px; font-size: 0.85em; color: var(--text-muted);">
-        💡 导入前会自动验证文件格式和完整性，确保设置数据安全可靠。
-      </p>
-    `;
   }
 
 
 
-  /**
-   * 处理文件选择
-   */
-  private handleFileSelection(files: FileList, dropArea: HTMLElement): void {
-    const file = files[0]; // 只取第一个文件
-    
-    if (!file || !file.name.endsWith('.json')) {
-      new Notice('❌ 请选择有效的JSON设置文件');
-      return;
-    }
 
-    // 更新UI显示选中的文件
-    dropArea.innerHTML = `
-      <div style="font-size: 2em; margin-bottom: 8px;">✅</div>
-      <p style="margin-bottom: 8px; font-weight: 600;">已选择文件</p>
-      <p style="margin-bottom: 12px; font-size: 0.85em; color: var(--text-muted);">
-        ${file.name}
-      </p>
-      <button class="mod-ghost" style="padding: 6px 12px; font-size: 0.85em;">重新选择</button>
-    `;
 
-    const reselectButton = dropArea.querySelector('button');
-    reselectButton?.addEventListener('click', () => {
-      const fileInput = dropArea.closest('.settings-io-file-section')?.querySelector('input[type="file"]') as HTMLInputElement;
-      fileInput?.click();
-    });
 
-    // 启用导入按钮
-    const importButton = this.containerEl.querySelector('button[data-action="import"]') as HTMLButtonElement;
-    if (importButton) {
-      importButton.disabled = false;
-    }
-  }
 
   /**
    * 处理导出操作
+   * 
+   * 异步执行导出操作，包含按钮状态管理和错误处理
    */
   private async handleExport(): Promise<void> {
     const exportButton = this.containerEl.querySelector('button[data-action="export"]') as HTMLButtonElement;
@@ -248,24 +262,31 @@ export class SettingsIOPanel {
     const originalText = exportButton.textContent;
     
     try {
+      // 更新按钮状态为加载中
       exportButton.textContent = '⏳ 导出中...';
       exportButton.disabled = true;
 
+      // 执行导出操作
       await this.ioManager.exportSettings(this.exportOptions);
       
     } finally {
+      // 恢复按钮状态
       exportButton.textContent = originalText;
       exportButton.disabled = false;
     }
   }
 
   /**
-   * 处理导入操作
+   * 直接处理导入操作
+   * 
+   * 处理用户选择的JSON文件导入
+   * 
+   * @param file 用户选择的文件对象
    */
-  private async handleImport(fileInput: HTMLInputElement): Promise<void> {
-    const files = fileInput.files;
-    if (!files || files.length === 0) {
-      new Notice('❌ 请先选择要导入的设置文件');
+  private async handleImportDirect(file: File): Promise<void> {
+    // 验证文件格式
+    if (!file || !file.name.endsWith('.json')) {
+      new Notice('❌ 请选择有效的JSON设置文件');
       return;
     }
 
@@ -275,36 +296,21 @@ export class SettingsIOPanel {
     const originalText = importButton.textContent;
     
     try {
+      // 更新按钮状态为加载中
       importButton.textContent = '⏳ 导入中...';
       importButton.disabled = true;
 
-      await this.ioManager.importSettings(files[0], this.importOptions);
+      // 执行导入操作
+      await this.ioManager.importSettings(file, this.importOptions);
       
     } finally {
+      // 恢复按钮状态
       importButton.textContent = originalText;
-      importButton.disabled = true; // 导入后需要重新选择文件
-      fileInput.value = ''; // 清空文件选择
-      
-      // 重置文件选择区域
-      const fileArea = this.containerEl.querySelector('.settings-io-file-section div');
-      if (fileArea) {
-        fileArea.innerHTML = `
-          <div style="font-size: 1.8em; margin-bottom: 8px;">📁</div>
-          <p style="margin-bottom: 8px; font-weight: 600;">选择设置文件</p>
-          <p style="margin-bottom: 12px; font-size: 0.9em; color: var(--text-muted);">
-            点击选择JSON设置文件
-          </p>
-          <button class="mod-ghost" style="padding: 8px 16px;">选择文件</button>
-        `;
-        
-        // 重新绑定选择文件按钮事件
-        const selectButton = fileArea.querySelector('button');
-        selectButton?.addEventListener('click', () => {
-          fileInput.click();
-        });
-      }
+      importButton.disabled = false;
     }
   }
+
+
 
 
 }

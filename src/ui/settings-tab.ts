@@ -2691,7 +2691,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		// 在基础设置部分添加导入导出功能
-		const importExportSubTitle = basicSection.contentEl.createEl('h4', { text: '⚙️ 插件配置数据' });
+		const importExportSubTitle = basicSection.contentEl.createEl('h4', { text: '⚙️备份设置' });
 		importExportSubTitle.style.marginTop = '20px';
 		importExportSubTitle.style.marginBottom = '12px';
 		importExportSubTitle.style.paddingBottom = '8px';

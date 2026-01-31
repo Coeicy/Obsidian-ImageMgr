@@ -98,10 +98,16 @@ export class SettingsIOManager {
         await this.createBackup();
       }
 
+      // 处理敏感信息：如果设置为跳过无效设置（即关闭敏感信息），则过滤敏感信息
+      let settingsToApply = validation.validatedSettings!;
+      if (options.skipInvalidSettings) {
+        settingsToApply = this.filterSensitiveDataFromImport(settingsToApply);
+      }
+
       // 应用设置
-      await this.applySettings(validation.validatedSettings!, options);
+      await this.applySettings(settingsToApply, options);
       
-      new Notice(`✅ 设置已成功导入，共应用了 ${Object.keys(validation.validatedSettings!).length} 个设置项`);
+      new Notice(`✅ 设置已成功导入，共应用了 ${Object.keys(settingsToApply).length} 个设置项`);
       return true;
       
     } catch (error) {
@@ -277,7 +283,7 @@ export class SettingsIOManager {
   }
 
   /**
-   * 过滤敏感信息
+   * 过滤敏感信息（用于导出）
    */
   private filterSensitiveData(settings: any): void {
     // 过滤API密钥等敏感信息
@@ -295,6 +301,31 @@ export class SettingsIOManager {
     // 过滤其他可能的敏感信息
     delete settings.ignoredHashMetadata;
     delete settings.remoteImageBlacklist;
+  }
+
+  /**
+   * 从导入数据中过滤敏感信息
+   */
+  private filterSensitiveDataFromImport(settings: any): any {
+    const filteredSettings = { ...settings };
+    
+    // 过滤API密钥等敏感信息
+    if (filteredSettings.uploadConfig) {
+      if (filteredSettings.uploadConfig.qiniu) {
+        delete filteredSettings.uploadConfig.qiniu.accessKey;
+        delete filteredSettings.uploadConfig.qiniu.secretKey;
+      }
+      if (filteredSettings.uploadConfig.aliyun) {
+        delete filteredSettings.uploadConfig.aliyun.accessKeyId;
+        delete filteredSettings.uploadConfig.aliyun.accessKeySecret;
+      }
+    }
+    
+    // 过滤其他可能的敏感信息
+    delete filteredSettings.ignoredHashMetadata;
+    delete filteredSettings.remoteImageBlacklist;
+    
+    return filteredSettings;
   }
 
   /**
