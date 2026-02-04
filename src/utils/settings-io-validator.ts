@@ -1,6 +1,165 @@
 /**
  * 设置数据校验器
- * 提供严格的设置数据验证功能
+ * 
+ * 核心功能：
+ * - 严格的设置数据验证
+ * - 多层验证机制（结构、类型、范围、枚举）
+ * - 详细的错误报告和解决方案
+ * - 版本兼容性检查
+ * - 文件大小限制检查
+ * 
+ * 验证层次：
+ * 1. **文件级验证**：
+ *    - 文件大小检查（最大10MB）
+ *    - JSON格式验证
+ *    - 基本结构检查（metadata、settings）
+ * 
+ * 2. **元数据验证**（validateMetadata）：
+ *    - 版本号检查
+ *    - 插件名称验证
+ *    - 导出日期验证
+ *    - 版本兼容性警告
+ * 
+ * 3. **设置数据验证**（validateSettingsData）：
+ *    - 基础设置验证（autoScan、defaultImageFolder等）
+ *    - 显示设置验证（imagesPerRow、排序方式等）
+ *    - 功能开关验证（布尔值）
+ *    - 高级设置验证（数值范围、枚举值）
+ * 
+ * 支持的验证类型：
+ * - 类型验证：boolean、string、number
+ * - 范围验证：数值在指定范围内
+ * - 枚举验证：字符串匹配允许的值
+ * - 必填字段验证：检查必需字段
+ * - 版本兼容性：检查版本号匹配
+ * 
+ * 验证规则：
+ * - 每行图片数量：1-10
+ * - 懒加载延迟：0-5000ms
+ * - 最大缓存大小：10-1000
+ * - 卡片圆角：0-50px
+ * - 固定图片高度：50-500px
+ * - 远程图片超时：1000-60000ms
+ * - 实时搜索延迟：0-2000ms
+ * - 批量操作数量：1-1000
+ * - 批量确认阈值：1-100
+ * 
+ * 枚举值验证：
+ * - 排序方式：name | size | date | dimensions
+ * - 排序顺序：asc | desc
+ * - 重复处理：prompt | skip-silent | use-newest | use-oldest
+ * - 多重引用：first | latest | prompt | all
+ * - 统计位置：top | bottom | sidebar
+ * - 日志级别：DEBUG | INFO | WARNING | ERROR
+ * - 代理模式：none | obsidian | weserv | both
+ * 
+ * 错误类型：
+ * - INVALID_FILE_FORMAT: 文件格式无效
+ * - MISSING_REQUIRED_FIELDS: 缺少必需字段
+ * - TYPE_MISMATCH: 类型不匹配
+ * - VERSION_INCOMPATIBLE: 版本不兼容
+ * - FILE_SIZE_EXCEEDED: 文件大小超限
+ * - INVALID_JSON: JSON格式无效
+ * - DATA_CORRUPTED: 数据损坏
+ * 
+ * 错误解决方案：
+ * 每种错误类型都会生成具体的解决建议，
+ * 包括：
+ * - 问题说明
+ * - 可能原因
+ * - 解决步骤
+ * - 预防措施
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 验证元数据
+ * const metadataResult = SettingsValidator.validateMetadata({
+ *     version: '1.0.0',
+ *     pluginName: 'Image Manager',
+ *     exportDate: '2024-02-04T12:00:00.000Z',
+ *     settingsCount: 50
+ * });
+ * 
+ * if (!metadataResult.isValid) {
+ *     console.error('验证失败:');
+ *     metadataResult.errors.forEach(error => {
+ *         console.error(`- ${error.message}`);
+ *         // 获取解决方案建议
+ *         const solutions = SettingsValidator.generateErrorSolution(error);
+ *         solutions.forEach(solution => {
+ *             console.log(`  ${solution}`);
+ *         });
+ *     });
+ * }
+ * 
+ * if (metadataResult.warnings.length > 0) {
+ *     console.warn('警告:');
+ *     metadataResult.warnings.forEach(warning => {
+ *         console.warn(`- ${warning}`);
+ *     });
+ * }
+ * 
+ * // 验证设置数据
+ * const settingsResult = SettingsValidator.validateSettingsData(settingsData);
+ * 
+ * if (settingsResult.isValid) {
+ *     // 使用验证后的设置
+ *     const validSettings = settingsResult.validatedSettings;
+ *     console.log('验证通过，应用设置...');
+ * } else {
+ *     console.error('验证失败:');
+ *     settingsResult.errors.forEach(error => {
+ *         console.error(`[${error.type}] ${error.message}`);
+ *         if (error.details) {
+ *             error.details.forEach(detail => {
+ *                 console.error(`  - 字段: ${detail.field}`);
+ *                 console.error(`  - 期望类型: ${detail.expectedType}`);
+ *                 console.error(`  - 实际类型: ${detail.actualType}`);
+ *             });
+ *         }
+ *     });
+ * }
+ * 
+ * // 验证文件大小
+ * const fileResult = SettingsValidator.validateFileSize(file);
+ * if (!fileResult.isValid) {
+ *     console.error('文件太大:', fileResult.errors[0].message);
+ * }
+ * ```
+ * 
+ * 验证流程：
+ * 1. 检查文件大小（如果超过10MB，直接拒绝）
+ * 2. 解析JSON（如果解析失败，报告错误）
+ * 3. 验证基本结构（metadata、settings是否存在）
+ * 4. 验证元数据（版本、插件名称等）
+ * 5. 验证设置数据（按类别分批验证）
+ * 6. 收集所有错误和警告
+ * 7. 返回验证结果
+ * 
+ * 性能优化：
+ * - 惰性验证：只在需要时验证
+ * - 批量验证：减少重复检查
+ * - 早期失败：发现错误立即返回
+ * 
+ * 安全考虑：
+ * - 文件大小限制：防止DoS攻击
+ * - 类型检查：防止注入攻击
+ * - 版本检查：防止不兼容的导入
+ * - 范围验证：防止非法数值
+ * 
+ * 最佳实践：
+ * 1. 导入前始终验证数据
+ * 2. 处理所有错误（不只是第一个）
+ * 3. 向用户显示详细的错误信息
+ * 4. 提供解决方案建议
+ * 5. 记录验证失败事件
+ * 6. 版本不匹配时警告用户
+ * 
+ * 注意事项：
+ * - 验证是同步的，不会阻塞
+ * - 验证失败时不修改数据
+ * - 警告不会阻止导入
+ * - 部分验证失败的设置会被跳过
  */
 
 import { ImageManagementSettings, DEFAULT_SETTINGS } from '../settings';
@@ -167,9 +326,9 @@ export class SettingsValidator {
 
     // 默认排序方式
     if (settings.defaultSortBy !== undefined) {
-      const validSortBy = ['name', 'size', 'date', 'modified'];
+      const validSortBy = ['name', 'size', 'date', 'dimensions'];
       if (typeof settings.defaultSortBy === 'string' && validSortBy.includes(settings.defaultSortBy)) {
-        validated.defaultSortBy = settings.defaultSortBy as any;
+        validated.defaultSortBy = settings.defaultSortBy as 'name' | 'size' | 'date' | 'dimensions';
       } else {
         errors.push(this.createError(
           SettingsIOErrorType.TYPE_MISMATCH,
@@ -183,7 +342,7 @@ export class SettingsValidator {
     if (settings.defaultSortOrder !== undefined) {
       const validOrder = ['asc', 'desc'];
       if (typeof settings.defaultSortOrder === 'string' && validOrder.includes(settings.defaultSortOrder)) {
-        validated.defaultSortOrder = settings.defaultSortOrder as any;
+        validated.defaultSortOrder = settings.defaultSortOrder as 'asc' | 'desc';
       } else {
         errors.push(this.createError(
           SettingsIOErrorType.TYPE_MISMATCH,
@@ -275,7 +434,8 @@ export class SettingsValidator {
     Object.entries(enumFields).forEach(([field, validValues]) => {
       if (settings[field] !== undefined) {
         if (typeof settings[field] === 'string' && validValues.includes(settings[field])) {
-          validated[field] = settings[field] as any;
+          // 类型安全：使用断言，但已经在运行时验证了值的范围
+          (validated as any)[field] = settings[field];
         } else {
           errors.push(this.createError(
             SettingsIOErrorType.TYPE_MISMATCH,

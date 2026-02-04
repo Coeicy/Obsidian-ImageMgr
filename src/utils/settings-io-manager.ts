@@ -1,19 +1,149 @@
 /**
  * 设置导入导出管理器
- * 提供完整的设置导入导出功能
+ * 
+ * 核心功能：
+ * - 导出设置到JSON文件（支持格式化和压缩）
+ * - 从JSON文件导入设置
+ * - 批量导入多个设置文件
+ * - 数据验证和完整性检查
+ * - 敏感信息过滤（API密钥等）
+ * - 自动备份机制
+ * 
+ * 安全特性：
+ * - 敏感数据过滤：导出时自动过滤API密钥
+ * - 文件大小限制：最大10MB
+ * - 数据完整性验证：校验和检查
+ * - 版本兼容性检查：防止不兼容的导入
+ * - 自动备份：导入前自动创建备份
+ * 
+ * 导出功能：
+ * - 支持格式化JSON（可读性好）
+ * - 支持压缩JSON（体积小）
+ * - 包含元数据（版本、日期、插件名称）
+ * - 可选择是否包含敏感数据
+ * - 自动生成带时间戳的文件名
+ * 
+ * 导入功能：
+ * - 单文件导入
+ * - 批量导入（多个文件）
+ * - 数据验证（类型、范围、枚举）
+ * - 合并策略（覆盖或保留现有）
+ * - 跳过无效设置选项
+ * - 自动创建备份
+ * - 进度回调支持
+ * 
+ * 错误处理：
+ * - 文件大小超限
+ * - JSON格式无效
+ * - 数据结构缺失
+ * - 版本不兼容
+ * - 类型不匹配
+ * - 详细错误提示和解决方案
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 创建管理器
+ * const manager = new SettingsIOManager(app, plugin);
+ * 
+ * // 导出设置（默认选项）
+ * await manager.exportSettings();
+ * // 输出：image-manager-settings-2024-02-04.json
+ * 
+ * // 导出设置（包含敏感数据）
+ * await manager.exportSettings({
+ *     includeSensitiveData: true,
+ *     format: 'json',
+ *     includeMetadata: true
+ * });
+ * 
+ * // 导出设置（压缩格式）
+ * await manager.exportSettings({
+ *     includeSensitiveData: false,
+ *     format: 'json-compressed'
+ * });
+ * // 输出：image-manager-settings-2024-02-04-compressed.json
+ * 
+ * // 导入设置（从文件）
+ * const file = document.querySelector('input[type="file"]').files[0];
+ * const success = await manager.importSettings(file, {
+ *     overwriteExisting: true,
+ *     createBackup: true,
+ *     skipInvalidSettings: true,
+ *     validateIntegrity: true
+ * });
+ * if (success) {
+ *     console.log('导入成功');
+ * }
+ * 
+ * // 批量导入
+ * const files = Array.from(document.querySelectorAll('input[type="file"]').files);
+ * const result = await manager.importSettingsBatch(
+ *     files,
+ *     {
+ *         overwriteExisting: true,
+ *         createBackup: true
+ *     },
+ *     (progress, message) => {
+ *         console.log(`进度: ${progress}% - ${message}`);
+ *     }
+ * );
+ * 
+ * console.log(`成功: ${result.successfulFiles}/${result.processedFiles}`);
+ * console.log(`失败: ${result.failedFiles}`);
+ * console.log(`导入设置: ${result.summary.importedSettings}`);
+ * ```
+ * 
+ * 导出数据结构：
+ * ```json
+ * {
+ *   "metadata": {
+ *     "version": "1.0.0",
+ *     "pluginName": "Image Manager",
+ *     "exportDate": "2024-02-04T12:00:00.000Z",
+ *     "settingsCount": 50,
+ *     "description": "图片管理器插件设置导出文件"
+ *   },
+ *   "settings": {
+ *     "autoScan": true,
+ *     "defaultImageFolder": "images",
+ *     ...
+ *   },
+ *   "checksum": "abc123..."
+ * }
+ * ```
+ * 
+ * 敏感数据过滤：
+ * - 上传配置的API密钥（七牛云、阿里云等）
+ * - 哈希元数据
+ * - 远程图片黑名单
+ * 
+ * 最佳实践：
+ * 1. 定期备份设置（建议每周）
+ * 2. 导出前备份当前设置
+ * 3. 导入前验证文件完整性
+ * 4. 谨慎处理敏感数据
+ * 5. 分批导入大型配置文件
+ * 6. 保留导出文件的历史版本
+ * 
+ * 注意事项：
+ * - 文件大小限制为10MB
+ * - 敏感数据默认不导出
+ * - 导入会覆盖现有设置（除非配置为保留）
+ * - 备份文件会自动下载
+ * - 版本不兼容的文件会被拒绝
  */
 
 import { Notice, TFile } from 'obsidian';
 import { ImageManagementSettings, DEFAULT_SETTINGS } from '../settings';
-import { 
-  SettingsExportData, 
-  SettingsFileMetadata, 
-  ImportOptions, 
-  ExportOptions, 
+import {
+  SettingsExportData,
+  SettingsFileMetadata,
+  ImportOptions,
+  ExportOptions,
   BatchIOResult,
   FileProcessResult,
   ProgressCallback,
-  SettingsIOErrorType 
+  SettingsIOErrorType
 } from './settings-io-types';
 import { SettingsValidator } from './settings-io-validator';
 
@@ -27,6 +157,23 @@ export class SettingsIOManager {
   constructor(app: any, plugin: any) {
     this.app = app;
     this.plugin = plugin;
+  }
+
+  /**
+   * 获取logger实例
+   */
+  private async log(level: 'error' | 'warn' | 'info' | 'debug', operation: string, message: string, error?: Error): Promise<void> {
+    if (this.plugin?.logger) {
+      if (level === 'error') {
+        await this.plugin.logger.error(operation as any, message, { error });
+      } else if (level === 'warn') {
+        await this.plugin.logger.warn(operation as any, message, { error });
+      } else if (level === 'info') {
+        await this.plugin.logger.info(operation as any, message);
+      } else {
+        await this.plugin.logger.debug(operation as any, message);
+      }
+    }
   }
 
   /**
@@ -57,9 +204,9 @@ export class SettingsIOManager {
       
       new Notice(`✅ 设置已成功导出到 ${fileName}`);
       return true;
-      
+
     } catch (error) {
-      console.error('导出设置失败:', error);
+      await this.log('error', 'EXPORT', '导出设置失败', error instanceof Error ? error : new Error(String(error)));
       new Notice('❌ 导出设置失败，请检查控制台获取详细信息');
       return false;
     }
@@ -104,14 +251,13 @@ export class SettingsIOManager {
         settingsToApply = this.filterSensitiveDataFromImport(settingsToApply);
       }
 
-      // 应用设置
       await this.applySettings(settingsToApply, options);
-      
+
       new Notice(`✅ 设置已成功导入，共应用了 ${Object.keys(settingsToApply).length} 个设置项`);
       return true;
-      
+
     } catch (error) {
-      console.error('导入设置失败:', error);
+      await this.log('error', 'IMPORT', '导入设置失败', error instanceof Error ? error : new Error(String(error)));
       new Notice('❌ 导入设置失败，请检查控制台获取详细信息');
       return false;
     }
@@ -421,9 +567,9 @@ export class SettingsIOManager {
       document.body.removeChild(link);
       
       setTimeout(() => URL.revokeObjectURL(url), 100);
-      
+
     } catch (error) {
-      console.warn('创建备份失败:', error);
+      await this.log('warn', 'BACKUP', '创建备份失败', error instanceof Error ? error : new Error(String(error)));
     }
   }
 
@@ -464,9 +610,9 @@ export class SettingsIOManager {
   /**
    * 显示错误信息
    */
-  private showError(title: string, error: any): void {
-    console.error(`${title}:`, error);
-    
+  private async showError(title: string, error: any): Promise<void> {
+    await this.log('error', 'ERROR', `${title}`, error instanceof Error ? error : new Error(String(error)));
+
     let errorMessage = error.message || '发生未知错误';
     if (error.details) {
       errorMessage += `\n详情: ${error.details.map((d: any) => d.message).join(', ')}`;

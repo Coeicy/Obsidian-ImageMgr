@@ -20,13 +20,79 @@ import { makeModalResizable } from '../utils/resizable-modal';
 /**
  * 图片详情模态框类
  * 
- * 显示单张图片的详细信息和编辑功能，包括：
- * - 图片预览和编辑（旋转、缩放、平移）
- * - 文件名和路径编辑
- * - 引用查询和修改
- * - 操作历史查看
- * - 图片锁定/解锁
- * - 删除和恢复
+ * 核心功能：
+ * - 图片预览和交互（旋转、缩放、平移）
+ * - 文件名和路径编辑（支持多行和自动调整高度）
+ * - 引用查询和批量修改（支持多种链接格式）
+ * - 操作历史查看和恢复（时间线展示）
+ * - 图片锁定/解锁（防止误操作）
+ * - 删除和恢复（支持回收站）
+ * - 快捷键支持（完整的键盘导航和操作）
+ * 
+ * 图片预览交互：
+ * - 滚轮：切换图片（scroll模式）或缩放（默认模式）
+ * - 拖拽：平移图片
+ * - 双击：切换视图模式（适应窗口/原始尺寸）
+ * - 键盘方向键：前后导航
+ * - Ctrl/Cmd + 0：重置视图
+ * 
+ * 视图模式：
+ * - fit: 适应窗口大小（默认）
+ * - 1:1: 原始尺寸（100%）
+ * 
+ * 状态管理：
+ * - scale: 缩放比例（1.0 = 100%）
+ * - rotate: 旋转角度（度数）
+ * - translateX/Y: 平移距离（像素）
+ * - viewMode: 查看模式（fit/1:1）
+ * 
+ * 组件架构：
+ * - ImagePreviewPanel: 图片预览区域
+ * - ImageControlsPanel: 控制按钮区域
+ * - ImageHistoryPanel: 操作历史区域
+ * 
+ * 引用管理：
+ * - 查找所有引用该图片的笔记
+ * - 支持多种链接格式（Wiki、Markdown、HTML）
+ * - 批量修改引用（重命名后自动更新）
+ * - 显示引用位置和上下文
+ * 
+ * 操作历史：
+ * - 记录所有修改操作（重命名、移动、编辑）
+ * - 显示时间线（时间、操作类型、详情）
+ * - 支持恢复到历史状态
+ * - 关联历史记录管理器
+ * 
+ * 文件编辑：
+ * - 文件名编辑（自动调整高度）
+ * - 路径编辑（支持多行和路径建议）
+ * - 路径冲突检测（自动生成唯一文件名）
+ * - 路径验证（检查非法字符和路径）
+ * 
+ * 安全机制：
+ * - 图片锁定（防止意外修改）
+ * - 修改检测（提示未保存的更改）
+ * - 路径验证（防止非法路径）
+ * - 引用更新（重命名后自动更新引用）
+ * 
+ * 性能优化：
+ * - 图片懒加载（仅在显示时加载）
+ * - DOM 元素复用（减少重绘）
+ * - 事件委托（优化事件处理）
+ * - 防抖和节流（优化频繁操作）
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 打开图片详情
+ * const modal = new ImageDetailModal(app, imageInfo, allImages, plugin);
+ * modal.open();
+ * 
+ * // 关闭模态框
+ * modal.close();
+ * 
+ * // 刷新引用列表
+ * await modal.refreshReferences();
+ * ```
  */
 export class ImageDetailModal extends Modal {
 	/** 当前显示的图片信息 */
@@ -2672,7 +2738,15 @@ export class ImageDetailModal extends Modal {
 			} else {
 				finalPath = newFileName;
 			}
-			
+
+			// 安全检查：使用 PathValidator 验证并清理路径
+			const sanitizedPath = PathValidator.validateAndSanitize(finalPath);
+			if (!sanitizedPath) {
+				new Notice('❌ 包含非法路径字符，请检查输入');
+				return;
+			}
+			finalPath = sanitizedPath;
+
 			// 检查实际变更（比较目录和文件名）
 			// 使用实际文件路径进行比较，而不是originalPath（因为它可能已过时）
 			const actualOldDir = this.image.path.includes('/') 

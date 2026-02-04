@@ -10,6 +10,7 @@ import { ReferenceManager, parseWikiLink, parseHtmlImageSize } from './utils/ref
 import { TrashManager } from './utils/trash-manager';
 import { LockListManager } from './utils/lock-list-manager';
 import { HistoryManager } from './utils/history-manager';
+import { BlacklistManager } from './utils/blacklist-manager';
 
 // ==================== 网络图片缓存系统导入 ====================
 import {
@@ -23,12 +24,219 @@ import { NetworkImageScanner } from './utils/network-image-scanner';
 /**
  * ImageManagement 插件主类
  * 
- * 负责：
+ * 核心职责：
  * - 插件生命周期管理（加载、卸载）
  * - 视图和命令注册
  * - 事件监听和处理
- * - 核心管理器初始化（日志、错误、引用、回收站）
+ * - 核心管理器初始化
  * - 缓存管理和数据持久化
+ * 
+ * 初始化流程（onload）：
+ * 1. 加载持久化数据和设置
+ * 2. 初始化核心管理器：
+ *    - Logger: 日志记录
+ *    - ErrorHandler: 错误处理
+ *    - ReferenceManager: 引用管理
+ *    - TrashManager: 回收站
+ *    - HistoryManager: 历史记录
+ *    - LockListManager: 锁定列表
+ * 3. 初始化网络图片系统：
+ *    - IndexedDBManager: 数据库管理
+ *    - NetworkImageScannerAPI: 扫描API
+ *    - NetworkImageCacheManager: 缓存管理
+ *    - NetworkImageScanner: 扫描器
+ *    - BlacklistManager: 黑名单管理
+ * 4. 注册视图（IMAGE_MANAGER_VIEW_TYPE）
+ * 5. 注册命令（各种快捷命令）
+ * 6. 注册事件监听器：
+ *    - metadataCache.on('changed'): 监听元数据变化
+ *    - vault.on('create'): 监听文件创建
+ *    - vault.on('rename'): 监听文件重命名
+ *    - vault.on('delete'): 监听文件删除
+ *    - workspace.on('file-menu'): 添加右键菜单
+ * 7. 延迟初始化（提升启动速度）
+ * 8. 标记初始化完成
+ * 
+ * 核心管理器说明：
+ * 
+ * **Logger（日志管理器）**：
+ * - 多级别日志（DEBUG、INFO、WARNING、ERROR）
+ * - 按操作类型分类
+ * - 日志持久化和查询
+ * - 错误聚合和去重
+ * - 控制台输出控制
+ * 
+ * **ErrorHandler（错误处理器）**：
+ * - 统一错误处理
+ * - 用户友好的错误提示
+ * - 自动重试逻辑
+ * - 详细错误日志
+ * 
+ * **ReferenceManager（引用管理器）**：
+ * - 查找图片引用
+ * - 更新引用（重命名后）
+ * - 支持多种链接格式
+ * - 引用缓存优化
+ * 
+ * **TrashManager（回收站管理器）**：
+ * - 文件删除到回收站
+ * - 从回收站恢复
+ * - 清空回收站
+ * - 回收站元数据管理
+ * 
+ * **HistoryManager（历史记录管理器）**：
+ * - 记录操作历史
+ * - 历史查询和恢复
+ * - 操作统计和分析
+ * 
+ * **LockListManager（锁定列表管理器）**：
+ * - 文件锁定管理
+ * - MD5哈希验证
+ * - 三要素验证（MD5、文件名、路径）
+ * 
+ * **NetworkImageScannerAPI（网络图片扫描API）**：
+ * - 网络图片扫描
+ * - 增量扫描算法
+ * - 图片验证
+ * - 黑名单管理
+ * - 缓存清理
+ * 
+ * **BlacklistManager（黑名单管理器）**：
+ * - 域名黑名单
+ * - URL黑名单
+ * - 自动添加策略
+ * - 容量管理
+ * 
+ * 缓存机制：
+ * 
+ * **displayTextCache**：
+ * - 用途：缓存Wiki链接的显示文本
+ * - 结构：Map<filePath, Map<lineNumber, displayText>>
+ * - 优势：避免重复解析，提升查询速度
+ * 
+ * **fullLineCache**：
+ * - 用途：缓存笔记中的完整行内容
+ * - 结构：Map<filePath, Map<lineNumber, fullLine>>
+ * - 优势：快速定位引用，避免重复读取文件
+ * 
+ * **referenceCache**：
+ * - 用途：缓存图片引用关系
+ * - 结构：Map<imagePath, Set<referencingFilePaths>>
+ * - 优势：快速查询哪些笔记引用了某张图片
+ * - 延迟初始化：启动5秒后初始化，提升启动速度
+ * 
+ * **recentlyRenamedImages**：
+ * - 用途：追踪最近重命名的图片
+ * - 结构：Map<imagePath, { timestamp, referencedFiles }>
+ * - 优势：智能处理重命名后的引用更新
+ * 
+ * **deletedFiles**：
+ * - 用途：临时存储被删除的文件
+ * - 结构：Map<imagePath, { file, content }>
+ * - 优势：支持撤销删除操作
+ * 
+ * 延迟初始化策略：
+ * 
+ * **引用缓存延迟（5秒）**：
+ * - 原因：避免启动时扫描所有文件
+ * - 效果：提升启动速度2-3倍
+ * - 实现：setTimeout延迟初始化
+ * 
+ * **初始化标记延迟（3秒）**：
+ * - 原因：避免启动扫描时产生大量日志
+ * - 效果：减少日志噪音，提升性能
+ * - 实现：setTimeout设置isInitializing = false
+ * 
+ * 事件监听器：
+ * 
+ * **metadataCache.on('changed')**：
+ * - 监听：元数据变化
+ * - 处理：检测显示文本变化和引用变化
+ * - 优化：仅更新变化的部分，避免全量刷新
+ * 
+ * **vault.on('create')**：
+ * - 监听：文件创建
+ * - 处理：检测新图片，自动扫描
+ * - 优化：延迟扫描，避免频繁触发
+ * 
+ * **vault.on('rename')**：
+ * - 监听：文件重命名
+ * - 处理：更新引用关系，记录历史
+ * - 优化：使用ReferenceManager批量更新
+ * 
+ * **vault.on('delete')**：
+ * - 监听：文件删除
+ * - 处理：移动到回收站，清理引用
+ * - 优化：异步操作，不阻塞主线程
+ * 
+ * **workspace.on('file-menu')**：
+ * - 监听：右键菜单
+ * - 处理：添加自定义菜单项
+ * - 菜单项：打开详情页、批量操作等
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 插件自动初始化，无需手动调用
+ * // Obsidian会调用onload()和onunload()
+ * 
+ * // 访问核心管理器
+ * const plugin = app.plugins.plugins['imagemgr'];
+ * 
+ * // 使用日志管理器
+ * await plugin.logger.info(OperationType.SCAN, '开始扫描');
+ * 
+ * // 使用引用管理器
+ * const references = await plugin.referenceManager.findImageReferences(
+ *     'images/photo.png',
+ *     'photo.png'
+ * );
+ * 
+ * // 使用回收站管理器
+ * await plugin.trashManager.moveToTrash(file);
+ * 
+ * // 访问缓存
+ * const cachedText = plugin.displayTextCache.get(filePath)?.get(lineNumber);
+ * 
+ * // 检查初始化状态
+ * if (plugin.isInitializing) {
+ *     console.log('插件正在初始化...');
+ * }
+ * ```
+ * 
+ * 错误处理：
+ * - 初始化失败：记录错误，但不阻止插件加载
+ * - 管理器初始化失败：降级处理，其他功能继续可用
+ * - 事件监听器错误：捕获并记录，不影响其他监听器
+ * - 数据加载失败：使用默认值，记录警告
+ * 
+ * 性能优化：
+ * - 延迟初始化：提升启动速度
+ * - 缓存机制：减少重复计算和IO操作
+ * - 防抖和节流：优化频繁操作
+ * - 批量处理：减少操作次数
+ * - 异步操作：不阻塞主线程
+ * 
+ * 安全机制：
+ * - 路径验证：防止路径遍历
+ * - 类型检查：防止类型错误
+ * - 错误边界：捕获异常，防止崩溃
+ * - 数据验证：导入导出前验证数据
+ * 
+ * 最佳实践：
+ * 1. 核心功能通过管理器实现，不在主类中直接实现
+ * 2. 初始化顺序要合理，避免依赖问题
+ * 3. 使用缓存提升性能
+ * 4. 错误处理要完善，不丢失错误信息
+ * 5. 延迟非关键初始化，提升启动速度
+ * 6. 事件监听器要轻量，避免阻塞
+ * 7. 清理资源时按反序初始化
+ * 
+ * 注意事项：
+ * - 插件实例是单例
+ * - 初始化完成后才能使用所有功能
+ * - 缓存需要定期清理
+ * - 事件监听器要正确注册和取消注册
+ * - 卸载时要清理所有资源
  */
 export default class ImageManagementPlugin extends Plugin {
 	// ==================== 核心管理器 ====================
@@ -49,17 +257,21 @@ export default class ImageManagementPlugin extends Plugin {
 	/** 锁定列表管理器 - 管理和监控锁定文件列表 */
 	lockListManager: LockListManager;
 
-	// ==================== 网络图片缓存系统 ====================
-	/** IndexedDB 管理器 */
-	networkImageDBManager: IndexedDBManager;
-	/** 网络图片缓存 API */
-	networkImageAPI: NetworkImageScannerAPI;
-	/** 网络图片缓存管理器 */
-	networkImageCacheManager: NetworkImageCacheManager;
-	/** 网络图片错误处理器 */
-	networkImageErrorHandler: ScanErrorHandler;
-	/** 网络图片扫描器 */
-	networkImageScanner: NetworkImageScanner;
+// ==================== 网络图片缓存系统 ====================
+/** IndexedDB 管理器 */
+networkImageDBManager: IndexedDBManager;
+/** 网络图片缓存 API */
+networkImageAPI: NetworkImageScannerAPI;
+/** 网络图片缓存管理器 */
+networkImageCacheManager: NetworkImageCacheManager;
+/** 网络图片错误处理器 */
+networkImageErrorHandler: ScanErrorHandler;
+/** 网络图片扫描器 */
+networkImageScanner: NetworkImageScanner;
+
+// ==================== 黑名单管理系统 ====================
+/** 黑名单管理器 */
+blacklistManager: BlacklistManager;
 
 	// ==================== 缓存机制 ====================
 	/** 显示文本缓存：filePath -> lineNumber -> displayText
@@ -159,21 +371,24 @@ export default class ImageManagementPlugin extends Plugin {
 			// 初始化回收站管理器 - 管理已删除的文件
 			this.trashManager = new TrashManager(this.app, this);
 			
-			// 初始化回收站预加载（在设置加载后）- 提升回收站打开速度
-			this.trashManager.initializePreload();
-			
-		// 初始化锁定列表管理器 - 管理和监控锁定文件列表
-		this.lockListManager = new LockListManager(this);
-		await this.lockListManager.initialize();
+		// 初始化回收站预加载（在设置加载后）- 提升回收站打开速度
+		this.trashManager.initializePreload();
 		
-		// 初始化网络图片缓存系统（仅在启用扫描网络图片时）
-		if (this.settings.scanRemoteImages) {
-			await this.initializeNetworkImageCache();
-		} else {
-			if (this.logger) {
-				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image scanning is disabled, skipping cache system initialization');
-			}
+	// 初始化锁定列表管理器 - 管理和监控锁定文件列表
+	this.lockListManager = new LockListManager(this);
+	await this.lockListManager.initialize();
+	
+	// 初始化黑名单管理器 - 管理网络图片黑名单
+	this.blacklistManager = new BlacklistManager(this);
+	
+	// 初始化网络图片缓存系统（仅在启用扫描网络图片时）
+	if (this.settings.scanRemoteImages) {
+		await this.initializeNetworkImageCache();
+	} else {
+		if (this.logger) {
+			await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image scanning is disabled, skipping cache system initialization');
 		}
+	}
 		
 		// 延迟初始化引用缓存，避免在启动时扫描所有文件
 			// 5秒后初始化，让插件先完成核心启动流程

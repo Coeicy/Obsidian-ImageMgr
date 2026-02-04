@@ -1,5 +1,42 @@
 /**
- * 增量扫描器
+ * 增量网络图片扫描器
+ * 
+ * 核心功能：
+ * - 增量扫描算法，仅处理新增或修改的文件
+ * - 文件状态检测（修改时间、大小、内容哈希）
+ * - 黑名单缓存机制，避免重复检查
+ * - 自动清理孤立图片记录
+ * 
+ * 增量扫描流程：
+ * 1. 获取所有 Markdown 文件
+ * 2. 检查每个文件的扫描状态：
+ *    - 从缓存获取文件记录
+ *    - 检查文件是否存在（删除检测）
+ *    - 检查文件是否修改（mtime/size/hash）
+ * 3. 分类处理文件：
+ *    - scan: 需要扫描的文件（新增或修改）
+ *    - skip: 未修改的文件（跳过）
+ *    - cleanup: 已删除的文件（清理）
+ * 4. 并行扫描需要处理的文件
+ * 5. 清理已删除文件的图片
+ * 6. 清理孤立图片记录
+ * 7. 计算缓存命中率和统计信息
+ * 
+ * 文件变更检测机制：
+ * - 修改时间（mtime）: 快速检测
+ * - 文件大小（size）: 辅助检测
+ * - 内容哈希（hash）: 精确检测
+ * 
+ * 黑名单缓存优化：
+ * - 首次访问时从数据库加载黑名单到内存
+ * - 避免每次扫描时重复读取数据库
+ * - 支持缓存清除（黑名单变化时）
+ * 
+ * 性能优化：
+ * - 并行扫描（Promise.allSettled）
+ * - 黑名单内存缓存
+ * - 文件状态缓存（5秒有效期）
+ * - 批量数据库操作
  * 
  * @file 实现增量扫描算法，仅处理新增或修改的文件
  * @module IncrementalNetworkImageScanner
@@ -34,6 +71,8 @@ export class IncrementalNetworkImageScanner {
     private app: any; // Obsidian App 实例
     private scanner: NetworkImageScannerInterface;
     private errorHandler: ScanErrorHandler;
+    /** 黑名单缓存，避免重复从数据库加载 */
+    private blacklistCache: Set<string> | null = null;
     
     /**
      * 创建增量扫描器实例
@@ -299,15 +338,11 @@ export class IncrementalNetworkImageScanner {
             // 3. 处理每个图片（过滤黑名单中的链接）
             const imageIds: string[] = [];
             
-            // 获取黑名单（用于过滤）
-            const blacklist = await this.getBlacklist();
-            const blacklistSet = new Set(blacklist.map((item: any) => item.id));
-            
             for (const image of images) {
                 const imageId = await hashString(image.url);
                 
                 // 检查是否在黑名单中，如果是则跳过
-                if (blacklistSet.has(imageId)) {
+                if (await this.isUrlBlacklisted(image.url)) {
                     continue;
                 }
                 
@@ -745,17 +780,61 @@ export class IncrementalNetworkImageScanner {
     }
     
     /**
-     * 获取黑名单
+     * 加载黑名单到内存缓存（只加载一次）
      */
-    private async getBlacklist(): Promise<any[]> {
+    private async loadBlacklistToCache(): Promise<void> {
+        if (this.blacklistCache !== null) {
+            return; // 已经加载过，直接返回
+        }
+        
+        try {
+            const blacklist = await this.getBlacklistFromDB();
+            this.blacklistCache = new Set(blacklist.map((item: any) => item.id));
+            console.log(`[IncrementalScanner] Loaded ${this.blacklistCache.size} blacklist entries to cache`);
+        } catch (error) {
+            console.warn('Failed to load blacklist to cache:', error);
+            this.blacklistCache = new Set();
+        }
+    }
+    
+    /**
+     * 从数据库获取黑名单（原始数据）
+     */
+    private async getBlacklistFromDB(): Promise<any[]> {
         try {
             const tx = this.db.transaction([ObjectStore.BLACKLIST], 'readonly');
             const store = tx.objectStore(ObjectStore.BLACKLIST);
             return await this.getAllFromStore(store);
         } catch (error) {
-            console.warn('Failed to get blacklist:', error);
+            console.warn('Failed to get blacklist from DB:', error);
             return [];
         }
+    }
+    
+    /**
+     * 获取黑名单（兼容旧代码）
+     */
+    private async getBlacklist(): Promise<any[]> {
+        await this.loadBlacklistToCache();
+        // 将Set转换回数组格式
+        return Array.from(this.blacklistCache || []).map(id => ({ id }));
+    }
+    
+    /**
+     * 检查URL是否在黑名单中
+     */
+    private async isUrlBlacklisted(url: string): Promise<boolean> {
+        await this.loadBlacklistToCache();
+        const urlId = await hashString(url);
+        return this.blacklistCache?.has(urlId) || false;
+    }
+    
+    /**
+     * 清除黑名单缓存（当黑名单发生变化时调用）
+     */
+    public clearBlacklistCache(): void {
+        this.blacklistCache = null;
+        console.log('[IncrementalScanner] Blacklist cache cleared');
     }
 }
 

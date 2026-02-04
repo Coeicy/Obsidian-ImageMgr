@@ -1,12 +1,19 @@
 /**
- * 空链接检测模态框模块
+ * 空链接检测模态框模块 - 网络图片错误显示系统
  * 
- * 提供检测和显示笔记中空链接（指向不存在图片的链接）的功能。
+ * 提供完整的错误检测和显示功能，包括：
+ * - 智能错误分类：网络错误、本地链接错误等
+ * - 错误聚合显示：避免重复提示，提高信息密度
+ * - 错误上下文信息：详细错误诊断和修复建议
+ * - 实时错误更新：支持增量检测和动态更新
  * 
- * 功能特性：
- * - 点击跳转：点击空链接跳转到笔记并选中链接
- * - 搜索过滤：支持搜索文件路径、链接文本
- * - 分类显示：区分网络链接错误和本地链接错误
+ * 技术特性：
+ * - 错误缓存机制：避免重复检测相同错误
+ * - 智能错误恢复：自动识别重命名/移动导致的链接错误
+ * - 用户体验优化：清晰的错误分类和直观的交互设计
+ * 
+ * @version 1.0.0
+ * @module broken-links-modal
  */
 
 import { App, Modal, Notice, TFile } from 'obsidian';
@@ -76,6 +83,8 @@ export class BrokenLinksModal extends Modal {
 	private activeFilterId: string | null = null;
 	/** DOM元素缓存 */
 	private cachedElements: Map<string, HTMLElement | null> = new Map();
+	/** 黑名单缓存，避免重复从IndexedDB加载 */
+	private blacklistCache: any[] | null = null;
 
 	constructor(
 		app: App, 
@@ -267,44 +276,7 @@ export class BrokenLinksModal extends Modal {
 		title.style.margin = '0';
 		title.style.flex = '1';
 		
-		// 工具栏按钮组
-		const toolbar = headerContainer.createDiv();
-		toolbar.style.cssText = 'display: flex; gap: 8px; align-items: center;';
-		
-		// 刷新按钮
-		const refreshBtn = toolbar.createEl('button', { text: '🔄 刷新' });
-		refreshBtn.style.cssText = `
-			padding: 6px 12px;
-			border-radius: 4px;
-			border: 1px solid var(--background-modifier-border);
-			background: var(--background-secondary);
-			color: var(--text-normal);
-			cursor: pointer;
-			font-size: 0.85em;
-			transition: all 0.2s ease;
-		`;
-		refreshBtn.addEventListener('click', async () => {
-			if (this.isDetecting) {
-				new Notice('正在检测中，请稍候...');
-				return;
-			}
-			// 清空缓存和列表
-			this.brokenLinks = [];
-			this.enhancedLinks = [];
-			this.searchQuery = '';
-			// 重新检测
-			const contentArea = contentEl.querySelector('div[style*="flex-direction: column"]') as HTMLElement;
-			if (contentArea) {
-				contentArea.empty();
-				await this.detectBrokenLinks(contentArea);
-			}
-		});
-		refreshBtn.addEventListener('mouseenter', () => {
-			refreshBtn.style.background = 'var(--background-modifier-hover)';
-		});
-		refreshBtn.addEventListener('mouseleave', () => {
-			refreshBtn.style.background = 'var(--background-secondary)';
-		});
+		// 工具栏按钮组（删除刷新按钮后不需要这个容器）
 		
 
 		// 创建内容区域（包含统计信息和列表）
@@ -313,6 +285,9 @@ export class BrokenLinksModal extends Modal {
 		contentArea.style.display = 'flex';
 		contentArea.style.flexDirection = 'column';
 		contentArea.style.overflow = 'hidden';
+		
+		// 添加黑名单显示区域
+		this.displayBlacklistSection(contentArea);
 		
 		// 添加搜索框
 		const searchContainer = contentArea.createDiv();
@@ -385,7 +360,7 @@ export class BrokenLinksModal extends Modal {
 					existingLinks.map(link => `${link.filePath}:${link.lineNumber}:${link.extractedPath || link.linkText}`)
 				);
 				
-				const uniqueNewLinks = newLinks.filter(link => {
+				const uniqueNewLinks = newLinks.filter((link: {filePath: string, lineNumber: number, extractedPath?: string, linkText: string}) => {
 					const key = `${link.filePath}:${link.lineNumber}:${link.extractedPath || link.linkText}`;
 					return !existingKeys.has(key);
 				});
@@ -609,12 +584,12 @@ export class BrokenLinksModal extends Modal {
 		// 当前选中的分类ID（使用实例变量）
 		this.activeFilterId = null;
 
-		// 渲染分类内容（已改为在filterAndRenderLinks中处理）
-
 		// 创建按钮并绑定点击事件
+		let hasVisibleButtons = false;
 		for (const group of filterGroups) {
 			// 如果没有链接，隐藏该按钮
 			if (group.links.length === 0) continue;
+			hasVisibleButtons = true;
 
 			const button = buttonContainer.createEl('button', {
 				text: `${group.title} (${group.links.length})`,
@@ -669,6 +644,11 @@ export class BrokenLinksModal extends Modal {
 					button.style.background = 'var(--background-secondary)';
 				}
 			});
+		}
+
+		// 如果没有可见的按钮，隐藏整个按钮容器
+		if (!hasVisibleButtons) {
+			buttonContainer.style.display = 'none';
 		}
 
 		// 默认激活第一个有内容的按钮
@@ -947,6 +927,143 @@ export class BrokenLinksModal extends Modal {
 		const element = queryFn();
 		this.cachedElements.set(key, element);
 		return element;
+	}
+
+	/**
+	 * 显示黑名单内容区域
+	 */
+	private async displayBlacklistSection(containerEl: HTMLElement): Promise<void> {
+		try {
+			// 检查内存缓存，如果已加载则直接使用
+			let blacklist: any[] = [];
+			
+			if (this.blacklistCache !== null) {
+				// 使用内存缓存的数据
+				blacklist = this.blacklistCache;
+			} else {
+				// 首次加载，从 IndexedDB 获取
+				if (this.plugin?.networkImageAPI) {
+					// 使用新的网络图片API获取黑名单
+					blacklist = await this.plugin.networkImageAPI.getBlacklist();
+				} else if ((this.plugin as any)?.cacheManager) {
+					// 回退到旧的缓存管理器
+					const cacheManager = (this.plugin as any).cacheManager;
+					if (cacheManager?.db) {
+						const tx = cacheManager.db.transaction(['blacklist'], 'readonly');
+						const store = tx.objectStore('blacklist');
+						blacklist = await new Promise((resolve, reject) => {
+							const request = store.getAll();
+							request.onsuccess = () => resolve(request.result || []);
+							request.onerror = () => reject(request.error);
+						});
+					}
+				}
+				
+				// 保存到内存缓存
+				this.blacklistCache = blacklist;
+			}
+			
+			if (!blacklist || blacklist.length === 0) {
+				return; // 如果没有黑名单内容，不显示区域
+			}
+			
+			// 创建黑名单区域
+			const blacklistSection = containerEl.createDiv('blacklist-section');
+			blacklistSection.style.cssText = `
+				margin-bottom: 20px;
+				padding: 12px;
+				background: var(--background-secondary);
+				border-radius: 8px;
+				border: 1px solid var(--background-modifier-border);
+			`;
+			
+			// 标题
+			const titleEl = blacklistSection.createEl('h3', { text: `🚫 失效网络图片黑名单 (${blacklist.length} 个)` });
+			titleEl.style.cssText = `
+				margin: 0 0 8px 0;
+				font-size: 1.1em;
+				color: var(--text-normal);
+			`;
+			
+			// 描述
+			const descEl = blacklistSection.createEl('p', { 
+				text: '这些链接已被自动加入黑名单，下次扫描时将自动跳过' 
+			});
+			descEl.style.cssText = `
+				margin: 0 0 12px 0;
+				font-size: 0.9em;
+				color: var(--text-muted);
+			`;
+			
+			// 创建滚动容器
+			const scrollContainer = blacklistSection.createDiv();
+			scrollContainer.style.cssText = `
+				max-height: 150px;
+				overflow-y: auto;
+				border: 1px solid var(--background-modifier-border);
+				border-radius: 4px;
+				padding: 8px;
+				background: var(--background-primary);
+			`;
+			
+			// 显示黑名单条目
+			for (const item of blacklist) {
+				const itemEl = scrollContainer.createDiv('blacklist-item');
+				itemEl.style.cssText = `
+					padding: 6px 8px;
+					margin-bottom: 4px;
+					background: var(--background-primary);
+					border-radius: 4px;
+					font-family: monospace;
+					font-size: 0.85em;
+					border-left: 3px solid var(--text-error);
+					word-break: break-all;
+				`;
+				
+				// 显示URL（如果存在）
+				const url = item.url || item.id || '';
+				if (url) {
+					itemEl.createEl('div', { text: url });
+				}
+				
+				// 显示错误信息（如果存在）
+				if (item.errorMessage || item.reason) {
+					const errorEl = itemEl.createEl('div', { 
+						text: `错误: ${item.errorMessage || item.reason}` 
+					});
+					errorEl.style.cssText = `
+						margin-top: 4px;
+						color: var(--text-muted);
+						font-size: 0.9em;
+					`;
+				}
+				
+				// 显示时间（如果存在）
+				if (item.addedTime || item.lastFailure) {
+					const time = new Date(item.addedTime || item.lastFailure).toLocaleString('zh-CN');
+					const timeEl = itemEl.createEl('div', { text: `添加时间: ${time}` });
+					timeEl.style.cssText = `
+						margin-top: 2px;
+						color: var(--text-faint);
+						font-size: 0.8em;
+					`;
+				}
+			}
+			
+		} catch (error) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.warn(OperationType.VIEW, '显示黑名单部分失败', {
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
+		}
+	}
+
+	/**
+	 * 清除黑名单缓存（用于黑名单数据变化时刷新）
+	 */
+	public clearBlacklistCache(): void {
+		this.blacklistCache = null;
 	}
 
 	/**

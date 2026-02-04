@@ -1,8 +1,109 @@
 /**
  * 图片扫描器模块
  * 
- * 负责扫描 Obsidian 仓库中的所有图片文件，并可选地计算 MD5 哈希值用于去重。
- * 支持进度显示、批量处理和缓存机制以优化性能。
+ * 核心功能：
+ * - 扫描 Obsidian 仓库中的所有图片文件
+ * - 可选地计算 MD5 哈希值用于去重
+ * - 检测图片引用关系（支持多种链接格式）
+ * - 支持增量扫描（仅处理修改的文件）
+ * - 检测和统计空链接（指向不存在图片的链接）
+ * - 统计链接格式（Wiki/Markdown/HTML）
+ * 
+ * 支持的图片格式：
+ * - PNG (.png)
+ * - JPEG (.jpg, .jpeg)
+ * - GIF (.gif)
+ * - WebP (.webp)
+ * - SVG (.svg)
+ * - BMP (.bmp)
+ * 
+ * 扫描流程：
+ * 1. **文件扫描阶段**（scanning）：
+ *    - 获取所有图片文件
+ *    - 检查文件修改状态（mtime/size）
+ *    - 使用缓存加速重复扫描
+ *    - 异步加载图片尺寸信息
+ * 
+ * 2. **哈希计算阶段**（hashing）：
+ *    - 批量计算 MD5 哈希值
+ *    - 使用哈希缓存避免重复计算
+ *    - 检测重复图片
+ * 
+ * 3. **引用统计阶段**（references）：
+ *    - 扫描所有 Markdown 文件
+ *    - 查找图片引用关系
+ *    - 支持多种链接格式
+ *    - 智能代码块过滤
+ * 
+ * 4. **链接统计阶段**（links）：
+ *    - 统计各种链接格式数量
+ *    - 检测空链接
+ *    - 收集网络图片信息
+ * 
+ * 性能优化：
+ * - 批量处理文件（每批10个）避免阻塞UI
+ * - 增量扫描缓存（基于mtime/size）
+ * - 哈希值缓存（避免重复计算）
+ * - 异步图片加载（不阻塞扫描流程）
+ * - 定期让出控制权（setTimeout 0）
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 创建扫描器
+ * const scanner = new ImageScanner(app, vault, plugin);
+ * 
+ * // 执行扫描（带进度回调）
+ * const result = await scanner.scanImages(
+ *     (progress) => {
+ *         console.log(`${progress.phase}: ${progress.current}/${progress.total}`);
+ *         console.log(`缓存命中: ${progress.cacheHits}, 新扫描: ${progress.newScans}`);
+ *     },
+ *     true,  // 启用去重
+ *     false // 不强制全量扫描（使用缓存）
+ * );
+ * 
+ * console.log(`扫描完成：`);
+ * console.log(`- 总图片数: ${result.images.length}`);
+ * console.log(`- 重复图片: ${result.duplicateCount}`);
+ * console.log(`- 唯一图片: ${result.uniqueCount}`);
+ * console.log(`- 总大小: ${(result.totalSize / 1024 / 1024).toFixed(2)} MB`);
+ * console.log(`- 空链接: ${result.brokenLinks?.length || 0}`);
+ * 
+ * // 查看链接格式统计
+ * if (result.linkFormatStats) {
+ *     console.log(`- Wiki链接: ${result.linkFormatStats.wiki}`);
+ *     console.log(`- Markdown链接: ${result.linkFormatStats.markdown}`);
+ *     console.log(`- HTML链接: ${result.linkFormatStats.html}`);
+ *     console.log(`- 网络图片: ${result.linkFormatStats.remote}`);
+ * }
+ * 
+ * // 查看重复图片
+ * for (const [hash, images] of result.hashMap.entries()) {
+ *     if (images.length > 1) {
+ *         console.log(`重复图片 ${hash}: ${images.map(i => i.path).join(', ')}`);
+ *     }
+ * }
+ * 
+ * // 清理缓存
+ * await scanner.clearCache();
+ * 
+ * // 获取缓存统计
+ * const stats = scanner.getCacheStats();
+ * console.log(`哈希缓存: ${stats.hashCacheSize}`);
+ * console.log(`扫描缓存: ${stats.scanCacheSize}`);
+ * ```
+ * 
+ * 增量扫描说明：
+ * - 首次扫描：扫描所有文件，建立缓存
+ * - 后续扫描：仅扫描修改的文件（mtime/size变化）
+ * - 强制全量扫描：设置 forceFullScan = true
+ * - 引用信息不使用缓存：因为引用关系取决于Markdown文件内容
+ * 
+ * 注意事项：
+ * - 扫描过程会占用大量内存（所有图片信息）
+ * - 哈希计算会消耗CPU资源（大文件）
+ * - 引用统计需要遍历所有Markdown文件
+ * - 网络图片仅收集信息，不下载文件
  */
 
 import { App, Notice, TFile, Vault } from 'obsidian';

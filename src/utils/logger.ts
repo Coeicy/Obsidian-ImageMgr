@@ -598,33 +598,45 @@ export class Logger {
 	}
 
 	/**
+	 * 脱敏处理路径（防止敏感信息泄露）
+	 * @param path - 原始路径
+	 * @returns 脱敏后的路径（只显示文件名）
+	 */
+	private sanitizePath(path: string): string {
+		if (!path) return '';
+		const parts = path.split('/');
+		// 只返回文件名部分，隐藏目录结构
+		return parts[parts.length - 1];
+	}
+
+	/**
 	 * 格式化控制台输出消息（简洁版本）
 	 */
 	private formatConsoleMessage(entry: LogEntry): string {
-		const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', { 
+		const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', {
 			hour12: false,
 			hour: '2-digit',
 			minute: '2-digit',
 			second: '2-digit'
 		});
-		
+
 		const levelIcon = {
 			[LogLevel.DEBUG]: '🔍',
 			[LogLevel.INFO]: 'ℹ️',
 			[LogLevel.WARNING]: '⚠️',
 			[LogLevel.ERROR]: '❌'
 		}[entry.level] || '';
-		
+
 		let message = `[${time}] ${levelIcon} [${entry.operation}] ${entry.message}`;
-		
-		// 如果有图片信息，添加到消息中
+
+		// 如果有图片信息，添加到消息中（脱敏处理）
 		if (entry.imageName) {
 			message += ` | 图片: ${entry.imageName}`;
 		} else if (entry.imagePath) {
-			const pathParts = entry.imagePath.split('/');
-			message += ` | 路径: ${pathParts[pathParts.length - 1]}`;
+			// 只显示文件名，不显示完整路径
+			message += ` | 文件: ${this.sanitizePath(entry.imagePath)}`;
 		}
-		
+
 		return message;
 	}
 

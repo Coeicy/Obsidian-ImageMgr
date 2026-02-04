@@ -1,12 +1,134 @@
 /**
  * 文件编辑服务模块
  * 
- * 处理图片文件的重命名和移动操作，包括：
- * - 文件名验证和清理
- * - 目录创建
- * - 引用链接自动更新
- * - 锁定文件检查
+ * 核心功能：
+ * - 文件重命名和移动操作
+ * - 文件名验证和清理（防止非法字符）
+ * - 目录自动创建（包括所有父目录）
+ * - 引用链接自动更新（重命名/移动后）
+ * - 锁定文件检查（防止误操作）
  * - 操作历史记录
+ * 
+ * 操作流程：
+ * 1. **检查锁定状态**：
+ *    - 检查文件是否在忽略列表中
+ *    - 如果锁定，提示用户确认
+ *    - 确认后自动从忽略列表移除
+ * 
+ * 2. **验证和构建路径**：
+ *    - 验证文件名合法性
+ *    - 构建目标路径
+ *    - 检查目标目录是否存在
+ * 
+ * 3. **创建目录**：
+ *    - 自动创建所有父目录
+ *    - 静默跳过已存在目录
+ * 
+ * 4. **执行重命名/移动**：
+ *    - 使用 Obsidian Vault API
+ *    - 自动更新分组数据
+ * 
+ * 5. **更新引用**：
+ *    - 查找所有引用该图片的笔记
+ *    - 批量更新引用链接
+ *    - 支持多种链接格式
+ * 
+ * 6. **记录历史**：
+ *    - 记录操作类型（rename/move）
+ *    - 记录旧路径和新路径
+ *    - 保存时间戳
+ * 
+ * 路径验证规则：
+ * - 禁止字符：< > : " | ? *
+ * - 最大长度：50字符
+ * - 保留名称：CON, PRN, AUX, NUL, COM1-9, LPT1-9（Windows）
+ * 
+ * 目录创建策略：
+ * - 递归创建所有父目录
+ * - 静默跳过已存在目录
+ * - 不抛出重复创建错误
+ * 
+ * 引用更新支持：
+ * - Wiki 链接：![[image.png]]
+ * - Markdown 链接：![alt](image.png)
+ * - HTML 标签：<img src="image.png">
+ * - 自动检测链接格式
+ * 
+ * 错误处理：
+ * - 文件不存在：返回错误信息
+ * - 目标路径冲突：提示用户修改
+ * - 权限不足：记录日志
+ * - 引用更新失败：继续执行，不中断
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 创建服务实例
+ * const service = new FileEditService(
+ *     app,
+ *     vault,
+ *     imageInfo,  // 当前图片信息
+ *     plugin,     // 插件实例
+ *     referenceManager,  // 引用管理器（可选）
+ *     historyManager     // 历史管理器（可选）
+ * );
+ * 
+ * // 重命名文件
+ * const result = await service.saveChanges(
+ *     'new-name',      // 新文件名（不含扩展名）
+ *     '.png',          // 文件扩展名
+ *     '',              // 新目录路径（空表示当前目录）
+ *     'old-name.png',  // 原始文件名
+ *     'images/old-name.png' // 原始完整路径
+ * );
+ * 
+ * if (result.success) {
+ *     console.log(`重命名成功: ${result.newFileName}`);
+ *     console.log(`新路径: ${result.newFullPath}`);
+ * } else {
+ *     console.error(`失败: ${result.error}`);
+ * }
+ * 
+ * // 移动文件
+ * const result = await service.saveChanges(
+ *     'image',          // 文件名
+ *     '.jpg',           // 扩展名
+ *     'archive',        // 新目录
+ *     'image.jpg',      // 原文件名
+ *     'temp/image.jpg'  // 原路径
+ * );
+ * 
+ * // 同时重命名和移动
+ * const result = await service.saveChanges(
+ *     'renamed',         // 新文件名
+ *     '.png',            // 扩展名
+ *     'organized',       // 新目录
+ *     'old-name.png',    // 原文件名
+ *     'temp/old-name.png' // 原路径
+ * );
+ * 
+ * // 创建目录
+ * await service.createDirectory('new/folder/path');
+ * 
+ * // 验证文件名
+ * const isValid = FileEditService.isValidFileName('valid_name');
+ * console.log(isValid); // true
+ * 
+ * const isInvalid = FileEditService.isValidFileName('invalid<name>');
+ * console.log(isInvalid); // false
+ * ```
+ * 
+ * 最佳实践：
+ * 1. 在重命名前先检查文件名合法性
+ * 2. 批量操作时等待每个操作完成
+ * 3. 保留原始路径和历史记录
+ * 4. 处理错误时给用户友好的提示
+ * 5. 移动文件前确保目标目录可访问
+ * 
+ * 注意事项：
+ * - 文件重命名会触发 Obsidian 的 'rename' 事件
+ * - 引用更新是异步的，可能需要时间
+ * - 锁定文件修改会自动解除锁定
+ * - 目标文件已存在时会返回错误
  */
 
 import { App, Notice, TFile, TFolder, Vault } from 'obsidian';

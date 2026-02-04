@@ -1,5 +1,58 @@
 /**
- * API 接口层
+ * 网络图片扫描器 API 接口层
+ * 
+ * 核心功能：
+ * - 提供统一的扫描、搜索、清理和验证功能
+ * - 封装底层增量扫描器和缓存管理器
+ * - 支持多种扫描模式（增量/完整/快速）
+ * - 智能黑名单管理和自动添加
+ * - 图片验证和错误处理
+ * 
+ * 扫描模式：
+ * - 增量扫描（incremental）：仅扫描修改的文件
+ * - 完整扫描（full）：重新扫描所有文件
+ * - 快速扫描（quick）：仅检查修改的文件，不验证图片
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 初始化 API
+ * const api = new NetworkImageScannerAPI(app, db, scanner);
+ * 
+ * // 执行增量扫描
+ * const result = await api.scan({
+ *     path: 'docs/images',
+ *     incremental: true,
+ *     validateImages: false
+ * });
+ * console.log(`新增 ${result.newImages} 张图片，更新 ${result.updatedImages} 张图片`);
+ * 
+ * // 搜索图片
+ * const searchResult = await api.searchImagesByUrl('https://example.com');
+ * console.log(`找到 ${searchResult.total} 张图片`);
+ * 
+ * // 清理缓存
+ * const cleanupResult = await api.cleanup({
+ *     lru: true,
+ *     ttl: true,
+ *     orphaned: true
+ * });
+ * console.log(`清理了 ${cleanupResult.imagesRemoved} 张图片`);
+ * 
+ * // 获取缓存统计
+ * const stats = await api.getStats();
+ * console.log(`缓存命中率: ${stats.cacheHitRate.toFixed(2)}%`);
+ * ```
+ * 
+ * 最佳实践：
+ * 1. 定期执行完整扫描（建议每周一次）
+ * 2. 日常使用增量扫描（减少资源消耗）
+ * 3. 验证图片时控制并发数（避免过载）
+ * 4. 定期清理缓存（建议每月一次）
+ * 
+ * 错误处理：
+ * - 所有异步操作都会记录错误日志
+ * - 扫描错误不会中断整个扫描过程
+ * - 网络错误的图片会自动添加到黑名单
  * 
  * @file 提供对外使用的完整 API 接口
  * @module NetworkImageScannerAPI
@@ -31,6 +84,8 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
     private scanner: IncrementalNetworkImageScanner;
     private cacheManager: NetworkImageCacheManager;
     private errorHandler: ScanErrorHandler;
+    private s1ax1xDomainWarned: boolean = false;
+    private databaseConnectionWarned: boolean = false;
     
     /**
      * 创建 API 实例
@@ -420,22 +475,35 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
                         error: result.error
                     };
                     
-                    // 如果是网络错误（如 ERR_NAME_NOT_RESOLVED），添加到黑名单并记录日志
+                    // 如果是网络错误（如 ERR_CONNECTION_CLOSED, ERR_NAME_NOT_RESOLVED），添加到黑名单
                     if (result.errorType === 'network_error' || 
-                        (result.error && (result.error.includes('ERR_NAME_NOT_RESOLVED') || 
+                        (result.error && (result.error.includes('ERR_CONNECTION_CLOSED') ||
+                                         result.error.includes('ERR_NAME_NOT_RESOLVED') || 
                                          result.error.includes('DNS resolution failed') ||
                                          result.error.includes('Failed to fetch') ||
                                          result.error.includes('Network error')))) {
                         const errorMsg = result.error || 'Network error';
+                        
+                        // 检查是否为 s1.ax1x.com 域名，避免重复添加
+                        const domain = new URL(image.url).hostname;
+                        if (domain === 's1.ax1x.com') {
+                            // 对于特定域名，只记录一次警告
+                            if (!this.s1ax1xDomainWarned) {
+                                console.warn(`[Network Image Scanner] Domain s1.ax1x.com has connection issues, adding to blacklist: ${errorMsg}`);
+                                this.s1ax1xDomainWarned = true;
+                            }
+                        } else {
+                            console.warn(`[Network Image Scanner] Failed URL added to blacklist: ${image.url} - ${errorMsg}`);
+                        }
+                        
+                        // 使用URL重新计算hash，确保与检查时的ID一致
+                        const urlId = await hashUrl(image.url);
                         blacklistRecords.push({
-                            id: result.imageId,
+                            id: urlId,
                             url: image.url,
                             reason: result.errorType || 'network_error',
                             errorMessage: errorMsg
                         });
-                        
-                        // 记录到控制台日志
-                        console.warn(`[Network Image Scanner] Failed URL added to blacklist: ${image.url} - ${errorMsg}`);
                     }
                 }
                 
@@ -456,9 +524,25 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      * @param records - 黑名单记录数组
      */
     private async addToBlacklist(records: Array<{id: string, url: string, reason: any, errorMessage: string}>): Promise<void> {
+        // 检查数据库连接是否可用
+        if (!this.cacheManager || !this.cacheManager['db'] || this.cacheManager['db'].readyState !== 'open') {
+            // 避免重复显示相同的数据库连接错误
+            if (!this.databaseConnectionWarned) {
+                console.warn('Database connection is not available, skipping blacklist update');
+                this.databaseConnectionWarned = true;
+            }
+            return;
+        }
+        
         try {
             const db = this.cacheManager['db'];
             const tx = db.transaction([ObjectStore.BLACKLIST], 'readwrite');
+            
+            // 添加事务错误处理
+            tx.onerror = (event) => {
+                console.error('Transaction error in addToBlacklist:', event);
+            };
+            
             const store = tx.objectStore(ObjectStore.BLACKLIST);
             
             for (const record of records) {
@@ -489,6 +573,12 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             }
             
             console.log(`Added/Updated ${records.length} URLs in blacklist`);
+            
+            // 清除扫描器的黑名单缓存，以便下次扫描使用更新后的黑名单
+            if (this.scanner && typeof this.scanner.clearBlacklistCache === 'function') {
+                this.scanner.clearBlacklistCache();
+                console.log('[NetworkImageAPI] Blacklist cache cleared after update');
+            }
         } catch (error) {
             console.warn('Failed to add to blacklist:', error);
         }

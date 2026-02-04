@@ -4,12 +4,69 @@
  * 插件的核心视图，提供图片浏览和管理功能。
  * 
  * 主要功能：
- * - 图片网格展示（支持虚拟滚动）
- * - 搜索、排序、筛选
- * - 批量操作（选择、删除、重命名）
- * - 分组显示
- * - 键盘快捷键支持
- * - 拖拽框选
+ * - 图片网格展示（支持虚拟滚动，性能优化）
+ * - 搜索、排序、筛选（支持多种条件和组合）
+ * - 批量操作（选择、删除、重命名、移动）
+ * - 分组显示（按文件夹、日期、类型等）
+ * - 键盘快捷键支持（完整的键盘导航和操作）
+ * - 拖拽框选（支持矩形选择和反选）
+ * - 引用检测（显示图片在笔记中的引用状态）
+ * 
+ * 虚拟滚动机制：
+ * - 仅渲染可视区域内的图片，大幅提升性能
+ * - 使用 IntersectionObserver 实现懒加载
+ * - 动态计算渲染范围，滚动时平滑过渡
+ * - 支持大量图片（1000+）的流畅滚动
+ * 
+ * 性能优化：
+ * - DOM 缓存（复用已渲染的元素）
+ * - 虚拟滚动（减少DOM数量）
+ * - 图片懒加载（仅在需要时加载）
+ * - 筛选和排序缓存（避免重复计算）
+ * - 防抖和节流（优化事件处理）
+ * 
+ * 状态管理：
+ * - images: 所有扫描到的图片列表
+ * - filteredImages: 经过搜索、排序、筛选后的图片列表
+ * - selectedImages: 用户选中的图片列表
+ * - referenceCache: 引用状态缓存
+ * - operationHistory: 操作历史（用于智能清除）
+ * 
+ * 交互设计：
+ * - 单击：选中图片
+ * - 双击：打开详情模态框
+ * - 滚轮：切换视图或缩放
+ * - 拖拽：框选多个图片
+ * - 键盘：完整导航和操作支持
+ * 
+ * 与其他组件的交互：
+ * - ImageDetailModal: 打开图片详情
+ * - RenameModal: 批量重命名
+ * - SortModal: 排序选项设置
+ * - FilterModal: 筛选条件设置
+ * - SearchModal: 搜索功能
+ * - GroupModal: 分组功能
+ * - ReferenceManager: 引用检测和更新
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 在插件中注册视图
+ * app.workspace.registerView(
+ *     IMAGE_MANAGER_VIEW_TYPE,
+ *     (leaf) => new ImageManagerView(leaf, plugin)
+ * );
+ * 
+ * // 打开视图
+ * app.workspace.getLeaf().setViewState({
+ *     type: IMAGE_MANAGER_VIEW_TYPE
+ * });
+ * 
+ * // 刷新图片列表
+ * await view.refreshImages();
+ * 
+ * // 获取选中的图片
+ * const selected = view.getSelectedImages();
+ * ```
  */
 
 import { ItemView, Notice, TFile, WorkspaceLeaf, requestUrl, arrayBufferToBase64 } from 'obsidian';
@@ -35,6 +92,7 @@ import { matchesShortcut, isInputElement, SHORTCUT_DEFINITIONS } from '../utils/
 import { DragSelectManager } from '../utils/drag-select-manager';
 import { LinkFormatModal } from './link-format-modal';
 import { ObjectStore } from '../network-image/types';
+import { DOMCache } from '../utils/dom-cache';
 
 /** 图片管理视图的类型标识符 */
 export const IMAGE_MANAGER_VIEW_TYPE = 'image-manager-view';
@@ -235,21 +293,26 @@ export class ImageManagerView extends ItemView {
 						const isDnsError = errorMsg.includes('ERR_NAME_NOT_RESOLVED') || 
 						                   errorMsg.includes('ENOTFOUND') ||
 						                   errorMsg.includes('getaddrinfo');
+						const isConnectionError = errorMsg.includes('ERR_CONNECTION_CLOSED') ||
+						                      errorMsg.includes('ECONNREFUSED') ||
+						                      errorMsg.includes('ECONNRESET') ||
+						                      errorMsg.includes('net::ERR_');
 						
 						if (this.plugin?.logger) {
 							await this.plugin.logger.warn(OperationType.VIEW, `Level 1 代理失败: ${errorMsg}`, {
 								imagePath: src,
 								error: e,
-								details: { isDnsError }
+								details: { isDnsError, isConnectionError }
 							});
 							
-							if (isDnsError) {
-								await this.plugin.logger.warn(OperationType.VIEW, `DNS 解析失败，域名可能无法访问: ${src}`, {
+							if (isDnsError || isConnectionError) {
+								const errorType = isDnsError ? 'DNS 解析失败' : '网络连接失败';
+								await this.plugin.logger.warn(OperationType.VIEW, `${errorType}，域名可能无法访问: ${src}`, {
 									imagePath: src
 								});
 								
 								// 自动添加到黑名单
-								await this.addToBlacklist(src, 'ERR_NAME_NOT_RESOLVED');
+								await this.addToBlacklist(src, errorMsg);
 							}
 						}
 						
@@ -3091,7 +3154,11 @@ export class ImageManagerView extends ItemView {
 					}
 				}
 			} catch (error) {
-				console.warn('Failed to get broken images from cache:', error);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.warn(OperationType.SCAN, '获取失效图片缓存失败', {
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 			}
 		}
 		
@@ -3136,7 +3203,11 @@ export class ImageManagerView extends ItemView {
 					}
 				}
 			} catch (error) {
-				console.warn('Failed to get scanned files:', error);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.warn(OperationType.SCAN, '获取已扫描文件失败', {
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 			}
 		}
 		
@@ -4641,8 +4712,12 @@ export class ImageManagerView extends ItemView {
 				this.filterImages();
 				new Notice('🔄 图片列表已刷新');
 			})
-			.catch(error => {
-				console.error('刷新图片列表失败:', error);
+			.catch(async error => {
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.SCAN, '刷新图片列表失败', {
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 				new Notice('❌ 刷新失败，请检查控制台');
 			});
 	}

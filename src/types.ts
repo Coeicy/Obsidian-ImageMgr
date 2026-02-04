@@ -467,3 +467,25 @@ export interface ImageManagerSettings {
 		};
 	};
 }
+
+/**
+ * Window 扩展接口
+ *
+ * 定义全局 window 对象上的插件实例
+ */
+export interface WindowWithImageMgrPlugin {
+	/** ImageMgr 插件实例 */
+	ImageMgrPlugin?: {
+		/** 黑名单管理器 */
+		blacklistManager?: {
+			addToBlacklist(domain: string, reason: string): Promise<void>;
+		};
+		/** 设置对象 */
+		settings?: {
+			remoteImageBlacklist?: string[];
+		};
+		/** 保存设置方法 */
+		saveSettings?: () => Promise<void>;
+	};
+}
+

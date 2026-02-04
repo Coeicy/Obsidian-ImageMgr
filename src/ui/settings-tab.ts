@@ -876,16 +876,6 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(imageOperationsSection.contentEl)
-			.setName('保存批量重命名日志')
-			.setDesc('批量重命名后在根目录生成详细的操作记录文件（包含原路径、新路径、引用更新等信息）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.saveBatchRenameLog)
-				.onChange(async (value) => {
-					this.plugin.settings.saveBatchRenameLog = value;
-					await this.plugin.saveSettings();
-				}));
-
 		// 批量操作设置部分
 	const batchSectionTitle = imageOperationsSection.contentEl.createEl('h3', { text: '📦 批量操作设置' });
 	batchSectionTitle.style.marginTop = '32px';
@@ -2243,14 +2233,16 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 失效网络图片黑名单
 	new Setting(uploadSection.contentEl)
 		.setName('失效网络图片黑名单')
-		.setDesc('自动检测失效的图片 URL 并加入此列表（用于下次快速检测，每行一个 URL）')
-		.addTextArea(text => text
-			.setValue((this.plugin.settings.remoteImageBlacklist || []).join('\n'))
-			.setPlaceholder('http://example.com/broken-image.png')
-			.onChange(async (value) => {
+		.setDesc('失效图片 URL 列表（每行一个）')
+		.addTextArea(text => {
+			text.setValue((this.plugin.settings.remoteImageBlacklist || []).join('\n'));
+			text.setPlaceholder('http://example.com/broken-image.png');
+			text.inputEl.setAttribute('style', 'width: 100%; height: 200px; min-height: 200px; resize: vertical; font-family: monospace; font-size: 0.9em;');
+			text.onChange(async (value) => {
 				this.plugin.settings.remoteImageBlacklist = value.split('\n').filter(line => line.trim());
 				await this.plugin.saveSettings();
-			}));
+			});
+		});
 
 	// 扫描网络图片开关
 	new Setting(uploadSection.contentEl)

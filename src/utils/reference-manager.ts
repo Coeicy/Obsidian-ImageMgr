@@ -1,23 +1,68 @@
 /**
- * 引用管理模块
+ * 图片引用管理模块
  * 
- * 负责图片引用的查询、解析和更新功能。
- * 
- * 功能：
- * - 查找图片在笔记中的所有引用
+ * 核心功能：
+ * - 查找图片在笔记中的所有引用（支持多种格式）
  * - 解析 Wiki 链接、Markdown 链接和 HTML img 标签
  * - 更新笔记中的图片引用（重命名后自动更新）
- * - 监听文件重命名事件
+ * - 监听文件重命名事件并自动处理
+ * 
+ * 支持的链接格式：
+ * - Wiki 链接：
+ *   - `![[image.png]]` - 基本嵌入
+ *   - `![[image.png|显示文本]]` - 带显示文本
+ *   - `![[image.png|100x200]]` - 带尺寸
+ *   - `![[image.png|显示文本|100x200]]` - 显示文本和尺寸
+ * - Markdown 链接：
+ *   - `![alt](image.png)` - 基本格式
+ *   - `![alt](image.png?param=value)` - 带查询参数
+ * - HTML 标签：
+ *   - `<img src="image.png">` - 基本格式
+ *   - `<img src="image.png" alt="alt">` - 带alt属性
+ *   - `<img src="image.png" width="100" height="200">` - 带尺寸
  * 
  * 智能识别特性：
  * - 自动排除代码块（```）和行内代码（`）中的链接
  * - 只识别图片链接，排除笔记链接（检查图片扩展名）
  * - 实时更新：直接读取文件内容，确保识别最新添加的链接
+ * - 支持相对路径和绝对路径解析
  * 
- * 支持的链接格式：
- * - Wiki 链接：`![[image.png]]`、`![[image.png|显示文本]]`、`![[image.png|100x200]]`
- * - Markdown 链接：`![alt](image.png)`
- * - HTML 标签：`<img src="image.png">`
+ * 使用示例：
+ * ```typescript
+ * // 查找图片引用
+ * const references = await referenceManager.findImageReferences(
+ *     'images/photo.png',
+ *     'photo.png'
+ * );
+ * console.log(`找到 ${references.length} 个引用`);
+ * 
+ * // 简化版查找（仅返回文件和序号）
+ * const simpleRefs = await referenceManager.findImageReferencesSimple('images/photo.png');
+ * 
+ * // 手动触发引用更新（文件重命名后）
+ * await referenceManager.updateReferencesInNotes(
+ *     'images/old.png',
+ *     'images/new.png',
+ *     'old.png',
+ *     'new.png'
+ * );
+ * 
+ * // 监听重命名事件
+ * referenceManager.addFileRenameListener(async (oldPath, newPath) => {
+ *     console.log(`文件重命名: ${oldPath} -> ${newPath}`);
+ * });
+ * ```
+ * 
+ * 性能优化：
+ * - 使用 Obsidian MetadataCache API 提高查询速度
+ * - 文件内容缓存，避免重复读取
+ * - 批量操作，减少文件 I/O
+ * - 智能去重，避免重复处理
+ * 
+ * 错误处理：
+ * - 扫描错误不会中断整个查找过程
+ * - 文件读取失败会记录日志并跳过
+ * - 更新失败会通知用户但不影响其他文件
  */
 
 import { App, TFile } from 'obsidian';

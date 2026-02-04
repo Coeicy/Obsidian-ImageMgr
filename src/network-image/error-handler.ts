@@ -1,8 +1,24 @@
 /**
- * 错误处理模块
+ * 错误处理模块 - 网络图片扫描错误处理系统
  * 
- * @file 实现错误分类、错误日志和重试机制
+ * @file 实现智能错误分类、错误日志管理、重试机制和错误报告生成
  * @module error-handler
+ * @version 1.0.0
+ * 
+ * 核心功能：
+ * - 智能错误分类：基于错误消息和类型自动分类
+ * - 错误日志管理：记录、统计和分析扫描错误
+ * - 重试机制集成：支持动态重试策略
+ * - 错误报告生成：提供详细的诊断报告
+ * 
+ * 错误分类体系：
+ * - 网络错误：连接失败、DNS解析错误等
+ * - 超时错误：请求超时、操作超时等
+ * - 验证错误：404、403等HTTP状态码错误
+ * - 文件错误：文件读取权限问题
+ * - 笔记链接错误：空链接、无效链接等
+ * - 数据库错误：IndexedDB操作失败
+ * - 未知错误：无法分类的其他错误
  */
 
 import { ScanError, ScanErrorType, ErrorContext, RetryOptions } from './types';
@@ -10,21 +26,49 @@ import { retryOperation as genericRetryOperation, GenericErrorHandler } from '..
 
 /**
  * 扫描错误处理器
- * 提供错误分类、错误日志和错误报告功能
+ * 
+ * 提供完整的错误处理解决方案，包括：
+ * - 智能错误分类和识别
+ * - 错误日志管理和统计
+ * - 重试机制集成
+ * - 错误报告生成
+ * 
+ * 性能特性：
+ * - 错误日志自动清理（LRU策略）
+ * - 可配置的日志大小限制
+ * - 智能错误聚合显示
+ * - 跨会话错误持久化支持
+ * 
+ * @example
+ * ```typescript
+ * const errorHandler = new ScanErrorHandler(200, true);
+ * const error = errorHandler.handleError(new Error('Network error'), {
+ *   file: 'note.md',
+ *   url: 'https://example.com/image.jpg'
+ * });
+ * console.log(error.type); // ScanErrorType.NETWORK_ERROR
+ * ```
  */
 export class ScanErrorHandler {
+    /** 错误日志存储，按时间倒序排列 */
     private errorLog: ScanError[] = [];
+    /** 最大错误日志大小，防止内存泄漏 */
     private readonly maxErrorLogSize: number;
+    /** 是否启用控制台日志输出 */
     private readonly enableLogging: boolean;
     
     /**
      * 创建错误处理器实例
-     * @param maxErrorLogSize - 错误日志最大大小（默认 100）
-     * @param enableLogging - 是否启用控制台日志（默认 true）
+     * @param maxErrorLogSize - 错误日志最大大小（默认 100，建议 50-500）
+     * @param enableLogging - 是否启用控制台日志（默认 true，生产环境建议 false）
      */
     constructor(maxErrorLogSize: number = 100, enableLogging: boolean = true) {
-        this.maxErrorLogSize = maxErrorLogSize;
+        this.maxErrorLogSize = Math.max(10, Math.min(1000, maxErrorLogSize)); // 限制范围
         this.enableLogging = enableLogging;
+        
+        if (this.enableLogging) {
+            console.log(`ScanErrorHandler initialized with max log size: ${this.maxErrorLogSize}`);
+        }
     }
     
     /**
@@ -62,6 +106,16 @@ export class ScanErrorHandler {
     private classifyError(error: Error): ScanErrorType {
         if (!error) {
             return ScanErrorType.UNKNOWN_ERROR;
+        }
+        
+        if (error.message.includes('Empty note link')) {
+            return ScanErrorType.EMPTY_NOTE_LINK;
+        }
+        if (error.message.includes('Note not found')) {
+            return ScanErrorType.INVALID_NOTE_LINK;
+        }
+        if (error.message.includes('Note deleted')) {
+            return ScanErrorType.DELETED_NOTE_LINK;
         }
         
         const message = error.message?.toLowerCase() || '';
@@ -167,11 +221,13 @@ export class ScanErrorHandler {
         const contextStr = context.length > 0 ? ` [${context.join(', ')}]` : '';
         const retryStr = error.retryable ? ' (retryable)' : '';
         
-        console.error(`[ScanError] ${error.type}${contextStr}${retryStr}: ${error.message}`);
-        
-        // 对于可重试的错误，使用 warn 级别
+        // 只输出一次错误信息，避免重复
         if (error.retryable) {
-            console.warn(`[ScanError] This error is retryable: ${error.message}`);
+            // 对于可重试的错误，使用 warn 级别并包含重试信息
+            console.warn(`[ScanError] ${error.type}${contextStr}${retryStr}: ${error.message}`);
+        } else {
+            // 对于不可重试的错误，使用 error 级别
+            console.error(`[ScanError] ${error.type}${contextStr}${retryStr}: ${error.message}`);
         }
     }
     
@@ -315,3 +371,11 @@ export async function retryOperation<T>(
 }
 
 export default ScanErrorHandler;
+
+export function isNoteLinkError(error: ScanError): boolean {
+    return [
+        ScanErrorType.EMPTY_NOTE_LINK,
+        ScanErrorType.INVALID_NOTE_LINK,
+        ScanErrorType.DELETED_NOTE_LINK
+    ].includes(error.type);
+}
