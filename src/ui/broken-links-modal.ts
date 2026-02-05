@@ -86,6 +86,9 @@ export class BrokenLinksModal extends Modal {
 	/** 黑名单缓存，避免重复从IndexedDB加载 */
 	private blacklistCache: any[] | null = null;
 
+	/** 禁用默认的自动聚焦行为 */
+	shouldRestoreSelection = false;
+
 	constructor(
 		app: App, 
 		brokenLinks?: Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string}>, 
@@ -241,73 +244,109 @@ export class BrokenLinksModal extends Modal {
 		return result ? result.fileName : null;
 	}
 
-	onOpen() {
+		onOpen() {
 		const {contentEl, modalEl} = this;
 
 		contentEl.empty();
 		modalEl.addClass('broken-links-modal');
 		
-		// 设置模态框样式 - 根据内容自适应宽度
-		modalEl.style.width = 'auto';
-		modalEl.style.minWidth = '500px';
-		modalEl.style.maxWidth = '85%';
-		modalEl.style.maxHeight = '90vh';
+		// 设置模态框样式 - 固定宽度
+		modalEl.style.width = '700px';
+		modalEl.style.minWidth = '700px';
+		modalEl.style.maxWidth = '700px';
+		modalEl.style.maxHeight = '85vh';
 		
 		// 设置内容区域样式，使其可以滚动
 		contentEl.style.display = 'flex';
 		contentEl.style.flexDirection = 'column';
 		contentEl.style.height = '100%';
 		contentEl.style.overflow = 'hidden';
-		contentEl.style.padding = '20px';
+		contentEl.style.padding = '24px';
 		contentEl.style.maxWidth = '100%';
 		contentEl.style.boxSizing = 'border-box';
 
 		// 启用模态框可调整大小
 		makeModalResizable(modalEl, {
-			minWidth: 500,
+			minWidth: 600,
 			minHeight: 500,
 		});
 
-		// 标题和工具栏
-		const headerContainer = contentEl.createDiv();
-		headerContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; gap: 12px;';
+		// ========== 头部区域 ==========
+		const headerContainer = contentEl.createDiv('broken-links-header');
+		headerContainer.style.cssText = `
+			margin-bottom: 20px;
+			flex-shrink: 0;
+		`;
 		
 		const title = headerContainer.createEl('h2', { text: '🈳 空链接的图片链接' });
-		title.style.margin = '0';
-		title.style.flex = '1';
+		title.style.cssText = `
+			margin: 0 0 6px 0;
+			font-size: 1.4em;
+			font-weight: 600;
+			color: var(--text-normal);
+		`;
 		
-		// 工具栏按钮组（删除刷新按钮后不需要这个容器）
-		
+		const subtitle = headerContainer.createEl('p', { text: '检测笔记中引用不存在的本地图片，以及失效的网络图片链接' });
+		subtitle.style.cssText = `
+			margin: 0;
+			font-size: 0.85em;
+			color: var(--text-muted);
+		`;
 
-		// 创建内容区域（包含统计信息和列表）
-		const contentArea = contentEl.createDiv();
-		contentArea.style.flex = '1';
-		contentArea.style.display = 'flex';
-		contentArea.style.flexDirection = 'column';
-		contentArea.style.overflow = 'hidden';
+		// ========== 搜索框区域 ==========
+		const searchContainer = contentEl.createDiv('broken-links-search-container');
+		searchContainer.style.cssText = `
+			margin: 10px 0;
+			flex-shrink: 0;
+			position: relative;
+			padding: 0 6px;
+		`;
 		
-		// 添加黑名单显示区域
-		this.displayBlacklistSection(contentArea);
+		const searchWrapper = searchContainer.createDiv();
+		searchWrapper.style.cssText = `
+			position: relative;
+			display: flex;
+			align-items: center;
+		`;
 		
-		// 添加搜索框
-		const searchContainer = contentArea.createDiv();
-		searchContainer.style.cssText = 'margin-bottom: 12px; flex-shrink: 0;';
+		// 搜索图标
+		const searchIcon = searchWrapper.createEl('span', { text: '🔍' });
+		searchIcon.style.cssText = `
+			position: absolute;
+			left: 12px;
+			font-size: 0.9em;
+			opacity: 0.6;
+			pointer-events: none;
+		`;
 		
-		const searchInput = searchContainer.createEl('input', {
+		const searchInput = searchWrapper.createEl('input', {
 			type: 'text',
-			placeholder: '🔍 搜索文件路径、链接文本...',
+			placeholder: '搜索文件路径、链接文本...',
 			cls: 'broken-links-search-input'
 		});
 		searchInput.style.cssText = `
 			width: 100%;
-			padding: 8px 12px;
-			border: 1px solid var(--background-modifier-border);
+			padding: 6px 8px 6px 32px;
+			border: none;
+			border-bottom: 2px solid var(--background-modifier-border);
 			border-radius: 6px;
-			background: var(--background-secondary);
+			background: var(--background-primary);
 			color: var(--text-normal);
-			font-size: 0.9em;
+			font-size: 0.95em;
 			box-sizing: border-box;
+			transition: all 0.2s ease;
 		`;
+		
+		// 搜索框聚焦效果（不自动聚焦）
+		searchInput.addEventListener('focus', () => {
+			searchInput.style.borderBottomColor = 'var(--interactive-accent)';
+		});
+		searchInput.addEventListener('blur', () => {
+			searchInput.style.borderBottomColor = 'var(--background-modifier-border)';
+		});
+		
+		// 移除自动聚焦
+		searchInput.autofocus = false;
 		
 		// 搜索防抖
 		let searchTimeout: NodeJS.Timeout | null = null;
@@ -323,23 +362,89 @@ export class BrokenLinksModal extends Modal {
 				this.filterAndRenderLinks();
 			}, 300);
 		});
-		
 
+		// ========== 内容区域 ==========
+		const contentArea = contentEl.createDiv('broken-links-content-area');
+		contentArea.style.cssText = `
+			flex: 1;
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
+		`;
+
+		// 标签容器（固定不滚动）
+		const tabsContainer = contentArea.createDiv('broken-links-tabs-container');
+		tabsContainer.style.cssText = `
+			flex-shrink: 0;
+			margin-bottom: 12px;
+			padding: 0 6px;
+		`;
+
+		// 可滚动内容区域
+		const scrollContainer = contentArea.createDiv('broken-links-scroll-container');
+		scrollContainer.style.cssText = `
+			flex: 1;
+			overflow-y: scroll;
+			overflow-x: hidden;
+			width: 100%;
+			box-sizing: border-box;
+		`;
+
+		// 保存引用供后续使用
+		(this as any).tabsContainer = tabsContainer;
+		(this as any).scrollContainer = scrollContainer;
+		
 		// 先加载并显示缓存的空链接
-		const cachedLinks = this.plugin?.data.brokenLinks || [];
-		if (cachedLinks.length > 0) {
-			this.brokenLinks = cachedLinks as any;
-			this.displayResults(contentArea, false); // false 表示这是缓存的，不是新检测的
-		} else {
-			// 如果没有缓存，先显示空状态
-			const emptyEl = contentArea.createDiv({ 
-				text: '暂无已检测的空链接', 
-				attr: { style: 'text-align: center; padding: 40px; color: var(--text-muted);' }
-			});
-		}
+		(async () => {
+			const cachedLinks = this.plugin?.data.brokenLinks || [];
+			if (cachedLinks.length > 0) {
+				this.brokenLinks = cachedLinks as any;
+				await this.displayResults(contentArea, false);
+			} else {
+				// 如果没有缓存，显示加载状态
+				this.displayLoadingState(contentArea);
+			}
+		})();
 
 		// 在后台继续检测新的空链接（增量更新）
 		this.detectBrokenLinks(contentArea);
+	}
+
+	/**
+	 * 显示加载状态
+	 */
+	private displayLoadingState(containerEl: HTMLElement): void {
+		const loadingEl = containerEl.createDiv('broken-links-loading');
+		loadingEl.style.cssText = `
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			padding: 60px 40px;
+			color: var(--text-muted);
+			gap: 16px;
+		`;
+		
+		const spinner = loadingEl.createEl('div');
+		spinner.style.cssText = `
+			width: 32px;
+			height: 32px;
+			border: 3px solid var(--background-modifier-border);
+			border-top-color: var(--interactive-accent);
+			border-radius: 50%;
+			animation: broken-links-spin 1s linear infinite;
+		`;
+		
+		// 添加动画样式
+		const style = document.createElement('style');
+		style.textContent = `
+			@keyframes broken-links-spin {
+				to { transform: rotate(360deg); }
+			}
+		`;
+		document.head.appendChild(style);
+		
+		loadingEl.createEl('p', { text: '正在扫描笔记中的图片链接...' });
 	}
 
 	/**
@@ -404,7 +509,7 @@ export class BrokenLinksModal extends Modal {
 	}
 
 	/**
-	 * 添加新链接到 UI（增量更新）
+	 * 添加新链接到 UI（增量更新）- 选项卡布局
 	 */
 	private addLinksToUI(newLinks: Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string}>) {
 		if (!this.listContainer || newLinks.length === 0) return;
@@ -429,38 +534,28 @@ export class BrokenLinksModal extends Modal {
 			}
 		}
 
-		// 更新按钮计数
-		const filterGroups = [
-			{ id: 'remote', title: '🌐 网络链接错误', links: remoteErrors },
-			{ id: 'local', title: '📁 本地链接错误', links: localErrors }
+		// 更新选项卡计数
+		const tabs = [
+			{ id: 'local', links: localErrors },
+			{ id: 'remote', links: remoteErrors }
 		];
 
-		for (const group of filterGroups) {
-			if (group.links.length === 0) continue;
+		for (const tab of tabs) {
+			if (tab.links.length === 0) continue;
 
-			// 查找对应的按钮并更新计数
-			const button = this.listContainer.querySelector(`[data-filter-id="${group.id}"]`) as HTMLElement;
-			if (button) {
-				const currentCount = parseInt(button.textContent?.match(/\((\d+)\)/)?.[1] || '0');
-				button.textContent = `${group.title} (${currentCount + group.links.length})`;
-			}
-		}
-
-		// 如果当前显示的是对应的分类，直接添加到内容容器
-		const contentContainer = this.listContainer.querySelector('.broken-links-content-container') as HTMLElement;
-		if (contentContainer) {
-			// 获取当前激活的过滤器ID
-			const activeButton = this.listContainer.querySelector('.broken-links-filter-btn[style*="interactive-accent"]') as HTMLElement;
-			const activeFilterId = activeButton?.getAttribute('data-filter-id');
-
-			// 根据当前激活的过滤器添加对应的链接
-			if (activeFilterId === 'remote' && remoteErrors.length > 0) {
-				for (const link of remoteErrors) {
-					this.renderLinkItem(contentContainer, link);
+			const tabsContainer = (this as any).tabsContainer as HTMLElement;
+			const tabEl = tabsContainer?.querySelector(`[data-tab-id="${tab.id}"]`) as HTMLElement;
+			if (tabEl) {
+				// 更新计数徽章
+				const badge = tabEl.querySelector('.broken-link-count') as HTMLElement;
+				if (badge) {
+					const currentCount = parseInt(badge.textContent || '0');
+					badge.textContent = String(currentCount + tab.links.length);
 				}
-			} else if (activeFilterId === 'local' && localErrors.length > 0) {
-				for (const link of localErrors) {
-					this.renderLinkItem(contentContainer, link);
+				
+				// 如果当前选项卡已激活，刷新内容
+				if (this.activeFilterId === tab.id) {
+					this.filterAndRenderLinks();
 				}
 			}
 		}
@@ -472,74 +567,65 @@ export class BrokenLinksModal extends Modal {
 	private updateStats() {
 		if (!this.listContainer) return;
 		
-		// 重新查找恢复信息（因为 enhancedLinks 可能已更新）
+		// 重新查找恢复信息
 		this.findRecoveryInfo();
-		
-		const statsEl = this.listContainer.parentElement?.querySelector('.broken-links-stats') as HTMLElement;
-		if (!statsEl) return;
-
-		const countText = `共找到 ${this.enhancedLinks.length} 个空链接的图片`;
-		statsEl.textContent = countText;
 	}
 
 	/**
 	 * 显示检测结果
 	 */
-	displayResults(containerEl: HTMLElement, isNewDetection: boolean = true) {
+	async displayResults(containerEl: HTMLElement, isNewDetection: boolean = true) {
 		if (!this.brokenLinks) return;
 		
 		// 先查找恢复信息
 		this.findRecoveryInfo();
 		
-		if (this.enhancedLinks.length === 0) {
-			containerEl.createDiv({ 
-				text: '🎉 恭喜！没有找到空链接的图片', 
-				attr: { style: 'text-align: center; padding: 40px; color: var(--text-muted);' }
-			});
+		// 获取黑名单数据
+		let blacklist: any[] = [];
+		if (this.blacklistCache !== null) {
+			blacklist = this.blacklistCache;
+		} else {
+			if (this.plugin?.networkImageAPI) {
+				blacklist = await this.plugin.networkImageAPI.getBlacklist();
+			} else if ((this.plugin as any)?.cacheManager) {
+				const cacheManager = (this.plugin as any).cacheManager;
+				if (cacheManager?.db) {
+					const tx = cacheManager.db.transaction(['blacklist'], 'readonly');
+					const store = tx.objectStore('blacklist');
+					blacklist = await new Promise((resolve, reject) => {
+						const request = store.getAll();
+						request.onsuccess = () => resolve(request.result || []);
+						request.onerror = () => reject(request.error);
+					});
+				}
+			}
+			this.blacklistCache = blacklist;
+		}
+		
+		if (this.enhancedLinks.length === 0 && blacklist.length === 0) {
+			this.displayEmptyState(containerEl);
 			return;
 		}
 
-		// 显示总数（添加 class 以便后续更新）
-		const countText = `共找到 ${this.enhancedLinks.length} 个空链接的图片`;
+		// 使用预先创建的容器
+		const scrollContainer = (this as any).scrollContainer as HTMLElement;
+		const tabsContainer = (this as any).tabsContainer as HTMLElement;
 		
-		// 查找或创建统计信息元素（放在内容区域顶部）
-		let countEl = containerEl.querySelector('.broken-links-stats') as HTMLElement;
-		if (!countEl) {
-			countEl = containerEl.createEl('p', { 
-				text: countText, 
-				attr: { 
-					style: 'color: var(--text-muted); margin-bottom: 16px; flex-shrink: 0;',
-					class: 'broken-links-stats'
-				}
-			});
-		} else {
-			countEl.textContent = countText;
-		}
+		if (!scrollContainer || !tabsContainer) return;
 
-		// 创建可滚动的内容容器（如果不存在）
-		let scrollContainer = containerEl.querySelector('div[style*="overflow-y: auto"]') as HTMLElement;
-		if (!scrollContainer) {
-			scrollContainer = containerEl.createDiv();
-			scrollContainer.style.flex = '1';
-			scrollContainer.style.overflowY = 'auto';
-			scrollContainer.style.overflowX = 'hidden';
-			scrollContainer.style.width = '100%';
-			scrollContainer.style.boxSizing = 'border-box';
-		}
+		// 清空旧内容
+		scrollContainer.empty();
+		tabsContainer.empty();
 
-		// 创建列表容器（如果不存在，放在滚动容器内）
-		let listContainer = scrollContainer.querySelector('.broken-links-list') as HTMLElement;
-		if (!listContainer) {
-			listContainer = scrollContainer.createDiv('broken-links-list');
-			listContainer.style.border = '1px solid var(--background-modifier-border)';
-			listContainer.style.borderRadius = '8px';
-			listContainer.style.padding = '12px';
-			listContainer.style.minHeight = '0';
-			listContainer.style.width = 'fit-content';
-			listContainer.style.minWidth = '100%';
-			listContainer.style.maxWidth = '100%';
-			listContainer.style.boxSizing = 'border-box';
-		}
+		// 创建列表容器（放在滚动容器内）
+		const listContainer = scrollContainer.createDiv('broken-links-list');
+		listContainer.style.cssText = `
+			display: flex;
+			flex-direction: column;
+			gap: 12px;
+			width: 100%;
+			box-sizing: border-box;
+		`;
 		this.listContainer = listContainer;
 
 		// 按类型分组链接
@@ -554,116 +640,471 @@ export class BrokenLinksModal extends Modal {
 			}
 		}
 
-		// 定义分类组（只包含网络和本地两类）
+		// 定义分类组
 		const filterGroups = [
-			{ id: 'remote', title: '🌐 网络链接错误', links: remoteErrors, icon: '🌐' },
-			{ id: 'local', title: '📁 本地链接错误', links: localErrors, icon: '📁' }
+			{ 
+				id: 'local', 
+				title: '本地链接', 
+				links: localErrors, 
+				icon: '📄',
+				color: 'var(--text-accent)'
+			}
 		];
+		
+		// 如果有黑名单，添加黑名单选项卡
+		if (blacklist.length > 0) {
+			filterGroups.push({
+				id: 'blacklist',
+				title: '网络链接',
+				links: blacklist as any,
+				icon: '🌐',
+				color: 'var(--text-accent)'
+			});
+		}
 
-		// 创建按钮组容器
-		const buttonContainer = listContainer.createDiv('broken-links-filter-buttons');
-		buttonContainer.style.cssText = `
+		// 创建分类选项卡（并排显示，固定在顶部）
+		const tabsInnerContainer = tabsContainer.createDiv('broken-links-tabs');
+		tabsInnerContainer.style.cssText = `
 			display: flex;
-			gap: 8px;
-			margin-bottom: 16px;
-			flex-wrap: wrap;
-			width: fit-content;
-			max-width: 100%;
+			gap: 12px;
 		`;
 
-		// 创建内容容器（用于显示当前选中的分类）
-		const contentContainer = listContainer.createDiv('broken-links-content-container');
+		// 创建内容区域
+		const contentContainer = listContainer.createDiv('broken-links-tab-content');
 		contentContainer.style.cssText = `
 			min-height: 200px;
-			width: fit-content;
-			min-width: 100%;
-			max-width: 100%;
-			box-sizing: border-box;
 		`;
 
-		// 当前选中的分类ID（使用实例变量）
+		// 当前选中的分类ID
 		this.activeFilterId = null;
 
-		// 创建按钮并绑定点击事件
-		let hasVisibleButtons = false;
+		// 创建分类选项卡
 		for (const group of filterGroups) {
-			// 如果没有链接，隐藏该按钮
 			if (group.links.length === 0) continue;
-			hasVisibleButtons = true;
 
-			const button = buttonContainer.createEl('button', {
-				text: `${group.title} (${group.links.length})`,
-				cls: 'broken-links-filter-btn'
-			});
-			button.setAttribute('data-filter-id', group.id);
-			button.style.cssText = `
-				padding: 8px 16px;
-				border-radius: 6px;
-				border: 1px solid var(--background-modifier-border);
+			const tabCard = tabsInnerContainer.createDiv('broken-links-tab');
+			tabCard.setAttribute('data-tab-id', group.id);
+			tabCard.style.cssText = `
+				flex: 1;
 				background: var(--background-secondary);
-				color: var(--text-normal);
+				border: 1px solid var(--background-modifier-border);
+				border-radius: 8px;
+				padding: 10px 12px;
 				cursor: pointer;
-				font-size: 0.9em;
 				transition: all 0.2s ease;
-				flex: 0 0 auto;
+				display: flex;
+				align-items: center;
+				gap: 10px;
 			`;
 
+			// 图标
+			const iconEl = tabCard.createEl('span', { text: group.icon });
+			iconEl.style.fontSize = '1.2em';
+
+			// 标题
+			const titleText = tabCard.createEl('span', { text: group.title });
+			titleText.style.cssText = `
+				flex: 1;
+				font-weight: 600;
+				font-size: 0.9em;
+				color: var(--text-normal);
+			`;
+
+			// 数量徽章
+			const countBadge = tabCard.createEl('span', { 
+				text: String(group.links.length),
+				cls: 'broken-link-count'
+			});
+
 			// 点击切换
-			button.addEventListener('click', () => {
-				// 如果点击的是当前激活的按钮，不做任何操作
+			tabCard.addEventListener('click', () => {
 				if (this.activeFilterId === group.id) return;
 
-				// 更新所有按钮状态
-				const allButtons = buttonContainer.querySelectorAll('.broken-links-filter-btn');
-				allButtons.forEach(btn => {
-					(btn as HTMLElement).style.background = 'var(--background-secondary)';
-					(btn as HTMLElement).style.borderColor = 'var(--background-modifier-border)';
-					(btn as HTMLElement).style.color = 'var(--text-normal)';
+				// 更新所有选项卡样式和徽章
+				tabsInnerContainer.querySelectorAll('.broken-links-tab').forEach((tabEl) => {
+					const t = tabEl as HTMLElement;
+					t.style.background = 'var(--background-secondary)';
+					t.style.borderColor = 'var(--background-modifier-border)';
+					// 重置所有徽章为无背景
+					const badge = t.querySelector('.broken-link-count') as HTMLElement;
+					if (badge) {
+						badge.style.background = 'transparent';
+						badge.style.color = 'var(--text-muted)';
+					}
 				});
 
-				// 激活当前按钮
-				button.style.background = 'var(--interactive-accent)';
-				button.style.borderColor = 'var(--interactive-accent)';
-				button.style.color = 'var(--text-on-accent)';
+				// 激活当前选项卡
+				tabCard.style.background = 'var(--background-primary)';
+				tabCard.style.borderColor = group.color;
+
+				// 激活当前徽章
+				countBadge.style.background = group.color;
+				countBadge.style.color = 'white';
 
 				// 更新激活状态
 				this.activeFilterId = group.id;
 
-				// 渲染内容（应用搜索和排序）
-				this.filterAndRenderLinks();
+				// 渲染内容
+				this.renderTabContent(contentContainer, group.links, group.id);
 			});
 
 			// 悬停效果
-			button.addEventListener('mouseenter', () => {
+			tabCard.addEventListener('mouseenter', () => {
 				if (this.activeFilterId !== group.id) {
-					button.style.background = 'var(--background-modifier-hover)';
+					tabCard.style.background = 'var(--background-modifier-hover)';
 				}
 			});
-			button.addEventListener('mouseleave', () => {
+			tabCard.addEventListener('mouseleave', () => {
 				if (this.activeFilterId !== group.id) {
-					button.style.background = 'var(--background-secondary)';
+					tabCard.style.background = 'var(--background-secondary)';
 				}
 			});
-		}
 
-		// 如果没有可见的按钮，隐藏整个按钮容器
-		if (!hasVisibleButtons) {
-			buttonContainer.style.display = 'none';
-		}
-
-		// 默认激活第一个有内容的按钮
-		const firstGroup = filterGroups.find(g => g.links.length > 0);
-		if (firstGroup) {
-			const firstButton = buttonContainer.querySelector(`[data-filter-id="${firstGroup.id}"]`) as HTMLElement;
-			if (firstButton) {
-				this.activeFilterId = firstGroup.id;
-				firstButton.style.background = 'var(--interactive-accent)';
-				firstButton.style.borderColor = 'var(--interactive-accent)';
-				firstButton.style.color = 'var(--text-on-accent)';
-				this.filterAndRenderLinks();
+			// 默认激活第一个有内容的分类
+			const firstGroup = filterGroups.find(g => g.links.length > 0);
+			if (firstGroup && firstGroup.id === group.id) {
+				this.activeFilterId = group.id;
+				tabCard.style.background = 'var(--background-primary)';
+				tabCard.style.borderColor = group.color;
+				// 激活的徽章有背景色
+				countBadge.style.background = group.color;
+				countBadge.style.color = 'white';
+				countBadge.style.fontSize = '0.7em';
+				countBadge.style.padding = '2px 8px';
+				countBadge.style.borderRadius = '10px';
+				countBadge.style.flexShrink = '0';
+				this.renderTabContent(contentContainer, group.links, group.id);
+			} else {
+				// 未激活的徽章无背景色
+				countBadge.style.background = 'transparent';
+				countBadge.style.color = 'var(--text-muted)';
+				countBadge.style.fontSize = '0.7em';
+				countBadge.style.padding = '2px 8px';
+				countBadge.style.borderRadius = '10px';
+				countBadge.style.flexShrink = '0';
 			}
 		}
+	}
 
+	/**
+	 * 渲染选项卡内容
+	 */
+	private renderTabContent(containerEl: HTMLElement, links: BrokenLinkInfo[] | any[], tabId: string): void {
+		containerEl.empty();
+		
+		// 处理黑名单选项卡
+		if (tabId === 'blacklist') {
+			this.renderBlacklistContent(containerEl, links as any[]);
+			return;
+		}
+		
+		if (links.length === 0) {
+			containerEl.createDiv({
+				text: '暂无链接',
+				attr: { style: 'text-align: center; padding: 40px; color: var(--text-muted);' }
+			});
+			return;
+		}
+
+		// 应用搜索过滤
+		let filteredLinks = links as BrokenLinkInfo[];
+		if (this.searchQuery) {
+			const query = this.searchQuery.toLowerCase();
+			filteredLinks = filteredLinks.filter(link => {
+				const filePath = link.filePath.toLowerCase();
+				const linkText = link.linkText.toLowerCase();
+				const extractedPath = (link.extractedPath || '').toLowerCase();
+				return filePath.includes(query) || linkText.includes(query) || extractedPath.includes(query);
+			});
+		}
+
+		// 排序
+		filteredLinks.sort((a, b) => {
+			const pathComparison = a.filePath.localeCompare(b.filePath);
+			if (pathComparison !== 0) return pathComparison;
+			return a.lineNumber - b.lineNumber;
+		});
+
+		// 创建链接列表容器
+		const linksContainer = containerEl.createDiv();
+		linksContainer.style.cssText = `
+			background: var(--background-primary);
+			border-radius: 10px;
+			padding: 6px 6px 0 6px;
+		`;
+
+		if (filteredLinks.length === 0) {
+			linksContainer.createDiv({
+				text: '没有找到匹配的链接',
+				attr: { style: 'text-align: center; padding: 30px; color: var(--text-muted);' }
+			});
+		} else {
+			for (const link of filteredLinks) {
+				this.renderLinkItem(linksContainer, link);
+			}
+		}
+	}
+
+	/**
+	 * 渲染网络链接内容
+	 */
+	private renderBlacklistContent(containerEl: HTMLElement, blacklist: any[]): void {
+		if (blacklist.length === 0) {
+			containerEl.createDiv({
+				text: '暂无网络链接',
+				attr: { style: 'text-align: center; padding: 40px; color: var(--text-muted);' }
+			});
+			return;
+		}
+
+		// 应用搜索过滤
+		let filteredBlacklist = blacklist;
+		if (this.searchQuery) {
+			const query = this.searchQuery.toLowerCase();
+			filteredBlacklist = blacklist.filter(item => {
+				const url = (item.url || item.id || '').toLowerCase();
+				const error = (item.errorMessage || item.reason || '').toLowerCase();
+				return url.includes(query) || error.includes(query);
+			});
+		}
+
+		// 创建链接列表容器
+		const linksContainer = containerEl.createDiv();
+		linksContainer.style.cssText = `
+			background: var(--background-primary);
+			border-radius: 10px;
+			padding: 6px 6px 0 6px;
+		`;
+
+		if (filteredBlacklist.length === 0) {
+			linksContainer.createDiv({
+				text: '没有找到匹配的网络链接',
+				attr: { style: 'text-align: center; padding: 30px; color: var(--text-muted);' }
+			});
+		} else {
+			// 添加说明提示
+			const infoTip = linksContainer.createDiv();
+			infoTip.style.cssText = `
+				padding: 8px 10px;
+				margin-bottom: 8px;
+				background: var(--background-secondary);
+				border-radius: 6px;
+				font-size: 0.8em;
+				color: var(--text-muted);
+				display: flex;
+				align-items: center;
+				gap: 6px;
+			`;
+			infoTip.innerHTML = `<span>插件通过缓存网络图片提高性能，当遇到链接失效时（404、DNS错误、连接超时等），会将该URL记录在此，点击🔄重新下载。</span>`;
+
+			for (const item of filteredBlacklist) {
+				this.renderBlacklistItem(linksContainer, item);
+			}
+		}
+	}
+
+	/**
+	 * 渲染单个网络链接错误项
+	 */
+	private renderBlacklistItem(containerEl: HTMLElement, item: any) {
+		const linkItem = containerEl.createDiv('blacklist-link-item');
+		linkItem.setAttribute('data-url', item.url || item.id || '');
+		linkItem.style.cssText = `
+			padding: 6px;
+			margin-bottom: 4px;
+			background: var(--background-primary);
+			border-radius: 8px;
+			border: 1px solid var(--background-modifier-border);
+			transition: all 0.2s ease;
+			position: relative;
+			width: 100%;
+			box-sizing: border-box;
+			overflow: hidden;
+		`;
+
+		// 主内容区域
+		const mainContent = linkItem.createDiv();
+
+		// 顶部行：错误类型和🔄按钮
+		const headerRow = mainContent.createDiv();
+		headerRow.style.cssText = `
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin-bottom: 8px;
+		`;
+
+		const iconEl = headerRow.createEl('span', { text: '🌐' });
+		iconEl.style.fontSize = '0.9em';
+
+		// URL
+		const url = item.url || item.id || '';
+
+		// 错误类型文字（普通文字显示）
+		const errorType = item.errorMessage || item.reason || '链接失效';
+		const errorText = headerRow.createEl('span', { text: errorType });
+		errorText.style.cssText = `
+			color: var(--text-muted);
+			font-size: 0.85em;
+			flex: 1;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		`;
+
+		// 🔄 重新缓存按钮
+		const refreshBtn = headerRow.createEl('span', { text: '🔄' });
+		refreshBtn.style.cssText = `
+			font-size: 0.9em;
+			cursor: pointer;
+			padding: 4px 8px;
+			border-radius: 4px;
+			flex-shrink: 0;
+			transition: all 0.15s ease;
+		`;
+		refreshBtn.title = '重新尝试缓存';
+
+		refreshBtn.addEventListener('click', async (e) => {
+			e.stopPropagation();
+			refreshBtn.style.opacity = '0.5';
+			refreshBtn.style.pointerEvents = 'none';
+			refreshBtn.textContent = '⏳';
+			
+			try {
+				// 1. 从黑名单中移除该 URL 的域名
+				if (this.plugin?.blacklistManager && url) {
+					try {
+						const urlObj = new URL(url);
+						this.plugin.blacklistManager.removeFromBlacklist(urlObj.hostname);
+					} catch {
+						// URL 解析失败，忽略
+					}
+				}
+				
+				// 2. 尝试验证图片链接是否可用
+				const isValid = await this.validateImageUrl(url);
+				
+				if (isValid) {
+					// 缓存成功，从列表中删除链接
+					new Notice('图片缓存成功');
+					
+					linkItem.style.transition = 'all 0.3s ease';
+					linkItem.style.opacity = '0';
+					linkItem.style.transform = 'translateX(-20px)';
+					setTimeout(() => {
+						linkItem.remove();
+						// 检查是否为空
+						const remaining = containerEl.querySelectorAll('.blacklist-link-item');
+						if (remaining.length === 0) {
+							// 显示空状态
+							containerEl.empty();
+							containerEl.createDiv({
+								text: '暂无网络链接',
+								attr: { style: 'text-align: center; padding: 40px; color: var(--text-muted);' }
+							});
+						}
+					}, 300);
+				} else {
+					// 缓存失败，提示错误
+					new Notice('图片缓存失败：链接仍然不可用', 3000);
+					
+					// 恢复按钮状态
+					refreshBtn.style.opacity = '1';
+					refreshBtn.style.pointerEvents = 'auto';
+					refreshBtn.textContent = '🔄';
+				}
+			} catch (error) {
+				// 缓存失败，提示错误
+				new Notice('图片缓存失败：' + (error instanceof Error ? error.message : '未知错误'), 3000);
+				
+				// 恢复按钮状态
+				refreshBtn.style.opacity = '1';
+				refreshBtn.style.pointerEvents = 'auto';
+				refreshBtn.textContent = '🔄';
+			}
+		});
+
+		refreshBtn.addEventListener('mouseenter', () => {
+			refreshBtn.style.background = 'var(--background-secondary)';
+			refreshBtn.style.transform = 'scale(1.1)';
+		});
+		refreshBtn.addEventListener('mouseleave', () => {
+			refreshBtn.style.background = 'transparent';
+			refreshBtn.style.transform = 'scale(1)';
+		});
+
+		// 链接内容（可选择复制）
+		const linkContentWrapper = mainContent.createDiv();
+		linkContentWrapper.style.cssText = `
+			background: var(--background-secondary);
+			border-radius: 6px;
+			padding: 8px 10px;
+			margin-top: 4px;
+		`;
+
+		const linkContent = linkContentWrapper.createEl('code');
+		linkContent.style.cssText = `
+			color: var(--text-normal);
+			font-size: 0.85em;
+			white-space: pre-wrap;
+			word-break: break-all;
+			font-family: var(--font-monospace);
+			background: transparent;
+			padding: 0;
+			user-select: text;
+			font-weight: normal;
+		`;
+		linkContent.textContent = url || '';
+
+		// 链接项悬停效果
+		linkItem.addEventListener('mouseenter', () => {
+			linkItem.style.borderColor = 'var(--interactive-accent)';
+			linkItem.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+		});
+
+		linkItem.addEventListener('mouseleave', () => {
+			linkItem.style.borderColor = 'var(--background-modifier-border)';
+			linkItem.style.boxShadow = 'none';
+		});
+	}
+
+	/**
+	 * 显示空状态
+	 */
+	private displayEmptyState(containerEl: HTMLElement): void {
+		// 清除加载状态
+		const loadingEl = containerEl.querySelector('.broken-links-loading');
+		if (loadingEl) loadingEl.remove();
+
+		let emptyEl = containerEl.querySelector('.broken-links-empty') as HTMLElement;
+		if (!emptyEl) {
+			emptyEl = containerEl.createDiv('broken-links-empty');
+			emptyEl.style.cssText = `
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+				padding: 60px 40px;
+				gap: 16px;
+			`;
+			
+			const iconEl = emptyEl.createEl('div', { text: '🎉' });
+			iconEl.style.fontSize = '3em';
+			
+			const titleEl = emptyEl.createEl('h3', { text: '太棒了！' });
+			titleEl.style.cssText = `
+				margin: 0;
+				color: var(--text-normal);
+				font-size: 1.2em;
+			`;
+			
+			const descEl = emptyEl.createEl('p', { text: '没有找到空链接的图片，所有图片链接都正常' });
+			descEl.style.cssText = `
+				margin: 0;
+				color: var(--text-muted);
+				text-align: center;
+			`;
+		}
 	}
 
 	/**
@@ -672,98 +1113,98 @@ export class BrokenLinksModal extends Modal {
 	private renderLinkItem(containerEl: HTMLElement, link: BrokenLinkInfo) {
 		const linkItem = containerEl.createDiv('broken-link-item');
 		linkItem.setAttribute('data-link-key', `${link.filePath}:${link.lineNumber}:${link.linkText}`);
-		linkItem.style.padding = '12px';
-		linkItem.style.marginBottom = '8px';
-		linkItem.style.backgroundColor = 'var(--background-secondary)';
-		linkItem.style.borderRadius = '6px';
-		linkItem.style.border = '1px solid var(--background-modifier-border)';
-		linkItem.style.width = 'fit-content';
-		linkItem.style.minWidth = '100%';
-		linkItem.style.maxWidth = '100%';
-		linkItem.style.boxSizing = 'border-box';
+		linkItem.style.cssText = `
+			padding: 6px;
+			margin-bottom: 4px;
+			background: var(--background-primary);
+			border-radius: 8px;
+			border: 1px solid var(--background-modifier-border);
+			transition: all 0.2s ease;
+			position: relative;
+			width: 100%;
+			box-sizing: border-box;
+			overflow: hidden;
+		`;
 
 		// 主内容区域
 		const mainContent = linkItem.createDiv();
-		mainContent.style.cursor = 'pointer';
 
-		// 文件信息
-		const fileName = link.filePath.split('/').pop() || link.filePath;
-		const fileInfo = mainContent.createDiv();
-		fileInfo.style.fontWeight = '600';
-		fileInfo.style.color = 'var(--text-accent)';
-		fileInfo.style.marginBottom = '4px';
-		fileInfo.textContent = `📄 ${fileName} (第 ${link.lineNumber} 行)`;
+		// 顶部行：完整文件路径和行号
+		const headerRow = mainContent.createDiv();
+		headerRow.style.cssText = `
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin-bottom: 10px;
+		`;
 
-		// 链接内容
-		const linkContent = mainContent.createDiv();
-		linkContent.style.color = 'var(--text-normal)';
-		linkContent.style.fontSize = '0.9em';
-		linkContent.style.whiteSpace = 'pre-wrap';
-		linkContent.style.wordBreak = 'break-all';
-		linkContent.textContent = link.linkText;
+		const fileIcon = headerRow.createEl('span', { text: '📄' });
+		fileIcon.style.fontSize = '0.9em';
 
-		// 如果是网络链接错误，显示错误信息
-		if (link.isRemoteError && link.remoteError) {
-			const errorInfo = mainContent.createDiv();
-			errorInfo.style.cssText = `
-				margin-top: 8px;
-				padding: 8px 10px;
-				background: var(--background-secondary-alt);
-				border-left: 3px solid var(--text-error);
-				border-radius: 4px;
-				font-size: 0.85em;
-			`;
-			
-			// 错误图标和文字
-			const errorText = errorInfo.createSpan();
-			errorText.style.cssText = `
-				color: var(--text-error);
-				font-weight: 500;
-			`;
-			errorText.textContent = `🌐 网络链接错误: `;
-			
-			const errorDetail = errorInfo.createSpan();
-			errorDetail.style.cssText = `
+		// 分离路径和文件名
+		const filePath = link.filePath;
+		const fileName = filePath.split('/').pop() || filePath;
+		const folderPath = filePath.substring(0, filePath.length - fileName.length);
+
+		// 路径容器
+		const pathContainer = headerRow.createDiv();
+		pathContainer.style.cssText = `
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0;
+			flex: 1;
+		`;
+
+		// 路径部分（普通颜色）
+		if (folderPath) {
+			const folderEl = pathContainer.createEl('span', { text: folderPath });
+			folderEl.style.cssText = `
+				font-size: 0.9em;
 				color: var(--text-muted);
+				word-break: break-all;
 			`;
-			errorDetail.textContent = link.remoteError;
-			
-			// 显示链接地址
-			if (link.extractedPath) {
-				const urlInfo = mainContent.createDiv();
-				urlInfo.style.cssText = `
-					margin-top: 6px;
-					padding-left: 10px;
-					font-size: 0.8em;
-					color: var(--text-muted);
-					word-break: break-all;
-					opacity: 0.8;
-				`;
-				urlInfo.textContent = `🔗 ${link.extractedPath}`;
-			}
 		}
 
+		// 文件名部分（突出显示）
+		const fileNameEl = pathContainer.createEl('span', { text: fileName });
+		fileNameEl.style.cssText = `
+			font-weight: 600;
+			font-size: 0.9em;
+			color: var(--text-accent);
+			word-break: break-all;
+		`;
 
-		// 点击跳转到对应笔记
-		mainContent.addEventListener('click', async () => {
+		const lineBadge = headerRow.createEl('span', { text: `第 ${link.lineNumber} 行` });
+		lineBadge.style.cssText = `
+			background: var(--background-secondary);
+			color: var(--text-muted);
+			font-size: 0.75em;
+			padding: 2px 8px;
+			border-radius: 4px;
+			margin-left: 8px;
+			flex-shrink: 0;
+			cursor: pointer;
+			transition: all 0.15s ease;
+		`;
+
+		// 点击行号跳转到对应笔记
+		lineBadge.addEventListener('click', async (e) => {
+			e.stopPropagation();
 			const file = this.app.vault.getAbstractFileByPath(link.filePath);
 			if (file) {
-				// 根据设置决定是否保持模态框打开
 				const keepOpen = this.plugin?.settings.keepModalOpen || false;
 				
 				if (keepOpen) {
-					// 保持模态框打开：在右侧堆叠面板打开笔记
 					const newLeaf = this.app.workspace.splitActiveLeaf('vertical');
 					if (newLeaf) {
 						await newLeaf.openFile(file as TFile);
-						// 滚动到指定行并选中链接
 						setTimeout(async () => {
 							const view = newLeaf.view;
 							if (view && 'editor' in view) {
 								const editor = (view as any).editor;
 								if (editor && typeof editor.setSelection === 'function') {
 									const line = link.lineNumber - 1;
-									// 读取行内容，定位链接位置
 									const content = await this.app.vault.read(file as TFile);
 									const lines = content.split('\n');
 									let ch = 0;
@@ -780,18 +1221,15 @@ export class BrokenLinksModal extends Modal {
 						}, 300);
 					}
 				} else {
-					// 关闭模态框：在当前标签页打开笔记
 					const newLeaf = this.app.workspace.getLeaf(true);
 					if (newLeaf) {
 						await newLeaf.openFile(file as TFile);
-						// 滚动到指定行并选中链接
 						setTimeout(async () => {
 							const view = newLeaf.view;
 							if (view && 'editor' in view) {
 								const editor = (view as any).editor;
 								if (editor && typeof editor.setSelection === 'function') {
 									const line = link.lineNumber - 1;
-									// 读取行内容，定位链接位置
 									const content = await this.app.vault.read(file as TFile);
 									const lines = content.split('\n');
 									let ch = 0;
@@ -806,22 +1244,106 @@ export class BrokenLinksModal extends Modal {
 								}
 							}
 						}, 300);
-						// 关闭模态框
 						this.close();
 					}
 				}
 			}
 		});
 
-		// 悬停效果
+		// 行号悬停效果
+		lineBadge.addEventListener('mouseenter', () => {
+			lineBadge.style.background = 'var(--interactive-accent)';
+			lineBadge.style.color = 'var(--text-on-accent)';
+		});
+		lineBadge.addEventListener('mouseleave', () => {
+			lineBadge.style.background = 'var(--background-secondary)';
+			lineBadge.style.color = 'var(--text-muted)';
+		});
+
+		// 链接内容（可选择复制）
+		const linkContentWrapper = mainContent.createDiv();
+		linkContentWrapper.style.cssText = `
+			background: var(--background-secondary);
+			border-radius: 6px;
+			padding: 10px 12px;
+			margin-top: 4px;
+		`;
+
+		const linkContent = linkContentWrapper.createEl('code');
+		linkContent.style.cssText = `
+			color: var(--text-normal);
+			font-size: 0.85em;
+			white-space: pre-wrap;
+			word-break: break-all;
+			font-family: var(--font-monospace);
+			background: transparent;
+			padding: 0;
+			user-select: text;
+			font-weight: normal;
+		`;
+		linkContent.textContent = link.linkText;
+
+		// 如果是网络链接错误，显示错误信息
+		if (link.isRemoteError && link.remoteError) {
+			const errorInfo = mainContent.createDiv();
+			errorInfo.style.cssText = `
+				margin-top: 10px;
+				padding: 10px 12px;
+				background: rgba(var(--text-error-rgb), 0.08);
+				border: 1px solid rgba(var(--text-error-rgb), 0.2);
+				border-radius: 6px;
+				font-size: 0.85em;
+			`;
+			
+			const errorHeader = errorInfo.createDiv();
+			errorHeader.style.cssText = `
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				margin-bottom: 4px;
+			`;
+
+			const errorIcon = errorHeader.createEl('span', { text: '⚠️' });
+			errorIcon.style.fontSize = '0.9em';
+			
+			const errorText = errorHeader.createEl('span', { text: '网络错误' });
+			errorText.style.cssText = `
+				color: var(--text-error);
+				font-weight: 500;
+			`;
+			
+			const errorDetail = errorInfo.createEl('div', { text: link.remoteError });
+			errorDetail.style.cssText = `
+				color: var(--text-muted);
+				font-size: 0.9em;
+				padding-left: 22px;
+			`;
+			
+			// 显示链接地址
+			if (link.extractedPath) {
+				const urlInfo = errorInfo.createEl('div', { text: link.extractedPath });
+				urlInfo.style.cssText = `
+					margin-top: 6px;
+					padding: 6px 10px;
+					background: var(--background-primary);
+					border-radius: 4px;
+					font-size: 0.85em;
+					color: var(--text-muted);
+					word-break: break-all;
+					font-family: var(--font-monospace);
+				`;
+			}
+		}
+
+		// 链接项悬停效果
 		linkItem.addEventListener('mouseenter', () => {
-			linkItem.style.backgroundColor = 'var(--background-modifier-hover)';
 			linkItem.style.borderColor = 'var(--interactive-accent)';
+			linkItem.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
 		});
 
 		linkItem.addEventListener('mouseleave', () => {
-			linkItem.style.backgroundColor = 'var(--background-secondary)';
 			linkItem.style.borderColor = 'var(--background-modifier-border)';
+			linkItem.style.boxShadow = 'none';
 		});
 	}
 
@@ -835,81 +1357,47 @@ export class BrokenLinksModal extends Modal {
 
 
 	/**
-	 * 过滤和渲染链接（根据搜索查询和排序）
+	 * 过滤和渲染链接（根据搜索查询）- 选项卡布局
 	 */
 	private filterAndRenderLinks(): void {
-		if (!this.listContainer) return;
+		if (!this.listContainer || !this.activeFilterId) return;
 		
-		// 获取当前激活的过滤器对应的链接
-		let baseLinks: BrokenLinkInfo[] = [];
+		const contentContainer = this.listContainer.querySelector('.broken-links-tab-content') as HTMLElement;
+		if (!contentContainer) return;
 		
-		if (this.activeFilterId) {
-			// 按类型分组链接
-			const remoteErrors: BrokenLinkInfo[] = [];
-			const localErrors: BrokenLinkInfo[] = [];
-			
-			for (const link of this.enhancedLinks) {
-				if (link.isRemoteError) {
-					remoteErrors.push(link);
-				} else {
-					localErrors.push(link);
-				}
-			}
-			
-			// 根据激活的过滤器选择对应的链接
-			switch (this.activeFilterId) {
-				case 'remote':
-					baseLinks = remoteErrors;
-					break;
-				case 'local':
-					baseLinks = localErrors;
-					break;
-				default:
-					baseLinks = this.enhancedLinks;
-			}
-		} else {
-			baseLinks = this.enhancedLinks;
+		// 处理黑名单选项卡
+		if (this.activeFilterId === 'blacklist') {
+			this.renderTabContent(contentContainer, this.blacklistCache || [], 'blacklist');
+			return;
 		}
 		
-		// 应用搜索过滤
-		let filteredLinks = baseLinks;
+		// 按类型分组并应用搜索过滤
+		const localLinks = this.enhancedLinks.filter(l => !l.isRemoteError);
+		
+		let filteredLinks: BrokenLinkInfo[] = [];
+		
 		if (this.searchQuery) {
 			const query = this.searchQuery.toLowerCase();
-			filteredLinks = baseLinks.filter(link => {
+			const filterFn = (link: BrokenLinkInfo) => {
 				const filePath = link.filePath.toLowerCase();
 				const linkText = link.linkText.toLowerCase();
 				const extractedPath = (link.extractedPath || '').toLowerCase();
 				return filePath.includes(query) || linkText.includes(query) || extractedPath.includes(query);
-			});
+			};
+			filteredLinks = localLinks.filter(filterFn);
+		} else {
+			filteredLinks = localLinks;
 		}
 		
-		// 应用默认排序（按文件路径升序，然后按行号升序）
+		// 排序（按文件路径，然后按行号）
 		filteredLinks.sort((a, b) => {
-			// 先按文件路径排序
 			const pathComparison = a.filePath.localeCompare(b.filePath);
-			if (pathComparison !== 0) {
-				return pathComparison;
-			}
-			// 如果文件路径相同，按行号排序
+			if (pathComparison !== 0) return pathComparison;
 			return a.lineNumber - b.lineNumber;
 		});
 		
-		// 重新渲染内容容器
-		const contentContainer = this.listContainer.querySelector('.broken-links-content-container') as HTMLElement;
-		if (contentContainer) {
-			contentContainer.empty();
-			
-			if (filteredLinks.length === 0) {
-				const emptyMsg = contentContainer.createDiv({
-					text: this.searchQuery ? '没有找到匹配的链接' : '暂无链接',
-					attr: { style: 'text-align: center; padding: 40px; color: var(--text-muted);' }
-				});
-			} else {
-				for (const link of filteredLinks) {
-					this.renderLinkItem(contentContainer, link);
-				}
-			}
-		}
+		// 重新渲染当前选项卡内容
+		this.renderTabContent(contentContainer, filteredLinks, this.activeFilterId);
 	}
 
 	/**
@@ -930,23 +1418,18 @@ export class BrokenLinksModal extends Modal {
 	}
 
 	/**
-	 * 显示黑名单内容区域
+	 * 显示网络链接错误内容区域
 	 */
 	private async displayBlacklistSection(containerEl: HTMLElement): Promise<void> {
 		try {
-			// 检查内存缓存，如果已加载则直接使用
 			let blacklist: any[] = [];
 			
 			if (this.blacklistCache !== null) {
-				// 使用内存缓存的数据
 				blacklist = this.blacklistCache;
 			} else {
-				// 首次加载，从 IndexedDB 获取
 				if (this.plugin?.networkImageAPI) {
-					// 使用新的网络图片API获取黑名单
 					blacklist = await this.plugin.networkImageAPI.getBlacklist();
 				} else if ((this.plugin as any)?.cacheManager) {
-					// 回退到旧的缓存管理器
 					const cacheManager = (this.plugin as any).cacheManager;
 					if (cacheManager?.db) {
 						const tx = cacheManager.db.transaction(['blacklist'], 'readonly');
@@ -958,101 +1441,154 @@ export class BrokenLinksModal extends Modal {
 						});
 					}
 				}
-				
-				// 保存到内存缓存
 				this.blacklistCache = blacklist;
 			}
 			
 			if (!blacklist || blacklist.length === 0) {
-				return; // 如果没有黑名单内容，不显示区域
+				return;
 			}
 			
-			// 创建黑名单区域
+			// 创建网络链接错误区域 - 可折叠卡片样式
 			const blacklistSection = containerEl.createDiv('blacklist-section');
 			blacklistSection.style.cssText = `
-				margin-bottom: 20px;
-				padding: 12px;
-				background: var(--background-secondary);
-				border-radius: 8px;
+				background: var(--background-primary);
 				border: 1px solid var(--background-modifier-border);
+				border-radius: 10px;
+				overflow: hidden;
+				margin-bottom: 16px;
 			`;
 			
-			// 标题
-			const titleEl = blacklistSection.createEl('h3', { text: `🚫 失效网络图片黑名单 (${blacklist.length} 个)` });
-			titleEl.style.cssText = `
-				margin: 0 0 8px 0;
-				font-size: 1.1em;
+			// 头部（可点击折叠）
+			const headerEl = blacklistSection.createDiv('blacklist-header');
+			headerEl.style.cssText = `
+				display: flex;
+				align-items: center;
+				padding: 14px 16px;
+				background: var(--background-secondary);
+				cursor: pointer;
+				gap: 12px;
+				transition: background 0.2s ease;
+			`;
+			
+			const expandIcon = headerEl.createEl('span', { text: '▶' });
+			expandIcon.style.cssText = `
+				font-size: 0.7em;
+				color: var(--text-muted);
+				transition: transform 0.2s ease;
+				width: 16px;
+				text-align: center;
+			`;
+			
+			const iconEl = headerEl.createEl('span', { text: '🌐' });
+			iconEl.style.fontSize = '1.1em';
+			
+			const titleText = headerEl.createEl('span', { text: '网络链接' });
+			titleText.style.cssText = `
+				flex: 1;
+				font-weight: 600;
+				font-size: 0.9em;
 				color: var(--text-normal);
 			`;
 			
-			// 描述
-			const descEl = blacklistSection.createEl('p', { 
-				text: '这些链接已被自动加入黑名单，下次扫描时将自动跳过' 
-			});
-			descEl.style.cssText = `
-				margin: 0 0 12px 0;
-				font-size: 0.9em;
-				color: var(--text-muted);
+			const countBadge = headerEl.createEl('span', { text: String(blacklist.length) });
+			countBadge.style.cssText = `
+				background: var(--text-error);
+				color: white;
+				font-size: 0.7em;
+				padding: 2px 8px;
+				border-radius: 10px;
+				flex-shrink: 0;
 			`;
 			
-			// 创建滚动容器
-			const scrollContainer = blacklistSection.createDiv();
-			scrollContainer.style.cssText = `
-				max-height: 150px;
+			// 内容区域（默认折叠）
+			const contentEl = blacklistSection.createDiv('blacklist-content');
+			contentEl.style.cssText = `
+				display: none;
+				max-height: 200px;
 				overflow-y: auto;
-				border: 1px solid var(--background-modifier-border);
-				border-radius: 4px;
-				padding: 8px;
-				background: var(--background-primary);
+				border-top: 1px solid var(--background-modifier-border);
 			`;
 			
-			// 显示黑名单条目
-			for (const item of blacklist) {
-				const itemEl = scrollContainer.createDiv('blacklist-item');
+			// 显示黑名单条目（简化显示）
+			const itemsList = contentEl.createDiv();
+			itemsList.style.cssText = `
+				padding: 12px;
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+			`;
+			
+			// 只显示前5条，如果有更多显示提示
+			const displayCount = Math.min(blacklist.length, 5);
+			for (let i = 0; i < displayCount; i++) {
+				const item = blacklist[i];
+				const itemEl = itemsList.createDiv('blacklist-item');
 				itemEl.style.cssText = `
-					padding: 6px 8px;
-					margin-bottom: 4px;
-					background: var(--background-primary);
-					border-radius: 4px;
-					font-family: monospace;
-					font-size: 0.85em;
+					padding: 10px 12px;
+					background: var(--background-secondary);
+					border-radius: 6px;
 					border-left: 3px solid var(--text-error);
-					word-break: break-all;
 				`;
 				
-				// 显示URL（如果存在）
 				const url = item.url || item.id || '';
 				if (url) {
-					itemEl.createEl('div', { text: url });
-				}
-				
-				// 显示错误信息（如果存在）
-				if (item.errorMessage || item.reason) {
-					const errorEl = itemEl.createEl('div', { 
-						text: `错误: ${item.errorMessage || item.reason}` 
-					});
-					errorEl.style.cssText = `
-						margin-top: 4px;
-						color: var(--text-muted);
-						font-size: 0.9em;
+					const urlEl = itemEl.createEl('div', { text: url });
+					urlEl.style.cssText = `
+						font-family: var(--font-monospace);
+						font-size: 0.8em;
+						color: var(--text-normal);
+						word-break: break-all;
 					`;
 				}
 				
-				// 显示时间（如果存在）
-				if (item.addedTime || item.lastFailure) {
-					const time = new Date(item.addedTime || item.lastFailure).toLocaleString('zh-CN');
-					const timeEl = itemEl.createEl('div', { text: `添加时间: ${time}` });
-					timeEl.style.cssText = `
-						margin-top: 2px;
-						color: var(--text-faint);
+				if (item.errorMessage || item.reason) {
+					const errorEl = itemEl.createEl('div', { 
+						text: item.errorMessage || item.reason 
+					});
+					errorEl.style.cssText = `
+						margin-top: 4px;
 						font-size: 0.8em;
+						color: var(--text-muted);
 					`;
 				}
 			}
 			
+			// 如果有更多条目，显示提示
+			if (blacklist.length > 5) {
+				const moreEl = itemsList.createEl('div', { 
+					text: `还有 ${blacklist.length - 5} 个网络链接错误...` 
+				});
+				moreEl.style.cssText = `
+					text-align: center;
+					padding: 8px;
+					font-size: 0.85em;
+					color: var(--text-muted);
+					font-style: italic;
+				`;
+			}
+			
+			// 点击头部展开/折叠
+			let isExpanded = false;
+			headerEl.addEventListener('click', () => {
+				isExpanded = !isExpanded;
+				contentEl.style.display = isExpanded ? 'block' : 'none';
+				expandIcon.style.transform = isExpanded ? 'rotate(90deg)' : 'rotate(0deg)';
+				headerEl.style.background = isExpanded ? 'var(--background-modifier-hover)' : 'var(--background-secondary)';
+			});
+			
+			// 悬停效果
+			headerEl.addEventListener('mouseenter', () => {
+				headerEl.style.background = 'var(--background-modifier-hover)';
+			});
+			headerEl.addEventListener('mouseleave', () => {
+				if (!isExpanded) {
+					headerEl.style.background = 'var(--background-secondary)';
+				}
+			});
+			
 		} catch (error) {
 			if (this.plugin?.logger) {
-				await this.plugin.logger.warn(OperationType.VIEW, '显示黑名单部分失败', {
+				await this.plugin.logger.warn(OperationType.VIEW, '显示网络链接错误部分失败', {
 					error: error instanceof Error ? error : new Error(String(error))
 				});
 			}
@@ -1060,7 +1596,7 @@ export class BrokenLinksModal extends Modal {
 	}
 
 	/**
-	 * 清除黑名单缓存（用于黑名单数据变化时刷新）
+	 * 清除网络链接错误缓存（用于网络链接错误数据变化时刷新）
 	 */
 	public clearBlacklistCache(): void {
 		this.blacklistCache = null;
@@ -1071,6 +1607,34 @@ export class BrokenLinksModal extends Modal {
 	 */
 	private clearCache(): void {
 		this.cachedElements.clear();
+	}
+
+	/**
+	 * 验证图片 URL 是否可用
+	 * @param url - 图片 URL
+	 * @returns 是否可用
+	 */
+	private async validateImageUrl(url: string): Promise<boolean> {
+		if (!url) return false;
+		
+		try {
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 10000);
+			
+			await fetch(url, {
+				method: 'HEAD',
+				signal: controller.signal,
+				mode: 'no-cors'
+			});
+			
+			clearTimeout(timeoutId);
+			
+			// no-cors 模式下无法获取状态码，只要能请求就认为是可用的
+			return true;
+		} catch (error) {
+			// 请求失败，链接不可用
+			return false;
+		}
 	}
 
 	onClose() {

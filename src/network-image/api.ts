@@ -270,8 +270,6 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      * @returns 搜索结果
      */
     async searchImages(query: SearchQuery): Promise<SearchResult> {
-        console.log('Searching images with query:', query);
-        
         try {
             const db = this.cacheManager['db'];
             const tx = db.transaction([ObjectStore.IMAGES], 'readonly');
@@ -305,8 +303,6 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
                 page,
                 pageSize
             };
-            
-            console.log(`Search completed: found ${result.total} images, returning page ${page} (${result.images.length} items)`);
             
             return result;
         } catch (error) {

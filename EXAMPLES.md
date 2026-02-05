@@ -14,6 +14,19 @@
 4. [高级技巧](#高级技巧)
 5. [完整项目](#完整项目)
 
+### 示例列表
+
+| 示例 | 难度 | 描述 |
+|------|------|------|
+| [示例 1: 列出所有图片](#示例-1-列出所有图片) | 初级 | 获取仓库中所有图片的基本信息 |
+| [示例 2: 查找图片引用](#示例-2-查找图片引用) | 初级 | 查看某张图片被哪些笔记引用 |
+| [示例 3: 搜索和筛选](#示例-3-搜索和筛选) | 初级 | 使用多种条件搜索图片 |
+| [示例 4: 批量重命名](#示例-4-批量重命名带编号) | 中级 | 批量重命名图片，使用序号命名 |
+| [示例 5: 智能重命名](#示例-5-智能重命名根据引用笔记) | 中级 | 根据引用笔记自动命名图片 |
+| [示例 6: 图片库存统计](#示例-6-生成图片库存报告) | 中级 | 生成详细的图片库存报告 |
+| [示例 7: 检测和修复空链接](#示例-7-检测和修复空链接) | 中级 | 检测失效图片链接并批量修复 |
+| [示例 8: 自定义事件监听](#示例-8-自定义事件监听) | 高级 | 监听图片操作事件并自动记录 |
+
 ---
 
 ## 快速入门
@@ -431,6 +444,112 @@ async function generateImageInventory(outputPath: string = '图片清单.md') {
 
 generateImageInventory();
 ```
+
+---
+
+### 示例 7: 检测和修复空链接
+
+**目标:** 检测笔记中指向不存在文件的图片链接，并批量修复
+
+```typescript
+/**
+ * 检测空链接图片
+ * 返回所有指向不存在文件的图片链接
+ */
+async function detectBrokenLinks() {
+    const plugin = app.plugins.plugins['imagemgr'];
+    
+    // 扫描所有笔记中的图片链接
+    const brokenLinks = await plugin.detectBrokenImageLinks();
+    
+    if (brokenLinks.length === 0) {
+        new Notice('🎉 没有发现空链接的图片！');
+        return [];
+    }
+    
+    // 分类统计
+    const localErrors = brokenLinks.filter(link => !link.isRemoteError);
+    const remoteErrors = brokenLinks.filter(link => link.isRemoteError);
+    
+    console.log(`发现 ${brokenLinks.length} 个空链接：`);
+    console.log(`  - 本地链接失效: ${localErrors.length} 个`);
+    console.log(`  - 网络链接失效: ${remoteErrors.length} 个`);
+    
+    // 显示详细信息
+    for (const link of brokenLinks.slice(0, 10)) {
+        const type = link.isRemoteError ? '🌐' : '📄';
+        console.log(`${type} ${link.filePath}:${link.lineNumber} - ${link.linkText}`);
+    }
+    
+    if (brokenLinks.length > 10) {
+        console.log(`... 还有 ${brokenLinks.length - 10} 个链接`);
+    }
+    
+    return brokenLinks;
+}
+
+/**
+ * 打开空链接检测界面
+ * 使用插件内置的模态框展示空链接
+ */
+function openBrokenLinksModal() {
+    const plugin = app.plugins.plugins['imagemgr'];
+    
+    // 打开空链接检测模态框
+    plugin.openBrokenLinksModal();
+}
+
+/**
+ * 从黑名单中移除域名并重新尝试缓存
+ * @param url 网络图片URL
+ */
+async function retryCacheNetworkImage(url: string) {
+    const plugin = app.plugins.plugins['imagemgr'];
+    
+    try {
+        // 1. 从黑名单中移除域名
+        const urlObj = new URL(url);
+        plugin.blacklistManager.removeFromBlacklist(urlObj.hostname);
+        
+        // 2. 尝试验证图片链接
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        const response = await fetch(url, {
+            method: 'HEAD',
+            signal: controller.signal,
+            mode: 'no-cors'
+        });
+        
+        clearTimeout(timeoutId);
+        
+        new Notice('✅ 图片链接可用，下次扫描时将自动缓存');
+        return true;
+    } catch (error) {
+        new Notice('❌ 图片链接仍然不可用：' + error.message);
+        return false;
+    }
+}
+
+// 运行检测
+detectBrokenLinks();
+
+// 或者打开可视化界面
+// openBrokenLinksModal();
+```
+
+**功能说明:**
+
+1. **本地链接检测** - 检测笔记中引用不存在的本地图片文件
+2. **网络链接检测** - 检测失效的网络图片链接（404、DNS错误等）
+3. **可视化界面** - 双标签页设计，清晰区分本地和网络链接
+4. **一键跳转** - 点击行号直接跳转到对应笔记位置
+5. **重新缓存** - 网络链接支持🔄按钮重新尝试下载
+
+**使用场景:**
+- 定期清理笔记中的失效图片链接
+- 批量修复因文件移动导致的链接失效
+- 重新尝试下载之前缓存失败的网络图片
 
 ---
 

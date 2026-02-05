@@ -2230,10 +2230,10 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 			}));
 
-	// 失效网络图片黑名单
+	// 网络链接
 	new Setting(uploadSection.contentEl)
-		.setName('失效网络图片黑名单')
-		.setDesc('失效图片 URL 列表（每行一个）')
+		.setName('网络链接')
+		.setDesc('失效网络图片 URL 列表（每行一个）')
 		.addTextArea(text => {
 			text.setValue((this.plugin.settings.remoteImageBlacklist || []).join('\n'));
 			text.setPlaceholder('http://example.com/broken-image.png');
