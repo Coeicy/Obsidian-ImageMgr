@@ -1,7 +1,7 @@
 # ImageMgr API 文档
 
-**版本:** v1.0.1  
-**最后更新:** 2025-01-31  
+**版本:** v1.0.4  
+**最后更新:** 2026-02-07  
 **适用对象:** 开发者、高级用户、贡献者
 
 ---
@@ -64,6 +64,11 @@ await plugin.renameImage('old-name.png', 'new-name.png');
 | `trashManager` | `TrashManager` | 回收站管理器 |
 | `lockListManager` | `LockListManager` | 锁定列表管理器 |
 | `historyManager` | `HistoryManager` | 历史记录管理器 |
+| `networkImageAPI` | `NetworkImageScannerAPI` | 网络图片扫描API（含黑名单管理） |
+| `networkImageDBManager` | `IndexedDBManager` | IndexedDB 数据库管理器 |
+| `networkImageCacheManager` | `NetworkImageCacheManager` | 网络图片缓存管理器 |
+| `networkImageErrorHandler` | `ScanErrorHandler` | 网络图片错误处理器 |
+| `networkImageScanner` | `NetworkImageScanner` | 网络图片扫描器 |
 
 #### 核心方法
 
@@ -216,6 +221,100 @@ for (const link of brokenLinks) {
     console.log(`空链接: ${link.linkText} 在 ${link.filePath}:${link.lineNumber}`);
 }
 ```
+
+---
+
+### NetworkImageScannerAPI 网络图片扫描API
+
+管理网络图片的扫描、缓存和黑名单功能。
+
+#### 方法
+
+##### scanNetworkImages(path?: string, options?: { quiet?: boolean }): Promise<any[]>
+
+扫描网络图片链接。
+
+**参数:**
+- `path` (可选): 要扫描的文件夹路径，默认为整个仓库
+- `options` (可选): 扫描选项
+  - `quiet`: 是否静默模式（不显示通知）
+
+**返回值:**
+- `Promise<any[]>`: 扫描到的网络图片数组
+
+**示例:**
+```typescript
+// 扫描整个仓库
+const images = await plugin.scanNetworkImages();
+
+// 扫描特定文件夹
+const folderImages = await plugin.scanNetworkImages('docs');
+
+// 静默扫描（不显示通知）
+const quietImages = await plugin.scanNetworkImages('docs', { quiet: true });
+```
+
+##### performFullNetworkImageScan(): Promise<void>
+
+执行完整扫描（用于定期维护）。
+
+**示例:**
+```typescript
+await plugin.performFullNetworkImageScan();
+```
+
+##### cleanupNetworkImageCache(): Promise<void>
+
+清理网络图片缓存。
+
+**示例:**
+```typescript
+await plugin.cleanupNetworkImageCache();
+```
+
+##### getNetworkImageCacheStats(): Promise<any>
+
+获取网络图片缓存统计信息。
+
+**返回值:**
+- `Promise<any>`: 统计信息对象，包含：
+  - `totalImages`: 总图片数
+  - `activeImages`: 活跃图片数
+  - `brokenImages`: 失效图片数
+  - `cacheHitRate`: 缓存命中率
+  - `databaseSize`: 数据库大小
+
+**示例:**
+```typescript
+const stats = await plugin.getNetworkImageCacheStats();
+console.log(`缓存命中率: ${stats.cacheHitRate}%`);
+console.log(`总图片数: ${stats.totalImages}`);
+```
+
+#### NetworkImageScannerAPI 直接访问
+
+也可以通过 `networkImageAPI` 属性直接访问完整的 API：
+
+```typescript
+// 获取黑名单
+const blacklist = await plugin.networkImageAPI.getBlacklist();
+
+// 搜索图片
+const result = await plugin.networkImageAPI.searchImages({
+    url: 'example.com',
+    status: 'active',
+    page: 1,
+    pageSize: 20
+});
+
+// 验证图片
+const validationResults = await plugin.networkImageAPI.validateImages(['image-id-1']);
+
+// 获取统计
+const stats = await plugin.networkImageAPI.getStats();
+```
+
+更多详细API请参考 `src/network-image/README.md`。
 
 ---
 
@@ -753,6 +852,11 @@ if (plugin.lockListManager.isLocked(imagePath)) {
 ---
 
 ## 更新日志
+
+### v1.0.4 (2026-02-07)
+- 添加网络图片扫描API文档
+- 更新版本号和日期
+- 添加 NetworkImageScannerAPI 相关API说明
 
 ### v1.0.1 (2025-01-31)
 - 完善 API 文档，添加详细示例

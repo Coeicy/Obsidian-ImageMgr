@@ -38,6 +38,8 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	enableDuplicateDetection: true,
 	/** 是否启用空链接检测 - 在首页显示空链接检测按钮 */
 	enableBrokenLinksDetection: true,
+	/** 空链接页面新增条目的插入位置 - bottom(默认) | top */
+	brokenLinksNewItemPosition: 'bottom',
 	/** 是否自动生成图片名称 - 根据路径和时间戳自动生成有意义的名称 */
 	autoGenerateNames: true,
 	/** 前往笔记时是否保持详情页打开 - 点击引用时的行为 */
@@ -183,9 +185,6 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	remoteImageTimeout: 10000,
 	/** 是否自动尝试代理加载失败的云端图片 */
 	autoRetryRemoteImage: true,
-	/** 失效网络图片黑名单 - 自动检测失效的图片 URL 并加入此列表 */
-	remoteImageBlacklist: [],
-	
 	// ==================== 图床上传设置 ====================
 	uploadConfig: {
 		type: 'qiniu',

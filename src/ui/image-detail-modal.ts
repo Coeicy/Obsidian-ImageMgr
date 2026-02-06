@@ -2892,28 +2892,66 @@ export class ImageDetailModal extends Modal {
 
 	async renameFile(newFileName: string) {
 		try {
-			const file = this.vault.getAbstractFileByPath(this.image.path) as TFile;
-			if (file) {
-				// 构建新路径
-				const oldPath = this.image.path;
-				const pathParts = oldPath.split('/');
-				pathParts[pathParts.length - 1] = newFileName;
-				const newPath = pathParts.join('/');
-				
-				// 重命名文件
-				await this.vault.rename(file, newPath);
-				
-				// 更新图片信息
-				this.image.name = newFileName;
-				this.image.path = newPath;
-				
-				new Notice('文件名已更新');
-				
-				// 重新加载视图
-				this.onOpen();
+			// 验证文件名合法性
+			if (!PathValidator.isValidFileName(newFileName)) {
+				new Notice('❌ 文件名包含非法字符');
+				return;
 			}
+			
+			// 清理文件名
+			const sanitizedFileName = PathValidator.sanitizeFileName(newFileName);
+			if (sanitizedFileName !== newFileName) {
+				new Notice('⚠️ 文件名已清理，请检查');
+			}
+			
+			const file = this.vault.getAbstractFileByPath(this.image.path) as TFile;
+			if (!file) {
+				new Notice('❌ 文件不存在');
+				return;
+			}
+			
+			// 构建新路径
+			const oldPath = this.image.path;
+			const pathParts = oldPath.split('/');
+			pathParts[pathParts.length - 1] = sanitizedFileName;
+			const newPath = pathParts.join('/');
+			
+			// 验证完整路径安全性
+			if (!PathValidator.isSafePath(newPath)) {
+				new Notice('❌ 路径不安全');
+				return;
+			}
+			
+			// 重命名文件
+			await this.vault.rename(file, newPath);
+			
+			// 更新图片信息
+			this.image.name = sanitizedFileName;
+			this.image.path = newPath;
+			
+			new Notice('✅ 文件名已更新');
+			
+			// 重新加载视图
+			this.onOpen();
 		} catch (error) {
-			new Notice('重命名失败: ' + error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			new Notice('❌ 重命名失败: ' + errorMsg);
+			
+			// 记录错误日志
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(
+					OperationType.RENAME,
+					`重命名文件失败: ${this.image.name} -> ${newFileName}`,
+					{
+						error: error instanceof Error ? error : new Error(errorMsg),
+						imagePath: this.image.path,
+						imageName: this.image.name,
+						details: {
+							newFileName: newFileName
+						}
+					}
+				);
+			}
 		}
 	}
 
@@ -2941,106 +2979,126 @@ export class ImageDetailModal extends Modal {
 		
 		if (choice === 'save') {
 			const file = this.vault.getAbstractFileByPath(this.image.path);
-			if (file) {
-				try {
-					// 记录删除历史
-					if (this.historyManager) {
-						await this.historyManager.saveHistory({
-							timestamp: Date.now(),
-							action: 'delete',
-							fromName: this.image.name,
-							fromPath: this.image.path
-						});
-					}
-					
-					// 删除文件
-					if (this.plugin?.settings.enablePluginTrash) {
-						// 使用插件回收站（moveToTrash 内部已记录日志 OperationType.TRASH）
-						const success = await this.plugin.trashManager.moveToTrash(file as TFile);
-						if (success) {
-							new Notice('图片已移动到回收站');
-						} else {
-							new Notice('移动到回收站失败');
-							// 记录失败日志
-							if (this.plugin?.logger) {
-								await this.plugin.logger.error(
-									OperationType.DELETE,
-									`删除图片失败: ${this.image.name}`,
-									{
-										imageHash: this.image.md5,
-										imagePath: this.image.path,
-										imageName: this.image.name,
-										details: {
-											reason: '移动到回收站失败',
-											useTrash: true
-										}
-									}
-								);
-							}
-						}
-					} else if (this.plugin?.settings.moveToSystemTrash) {
-						// Obsidian API 的 delete 方法默认会移到系统回收站（如果支持）
-						await this.vault.delete(file);
-						new Notice('图片已删除');
-						
-						// 记录删除日志
-						if (this.plugin?.logger) {
-							await this.plugin.logger.info(
-								OperationType.DELETE,
-								`删除图片: ${this.image.name}`,
-								{
-									imageHash: this.image.md5,
-									imagePath: this.image.path,
-									imageName: this.image.name,
-									details: {
-										path: this.image.path,
-										size: this.image.size,
-										useSystemTrash: true
-									}
-								}
-							);
-						}
-					} else {
-						// 永久删除
-						await this.vault.delete(file);
-						new Notice('图片已永久删除');
-						
-						// 记录删除日志
-						if (this.plugin?.logger) {
-							await this.plugin.logger.info(
-								OperationType.DELETE,
-								`永久删除图片: ${this.image.name}`,
-								{
-									imageHash: this.image.md5,
-									imagePath: this.image.path,
-									imageName: this.image.name,
-									details: {
-										path: this.image.path,
-										size: this.image.size,
-										permanent: true
-									}
-								}
-							);
-						}
-					}
-					
-					this.close();
-				} catch (error) {
-					new Notice(`删除失败: ${error}`);
-					
-					// 记录错误
+			if (!file) {
+				new Notice('❌ 文件不存在');
+				return;
+			}
+			
+			try {
+				// 验证路径安全性（防御性检查）
+				if (!PathValidator.isSafePath(this.image.path)) {
+					new Notice('❌ 路径不安全，无法删除');
 					if (this.plugin?.logger) {
 						await this.plugin.logger.error(
 							OperationType.DELETE,
-							`删除图片失败: ${this.image.name}`,
+							`删除图片失败: 路径不安全`,
+							{
+								imagePath: this.image.path,
+								imageName: this.image.name
+							}
+						);
+					}
+					return;
+				}
+				
+				// 记录删除历史
+				if (this.historyManager) {
+					await this.historyManager.saveHistory({
+						timestamp: Date.now(),
+						action: 'delete',
+						fromName: this.image.name,
+						fromPath: this.image.path
+					});
+				}
+				
+				// 删除文件
+				if (this.plugin?.settings.enablePluginTrash) {
+					// 使用插件回收站（moveToTrash 内部已记录日志 OperationType.TRASH）
+					const success = await this.plugin.trashManager.moveToTrash(file as TFile);
+					if (success) {
+						new Notice('✅ 图片已移动到回收站');
+					} else {
+						new Notice('❌ 移动到回收站失败');
+						// 记录失败日志
+						if (this.plugin?.logger) {
+							await this.plugin.logger.error(
+								OperationType.DELETE,
+								`删除图片失败: ${this.image.name}`,
+								{
+									imageHash: this.image.md5,
+									imagePath: this.image.path,
+									imageName: this.image.name,
+									details: {
+										reason: '移动到回收站失败',
+										useTrash: true
+									}
+								}
+							);
+						}
+					}
+				} else if (this.plugin?.settings.moveToSystemTrash) {
+					// Obsidian API 的 delete 方法默认会移到系统回收站（如果支持）
+					await this.vault.delete(file);
+					new Notice('✅ 图片已删除');
+					
+					// 记录删除日志
+					if (this.plugin?.logger) {
+						await this.plugin.logger.info(
+							OperationType.DELETE,
+							`删除图片: ${this.image.name}`,
 							{
 								imageHash: this.image.md5,
 								imagePath: this.image.path,
 								imageName: this.image.name,
-								error: error as Error
+								details: {
+									path: this.image.path,
+									size: this.image.size,
+									useSystemTrash: true
+								}
 							}
 						);
 					}
+				} else {
+					// 永久删除
+					await this.vault.delete(file);
+					new Notice('✅ 图片已永久删除');
+					
+					// 记录删除日志
+					if (this.plugin?.logger) {
+						await this.plugin.logger.info(
+							OperationType.DELETE,
+							`永久删除图片: ${this.image.name}`,
+							{
+								imageHash: this.image.md5,
+								imagePath: this.image.path,
+								imageName: this.image.name,
+								details: {
+									path: this.image.path,
+									size: this.image.size,
+									permanent: true
+								}
+							}
+						);
+					}
+				}
+				
+				this.close();
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				new Notice(`❌ 删除失败: ${errorMsg}`);
+				
+				// 记录错误
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(
+						OperationType.DELETE,
+						`删除图片失败: ${this.image.name}`,
+						{
+							error: error instanceof Error ? error : new Error(errorMsg),
+							imageHash: this.image.md5,
+							imagePath: this.image.path,
+							imageName: this.image.name
+						}
+					);
 				}
 			}
 		}

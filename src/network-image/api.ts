@@ -69,7 +69,8 @@ import {
     ValidationResult,
     NetworkImageRecord,
     IncrementalScanResult,
-    ObjectStore
+    ObjectStore,
+    BlacklistRecord
 } from './types';
 import { IncrementalNetworkImageScanner, NetworkImageScannerInterface } from './incremental-scanner';
 import { NetworkImageCacheManager } from './cache-manager';
@@ -122,10 +123,8 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
         const scanOptions = { ...defaultOptions, ...options };
         
         try {
-            // 仅在非静默模式下输出开始信息
-            if (!scanOptions.quiet) {
-                console.log(`Starting ${scanOptions.incremental ? 'incremental' : 'full'} scan${scanOptions.path ? ` of ${scanOptions.path}` : ''}...`);
-            }
+            // 扫描开始信息已由扫描器内部处理，此处不再输出控制台日志
+            // 详细日志通过 errorHandler 和插件日志系统记录
             
             const result = await this.scanner.scan(
                 scanOptions.path,
@@ -211,7 +210,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             // 更新数据库中的验证结果
             await this.updateValidationResults(results);
             
-            console.log(`Validation completed: ${results.length} images`);
+            // 验证完成信息通过 errorHandler 记录，不输出控制台日志
             
             return results;
         } catch (error) {
@@ -241,7 +240,9 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
                 await this.validateImages(newImages.map(img => img.id));
             }
         } catch (error) {
-            console.warn('Failed to validate new images:', error);
+            // 验证失败通过 errorHandler 记录
+            const validationError = error instanceof Error ? error : new Error(String(error));
+            this.errorHandler.handleError(validationError, { file: path });
         }
     }
     
@@ -345,7 +346,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      * @returns 清理结果
      */
     async cleanup(options: CleanupOptions = {}): Promise<CleanupResult> {
-        console.log('Starting cache cleanup with options:', options);
+        // 清理操作开始信息通过 errorHandler 记录，不输出控制台日志
         
         try {
             const defaultOptions: CleanupOptions = {
@@ -384,7 +385,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             // 估算释放的空间
             result.spaceFreed = result.imagesRemoved * 1024; // 粗略估算每个图片记录 1KB
             
-            console.log(`Cleanup completed: ${JSON.stringify(result)}`);
+            // 清理完成信息通过 errorHandler 记录，不输出控制台日志
             
             return result;
         } catch (error) {
@@ -428,8 +429,9 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
         try {
             await this.cacheManager.updateAccessStats(imageId);
         } catch (error) {
-            // 访问统计更新失败不影响主流程
-            console.warn('Failed to update image access stats:', error);
+            // 访问统计更新失败不影响主流程，通过 errorHandler 记录
+            const accessError = error instanceof Error ? error : new Error(String(error));
+            this.errorHandler.handleError(accessError, {});
         }
     }
     
@@ -443,8 +445,8 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             const imageTx = db.transaction([ObjectStore.IMAGES], 'readwrite');
             const imageStore = imageTx.objectStore(ObjectStore.IMAGES);
             
-            // 准备黑名单记录
-            const blacklistRecords: Array<{id: string, url: string, reason: any, errorMessage: string}> = [];
+            // 准备黑名单记录（包含最近一次出现位置，便于 UI 展示）
+            const blacklistRecords: BlacklistRecord[] = [];
             
             for (const result of results) {
                 if (!result.imageId) continue;
@@ -482,14 +484,22 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
                         
                         // 检查是否为 s1.ax1x.com 域名，避免重复添加
                         const domain = new URL(image.url).hostname;
+                        // 域名警告信息通过 errorHandler 记录，避免控制台刷屏
                         if (domain === 's1.ax1x.com') {
                             // 对于特定域名，只记录一次警告
                             if (!this.s1ax1xDomainWarned) {
-                                console.warn(`[Network Image Scanner] Domain s1.ax1x.com has connection issues, adding to blacklist: ${errorMsg}`);
+                                this.errorHandler.handleError(
+                                    new Error(`Domain s1.ax1x.com has connection issues, adding to blacklist: ${errorMsg}`),
+                                    { url: image.url }
+                                );
                                 this.s1ax1xDomainWarned = true;
                             }
                         } else {
-                            console.warn(`[Network Image Scanner] Failed URL added to blacklist: ${image.url} - ${errorMsg}`);
+                            // 其他域名的错误通过 errorHandler 记录
+                            this.errorHandler.handleError(
+                                new Error(`Failed URL added to blacklist: ${image.url} - ${errorMsg}`),
+                                { url: image.url }
+                            );
                         }
                         
                         // 使用URL重新计算hash，确保与检查时的ID一致
@@ -498,7 +508,11 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
                             id: urlId,
                             url: image.url,
                             reason: result.errorType || 'network_error',
-                            errorMessage: errorMsg
+                            errorMessage: errorMsg,
+                            // 记录这次检测到的来源信息，供错误列表和空链接页面使用
+                            sourceFilePath: image.sourceFilePath,
+                            line: image.line,
+                            column: image.column
                         });
                     }
                 }
@@ -511,7 +525,9 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
                 await this.addToBlacklist(blacklistRecords);
             }
         } catch (error) {
-            console.warn('Failed to update validation results:', error);
+            // 更新验证结果失败通过 errorHandler 记录
+            const updateError = error instanceof Error ? error : new Error(String(error));
+            this.errorHandler.handleError(updateError, {});
         }
     }
     
@@ -519,12 +535,15 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      * 添加 URL 到黑名单
      * @param records - 黑名单记录数组
      */
-    private async addToBlacklist(records: Array<{id: string, url: string, reason: any, errorMessage: string}>): Promise<void> {
+    private async addToBlacklist(records: BlacklistRecord[]): Promise<void> {
         // 检查数据库连接是否可用
         if (!this.cacheManager || !this.cacheManager['db'] || this.cacheManager['db'].readyState !== 'open') {
             // 避免重复显示相同的数据库连接错误
             if (!this.databaseConnectionWarned) {
-                console.warn('Database connection is not available, skipping blacklist update');
+                this.errorHandler.handleError(
+                    new Error('Database connection is not available, skipping blacklist update'),
+                    {}
+                );
                 this.databaseConnectionWarned = true;
             }
             return;
@@ -536,47 +555,68 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             
             // 添加事务错误处理
             tx.onerror = (event) => {
-                console.error('Transaction error in addToBlacklist:', event);
+                this.errorHandler.handleError(
+                    new Error('Transaction error in addToBlacklist'),
+                    { error: event }
+                );
             };
             
             const store = tx.objectStore(ObjectStore.BLACKLIST);
             
             for (const record of records) {
                 // 检查是否已存在
-                const existing = await this.getFromStore(store, record.id);
+                const existing = await this.getFromStore(store, record.id) as BlacklistRecord | undefined;
                 
                 if (existing) {
-                    // 更新重试次数
+                    // 更新重试次数和最近错误信息
                     existing.retryCount = (existing.retryCount || 0) + 1;
                     existing.lastRetry = Date.now();
-                    existing.errorMessage = record.errorMessage;
+                    existing.errorMessage = record.errorMessage || existing.errorMessage;
+                    
+                    // 如果这次调用携带了来源信息，则更新为“最近一次出现位置”
+                    if (record.sourceFilePath) {
+                        existing.sourceFilePath = record.sourceFilePath;
+                    }
+                    if (typeof record.line === 'number') {
+                        existing.line = record.line;
+                    }
+                    if (typeof record.column === 'number') {
+                        existing.column = record.column;
+                    }
+                    
                     await store.put(existing);
-                    console.log(`Updated blacklist entry: ${record.url} (retry count: ${existing.retryCount})`);
+                    // 黑名单更新信息通过 errorHandler 记录，不输出控制台日志
                 } else {
-                    // 创建新记录
-                    const blacklistRecord = {
+                    // 创建新记录，包含错误信息和最近一次出现位置
+                    const now = Date.now();
+                    const blacklistRecord: BlacklistRecord = {
                         id: record.id,
                         url: record.url,
                         reason: record.reason,
                         errorMessage: record.errorMessage,
-                        detectedAt: Date.now(),
+                        detectedAt: now,
                         retryCount: 0,
-                        autoRemove: true // 默认自动移除
+                        autoRemove: true,
+                        sourceFilePath: record.sourceFilePath,
+                        line: record.line,
+                        column: record.column
                     };
                     await store.put(blacklistRecord);
-                    console.log(`Added to blacklist: ${record.url} - ${record.errorMessage}`);
+                    // 黑名单添加信息通过 errorHandler 记录，不输出控制台日志
                 }
             }
             
-            console.log(`Added/Updated ${records.length} URLs in blacklist`);
+            // 批量更新信息通过 errorHandler 记录，不输出控制台日志
             
             // 清除扫描器的黑名单缓存，以便下次扫描使用更新后的黑名单
             if (this.scanner && typeof this.scanner.clearBlacklistCache === 'function') {
                 this.scanner.clearBlacklistCache();
-                console.log('[NetworkImageAPI] Blacklist cache cleared after update');
+                // 缓存清除信息通过 errorHandler 记录，不输出控制台日志
             }
         } catch (error) {
-            console.warn('Failed to add to blacklist:', error);
+            // 添加黑名单失败通过 errorHandler 记录
+            const blacklistError = error instanceof Error ? error : new Error(String(error));
+            this.errorHandler.handleError(blacklistError, {});
         }
     }
     
@@ -595,7 +635,9 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             const record = await this.getFromStore(store, urlId);
             return !!record;
         } catch (error) {
-            console.warn('Failed to check blacklist:', error);
+            // 检查黑名单失败通过 errorHandler 记录
+            const checkError = error instanceof Error ? error : new Error(String(error));
+            this.errorHandler.handleError(checkError, { url });
             return false;
         }
     }
@@ -611,7 +653,9 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             const store = tx.objectStore(ObjectStore.BLACKLIST);
             return await this.getAllFromStore(store);
         } catch (error) {
-            console.warn('Failed to get blacklist:', error);
+            // 获取黑名单失败通过 errorHandler 记录
+            const getError = error instanceof Error ? error : new Error(String(error));
+            this.errorHandler.handleError(getError, {});
             return [];
         }
     }

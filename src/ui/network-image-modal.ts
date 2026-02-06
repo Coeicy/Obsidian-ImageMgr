@@ -280,21 +280,7 @@ export class NetworkImageModal extends Modal {
                         });
                     }
                     
-                    // 自动添加到黑名单
-                    const blacklist = this.plugin.settings.remoteImageBlacklist || [];
-                    if (!blacklist.includes(img.url)) {
-                        blacklist.push(img.url);
-                        this.plugin.settings.remoteImageBlacklist = blacklist;
-                        await this.plugin.saveSettings();
-                        
-                        if (this.plugin?.logger) {
-                            await this.plugin.logger.info(OperationType.VIEW, `已将失效图片添加到黑名单: ${img.url}`, {
-                                imagePath: img.url,
-                                details: { blacklistSize: blacklist.length }
-                            });
-                        }
-                    }
-                    
+                    // 自动添加到黑名单交由网络图片缓存系统处理，这里只做 UI 提示
                     imgEl.style.display = 'none';
                     imgEl.setAttribute('data-retried', 'true'); // 确保标记为已重试，避免无限循环
                     if (!previewCell.querySelector('.network-image-error')) {
@@ -311,10 +297,20 @@ export class NetworkImageModal extends Modal {
                 }
             };
 
-            // Source File
+            // Source File / 缓存位置信息
             const fileCell = row.createEl('td');
-            fileCell.createEl('span', { text: img.sourceFile.path });
-            fileCell.createEl('div', { text: `行: ${img.line + 1}`, cls: 'text-muted' }).style.fontSize = '0.8em';
+            const sourcePathEl = fileCell.createEl('span', { text: img.sourceFile.path });
+            sourcePathEl.style.display = 'block';
+            const lineInfoEl = fileCell.createEl('div', { text: `行: ${img.line + 1}`, cls: 'text-muted' });
+            lineInfoEl.style.fontSize = '0.8em';
+
+            // 额外注明缓存位置，帮助用户理解这是 IndexedDB 中的记录
+            const cacheInfoEl = fileCell.createEl('div', { 
+                text: `缓存位置：network_images · ${img.sourceFile.path} · 第 ${img.line + 1} 行`,
+                cls: 'text-muted'
+            });
+            cacheInfoEl.style.fontSize = '0.75em';
+            cacheInfoEl.style.marginTop = '2px';
 
             // URL
             const urlCell = row.createEl('td');
@@ -510,7 +506,7 @@ export class NetworkImageModal extends Modal {
      */
     private async addToBlacklist(url: string, errorMessage: string): Promise<void> {
         try {
-            // 优先使用 networkImageAPI 的黑名单系统
+            // 统一黑名单：只使用 networkImageAPI（IndexedDB）
             if (this.plugin.networkImageAPI) {
                 const { hashUrl } = await import('../network-image/utils');
                 const imageId = await hashUrl(url);
@@ -521,21 +517,6 @@ export class NetworkImageModal extends Modal {
                     reason: 'network_error',
                     errorMessage: errorMessage
                 }]);
-            }
-            
-            // 同时添加到设置中的黑名单（用于兼容）
-            const blacklist = this.plugin.settings.remoteImageBlacklist || [];
-            if (!blacklist.includes(url)) {
-                blacklist.push(url);
-                this.plugin.settings.remoteImageBlacklist = blacklist;
-                await this.plugin.saveSettings();
-                
-                if (this.plugin?.logger) {
-                    await this.plugin.logger.info(OperationType.VIEW, `已将失效图片添加到黑名单: ${url}`, {
-                        imagePath: url,
-                        details: { errorMessage, blacklistSize: blacklist.length }
-                    });
-                }
             }
         } catch (error) {
             // 静默失败，不影响主流程

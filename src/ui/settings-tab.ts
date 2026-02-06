@@ -44,7 +44,6 @@ const SETTINGS_TAB_DEFS: { id: string; title: string }[] = [
 	{ id: 'logs', title: '📋 操作日志' },
 	{ id: 'shortcuts', title: '⌨️ 快捷键' },
 	{ id: 'delete', title: '🗑️ 回收站' },
-	{ id: 'reference', title: '📖 插件说明' },
 ];
 
 export class ImageManagementSettingTab extends PluginSettingTab {
@@ -171,7 +170,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		
 		new Setting(basicSection.contentEl)
 			.setName('扫描文件夹')
-			.setDesc('设置扫描图片的文件夹路径，如：images/ （留空则扫描整个笔记库）')
+			.setDesc('设置扫描图片的文件夹路径，如：images/ 或 attachments/（留空则扫描整个笔记库中的所有图片）')
 			.addText(text => text
 				.setPlaceholder('例如: images/')
 				.setValue(this.plugin.settings.defaultImageFolder)
@@ -187,7 +186,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(basicSection.contentEl)
 			.setName('包含子文件夹')
-			.setDesc('扫描时自动包含所有子文件夹中的图片')
+			.setDesc('扫描时自动包含所有子文件夹中的图片。关闭后只扫描指定文件夹的直接子文件，不递归进入深层目录')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.includeSubfolders)
 				.onChange(async (value) => {
@@ -207,13 +206,13 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		const lazyLoadDescEl = basicSection.contentEl.createDiv({ cls: 'setting-item-description' });
 		lazyLoadDescEl.innerHTML = `
 			<p style="margin: 0 0 12px 0;">
-				<strong>📸 懒加载功能</strong>：图片进入可视区域时自动加载，提升大量图片时的性能
+				<strong>📸 懒加载功能</strong>：图片进入可视区域时自动加载，避免一次性加载所有图片导致卡顿。建议图片数量超过 50 张时保持开启
 			</p>
 		`;
 
 		const lazyLoadDelaySetting = new Setting(basicSection.contentEl)
 			.setName('懒加载延迟')
-			.setDesc('图片懒加载的延迟时间（毫秒，范围：0-1000）');
+			.setDesc('图片进入可视区域后延迟加载的时间。值越大加载越平滑但可能有短暂空白，建议 100-300ms');
 		
 		let lazyLoadDelayText: any;
 		let lazyLoadDelaySlider: any;
@@ -266,7 +265,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const maxCacheSizeSetting = new Setting(basicSection.contentEl)
 			.setName('最大缓存数量')
-			.setDesc('最多缓存多少张图片的数据（范围：50-500）');
+			.setDesc('内存中最多缓存多少张图片的元数据。缓存可加快重复浏览速度，但占用更多内存。图片较多时可适当增大');
 		
 		let maxCacheSizeText: any;
 		let maxCacheSizeSlider: any;
@@ -329,7 +328,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 鼠标悬停动画设置 - 放在显示设置第一个
 		new Setting(displaySection.contentEl)
 			.setName('鼠标悬停动画')
-			.setDesc('启用后，鼠标悬停在图片缩略图上时显示优雅的浮动效果')
+			.setDesc('鼠标悬停在图片缩略图上时显示优雅的浮动效果，提升视觉体验。低性能设备可关闭以减少动画消耗')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableHoverEffect)
 				.onChange(async (value) => {
@@ -350,7 +349,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const imagesPerRowSetting = new Setting(displaySection.contentEl)
 			.setName('每行显示数量')
-			.setDesc('图片画廊中每行显示的图片数量（范围：1-10）');
+			.setDesc('桌面端图片画廊每行显示的图片数量。屏幕较宽时可增大，较窄时可减小。建议 4-6 张');
 		
 		let imagesPerRowText: any;
 		let imagesPerRowSlider: any;
@@ -426,7 +425,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const cardBorderRadiusSetting = new Setting(displaySection.contentEl)
 			.setName('卡片圆角')
-			.setDesc('图片卡片的圆角大小（像素，范围：0-20）');
+			.setDesc('图片卡片边角的圆润程度。0 为直角，数值越大越圆润。建议 8-12px 获得现代感外观');
 		
 		let cardBorderRadiusText: any;
 		let cardBorderRadiusSlider: any;
@@ -487,7 +486,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const fixedImageHeightSetting = new Setting(displaySection.contentEl)
 			.setName('固定图片高度')
-			.setDesc('关闭"自适应大小"时的图片高度（像素，范围：100-400）');
+			.setDesc('关闭"自适应大小"后，所有图片卡片使用固定高度显示。适合希望整齐排列的用户，建议 180-250px');
 		
 		let fixedImageHeightText: any;
 		let fixedImageHeightSlider: any;
@@ -548,7 +547,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('统一卡片高度')
-			.setDesc('同一行的图片卡片保持相同高度')
+			.setDesc('同一行的图片卡片保持相同高度，避免高低不齐的视觉错乱。与"自适应大小"搭配使用效果更佳')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.uniformCardHeight)
 				.onChange(async (value) => {
@@ -572,7 +571,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('纯净画廊')
-			.setDesc('开启后只显示图片，隐藏所有信息（文件名、大小、尺寸、锁定图标、选择框等）')
+			.setDesc('开启后只显示图片本身，隐藏文件名、大小、尺寸、锁定图标、选择框等所有附加信息，获得沉浸式浏览体验')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.pureGallery)
 				.onChange(async (value) => {
@@ -586,7 +585,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('自适应图片大小')
-			.setDesc('图片按原始宽高比自适应显示（类似 Notion 效果），关闭则固定高度显示')
+			.setDesc('图片按原始宽高比自适应显示（类似 Notion），横图和竖图按各自比例显示。关闭则所有图片固定高度，更整齐但可能裁剪内容')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.adaptiveImageSize)
 				.onChange(async (value) => {
@@ -600,7 +599,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('显示图片名称')
-			.setDesc('在图片卡片上显示文件名')
+			.setDesc('在图片卡片底部显示文件名，方便识别图片内容。纯净画廊模式下自动隐藏')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.showImageName)
 				.onChange(async (value) => {
@@ -614,7 +613,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('图片名称换行')
-			.setDesc('当图片名称过长时允许换行显示')
+			.setDesc('长文件名自动换行显示，避免被截断。关闭后文件名超出部分显示省略号，更整洁但可能看不清完整名称')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.imageNameWrap)
 				.onChange(async (value) => {
@@ -628,7 +627,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('显示锁定图标')
-			.setDesc('显示被锁定文件右上角的🔒图标')
+			.setDesc('被锁定的文件在卡片右上角显示🔒图标，防止误删除。点击图标可快速跳转锁定管理页面')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.showLockIcon)
 				.onChange(async (value) => {
@@ -642,7 +641,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('显示图片大小')
-			.setDesc('在图片卡片上显示文件大小')
+			.setDesc('在图片卡片上显示文件大小（如 245 KB），方便了解存储占用情况。排序时可按大小快速识别大文件')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.showImageSize)
 				.onChange(async (value) => {
@@ -656,7 +655,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('显示图片尺寸')
-			.setDesc('在图片卡片上显示宽度×高度')
+			.setDesc('在图片卡片上显示图片分辨率（如 1920×1080），方便了解图片清晰度。网络图片可能显示"加载中"或"未知"')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.showImageDimensions)
 				.onChange(async (value) => {
@@ -670,7 +669,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('显示图片序号')
-			.setDesc('在图片卡片右上角显示序号（例如：1/100, 2/100...），方便快速定位')
+			.setDesc('在图片卡片右上角显示序号（如 1/100），方便了解当前位置和快速定位。批量操作时也可作为参考')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.showImageIndex)
 				.onChange(async (value) => {
@@ -692,7 +691,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('默认排序方式')
-			.setDesc('图片列表的默认排序依据')
+			.setDesc('打开图片管理器时默认使用的排序依据。可选：名称、大小、修改日期、创建日期、图片尺寸、引用数量。可随时在工具栏切换')
 			.addDropdown(dropdown => dropdown
 				.addOption('name', '文件名')
 				.addOption('size', '文件大小')
@@ -706,7 +705,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('默认排序顺序')
-			.setDesc('升序（A-Z，小到大）或降序（Z-A，大到小）')
+			.setDesc('排序的升降序方向。升序：A→Z、小→大、旧→新；降序：Z→A、大→小、新→旧。名称排序建议升序，日期排序建议降序')
 			.addDropdown(dropdown => dropdown
 				.addOption('asc', '升序')
 				.addOption('desc', '降序')
@@ -718,7 +717,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(displaySection.contentEl)
 			.setName('默认筛选类型')
-			.setDesc('默认显示哪种格式的图片')
+			.setDesc('打开图片管理器时默认显示的图片格式。可选：全部、PNG、JPG、GIF、WEBP、SVG。选择特定格式可快速专注某一类图片')
 			.addDropdown(dropdown => dropdown
 				.addOption('all', '全部')
 				.addOption('png', 'PNG')
@@ -743,7 +742,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 			new Setting(displaySection.contentEl)
 				.setName('滚轮行为')
-				.setDesc('设置鼠标滚轮在图片详情页的默认行为：缩放图片 或 切换图片')
+				.setDesc('图片详情页中鼠标滚轮的行为。缩放模式：滚轮放大/缩小图片；切换模式：滚轮切换上一张/下一张。按 W 键可临时切换模式')
 				.addDropdown(dropdown => dropdown
 					.addOption('zoom', '缩放图片')
 					.addOption('scroll', '切换图片')
@@ -787,7 +786,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(imageOperationsSection.contentEl)
 			.setName('自动生成文件名')
-			.setDesc('根据笔记标题自动生成序列文件名（例如：笔记标题-1.png、笔记标题-2.png）')
+			.setDesc('启用智能重命名功能后，根据引用笔记的标题自动生成有序列号的文件名。例如引用"项目总结"笔记的图片命名为"项目总结-1.png"、"项目总结-2.png"')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.autoGenerateNames)
 				.onChange(async (value) => {
@@ -797,7 +796,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const pathNamingDepthSetting = new Setting(imageOperationsSection.contentEl)
 			.setName('笔记路径深度')
-			.setDesc('重命名时使用笔记路径的层级数（1-5级，例如：父目录_子目录_笔记_1.png）');
+			.setDesc('智能重命名时，使用笔记路径的前几级目录作为文件名前缀。深度越大文件名越长但越具描述性。例如深度2："工作/项目A/笔记.md" → "工作_项目A_笔记-1.png"');
 		
 		let pathNamingDepthText: any;
 		let pathNamingDepthSlider: any;
@@ -850,7 +849,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(imageOperationsSection.contentEl)
 			.setName('重名处理方式')
-			.setDesc('当多个图片生成相同的文件名时，如何处理（默认：提示并跳过）')
+			.setDesc('智能重命名时，如果生成的文件名已存在如何处理。建议：自动添加序号（如 图片-1.png、图片-2.png），或提示后手动决定')
 			.addDropdown(dropdown => dropdown
 				.addOption('prompt', '提示并跳过')
 				.addOption('skip-silent', '安静跳过（不提示）')
@@ -864,7 +863,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(imageOperationsSection.contentEl)
 			.setName('多笔记引用处理')
-			.setDesc('当图片被多个笔记引用时的处理方式')
+			.setDesc('智能重命名时，如果图片被多个笔记引用，使用哪个笔记的标题来命名。建议：使用第一个引用的笔记，或创建包含多个笔记名的复合名称')
 			.addDropdown(dropdown => dropdown
 				.addOption('first', '使用第一个引用的笔记')
 				.addOption('latest', '使用最新修改的笔记')
@@ -886,7 +885,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const maxBatchOperationsSetting = new Setting(imageOperationsSection.contentEl)
 			.setName('批量操作最大数量')
-			.setDesc('一次批量操作最多处理多少个文件（范围：100-5000）');
+			.setDesc('为防止误操作导致大量文件被修改，设置单次批量操作（重命名、删除等）的最大文件数。超出此数量需要分多次操作');
 		
 		let maxBatchOperationsText: any;
 		let maxBatchOperationsSlider: any;
@@ -939,7 +938,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const batchConfirmThresholdSetting = new Setting(imageOperationsSection.contentEl)
 			.setName('批量确认阈值')
-			.setDesc('批量操作超过此数量时需要二次确认（范围：5-100）');
+			.setDesc('当批量操作的文件数超过此值时，会弹出确认对话框要求二次确认。建议设置为 10-20，避免误操作影响过多文件');
 		
 		let batchConfirmThresholdText: any;
 		let batchConfirmThresholdSlider: any;
@@ -992,226 +991,13 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(imageOperationsSection.contentEl)
 			.setName('显示批量操作进度')
-			.setDesc('批量操作时显示进度条和当前处理的文件')
+			.setDesc('批量重命名或删除时显示进度条，实时显示当前处理的文件名和剩余数量。文件较多时建议开启，了解操作进度')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.showBatchProgress)
 				.onChange(async (value) => {
 					this.plugin.settings.showBatchProgress = value;
 					await this.plugin.saveSettings();
 				}));
-
-		// 4. 性能优化
-		const referencePanel = this.tabPanels.get('reference');
-		if (!referencePanel) {
-			console.warn('Reference tab panel not found');
-			return;
-		}
-		const referenceSection = { contentEl: referencePanel };
-
-		// 页面标题
-		const pageTitle = referenceSection.contentEl.createEl('h2', { text: '📖 插件使用说明' });
-		pageTitle.style.marginBottom = '16px';
-		pageTitle.style.fontSize = '1.2em';
-		pageTitle.style.fontWeight = '600';
-
-		// 简介
-		const introText = referenceSection.contentEl.createDiv();
-		introText.style.marginBottom = '24px';
-		introText.style.color = 'var(--text-muted)';
-		introText.style.fontSize = '0.9em';
-		introText.textContent = '本插件提供完整的图片管理解决方案，包括图片扫描、去重、重命名、引用管理等功能。';
-
-		// 功能分类容器
-		const featuresContainer = referenceSection.contentEl.createDiv('features-container');
-		featuresContainer.style.display = 'flex';
-		featuresContainer.style.flexDirection = 'column';
-		featuresContainer.style.gap = '16px';
-
-		// 图片引用格式说明
-		const referenceFormatIntro = featuresContainer.createDiv();
-		referenceFormatIntro.style.color = 'var(--text-muted)';
-		referenceFormatIntro.style.padding = '12px 16px';
-		referenceFormatIntro.style.backgroundColor = 'var(--background-secondary)';
-		referenceFormatIntro.style.borderRadius = '6px';
-		referenceFormatIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		referenceFormatIntro.innerHTML = `
-			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">📝 图片引用格式</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.95em;">
-				<li><strong>Wiki 格式</strong>：<code>![[image.png|显示文本|100x200]]</code> ✅ 支持显示文本和尺寸设置</li>
-				<li><strong>HTML 格式</strong>：<code>&lt;img src="image.png" alt="文本" width="100" height="200"&gt;</code> ✅ 支持显示文本和尺寸设置</li>
-				<li><strong>Markdown 格式</strong>：<code>![alt](image.png)</code> ⚠️ 仅支持显示文本（alt），<strong>不支持尺寸设置</strong></li>
-			</ul>
-			<p style="margin: 10px 0 0 0; font-size: 0.9em;">💡 提示：建议使用 Wiki 或 HTML 格式以支持尺寸设置。插件会自动更新所有格式的引用链接。</p>
-		`;
-
-		// 搜索功能说明
-		const searchFeatureIntro = featuresContainer.createDiv();
-		searchFeatureIntro.style.color = 'var(--text-muted)';
-		searchFeatureIntro.style.padding = '12px 16px';
-		searchFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
-		searchFeatureIntro.style.borderRadius = '6px';
-		searchFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		searchFeatureIntro.innerHTML = `
-			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">🔍 搜索功能</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.95em;">
-				<li><strong>搜索范围</strong>：文件名、文件路径、引用笔记名</li>
-				<li><strong>大小写敏感</strong>：默认区分大小写（"Image" ≠ "image"）</li>
-				<li><strong>实时搜索</strong>：输入后自动延迟搜索（300ms）</li>
-				<li><strong>快捷键</strong>：<code>Ctrl+Shift+F</code> 快速聚焦搜索框</li>
-				<li><strong>搜索结果</strong>：显示匹配图片及引用信息</li>
-			</ul>
-			<p style="margin: 10px 0 0 0; font-size: 0.9em;">💡 提示：支持模糊匹配，可通过路径快速定位图片。</p>
-		`;
-
-		// 图片查看功能说明
-		const viewFeatureIntro = featuresContainer.createDiv();
-		viewFeatureIntro.style.color = 'var(--text-muted)';
-		viewFeatureIntro.style.padding = '12px 16px';
-		viewFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
-		viewFeatureIntro.style.borderRadius = '6px';
-		viewFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		viewFeatureIntro.innerHTML = `
-			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">👁️ 图片查看</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.95em;">
-				<li><strong>缩放</strong>：鼠标滚轮、触摸板双指缩放</li>
-				<li><strong>切换</strong>：滚轮、方向键、点击左右区域</li>
-				<li><strong>旋转</strong>：支持90°旋转图片</li>
-				<li><strong>保存</strong>：可保存旋转后的图片</li>
-				<li><strong>信息</strong>：显示图片名称、尺寸、大小、引用列表</li>
-			</ul>
-			<p style="margin: 10px 0 0 0; font-size: 0.9em;">💡 提示：滚轮模式可在查看时切换（缩放/切换图片）。</p>
-		`;
-
-		// 批量操作说明
-		const batchFeatureIntro = featuresContainer.createDiv();
-		batchFeatureIntro.style.color = 'var(--text-muted)';
-		batchFeatureIntro.style.padding = '12px 16px';
-		batchFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
-		batchFeatureIntro.style.borderRadius = '6px';
-		batchFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		batchFeatureIntro.innerHTML = `
-			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">📦 批量操作</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.95em;">
-				<li><strong>批量选择</strong>：多选图片进行操作</li>
-				<li><strong>批量重命名</strong>：按规则批量重命名图片</li>
-				<li><strong>智能重命名</strong>：按引用笔记自动命名</li>
-				<li><strong>批量锁定</strong>：防止重要图片被修改</li>
-				<li><strong>确认阈值</strong>：超过数量需二次确认（默认10个）</li>
-			</ul>
-			<p style="margin: 10px 0 0 0; font-size: 0.9em;">💡 提示：批量操作会生成详细日志，可追踪所有变更。</p>
-		`;
-
-		// 去重功能说明
-		const dedupFeatureIntro = featuresContainer.createDiv();
-		 dedupFeatureIntro.style.color = 'var(--text-muted)';
-		 dedupFeatureIntro.style.padding = '12px 16px';
-		 dedupFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
-		 dedupFeatureIntro.style.borderRadius = '6px';
-		 dedupFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		 dedupFeatureIntro.innerHTML = `
-			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">🔄 重复检测</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.95em;">
-				<li><strong>MD5 检测</strong>：精确检测内容相同的图片</li>
-				<li><strong>快速检测</strong>：基于文件名和大小检测</li>
-				<li><strong>重复标记</strong>：在图片卡片显示重复标识</li>
-				<li><strong>批量处理</strong>：一键删除或移动重复图片</li>
-			</ul>
-			<p style="margin: 10px 0 0 0; font-size: 0.9em;">💡 提示：MD5 检测可节省存储空间，避免重复保存相同图片。</p>
-		`;
-
-		// 空链接检测说明
-		const brokenLinkIntro = featuresContainer.createDiv();
-		brokenLinkIntro.style.color = 'var(--text-muted)';
-		brokenLinkIntro.style.padding = '12px 16px';
-		brokenLinkIntro.style.backgroundColor = 'var(--background-secondary)';
-		brokenLinkIntro.style.borderRadius = '6px';
-		brokenLinkIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		brokenLinkIntro.innerHTML = `
-			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">🔗 空链接检测</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.95em;">
-				<li><strong>自动扫描</strong>：检测笔记中的失效图片链接</li>
-				<li><strong>网络链接</strong>：验证网络图片是否可访问</li>
-				<li><strong>快速修复</strong>：一键删除或替换失效链接</li>
-				<li><strong>批量处理</strong>：批量清理多个空链接</li>
-			</ul>
-			<p style="margin: 10px 0 0 0; font-size: 0.9em;">💡 提示：定期检测可保持笔记整洁，避免遗留无效链接。</p>
-		`;
-
-		// 回收站功能说明
-		const trashFeatureIntro = featuresContainer.createDiv();
-		trashFeatureIntro.style.color = 'var(--text-muted)';
-		trashFeatureIntro.style.padding = '12px 16px';
-		trashFeatureIntro.style.backgroundColor = 'var(--background-secondary)';
-		trashFeatureIntro.style.borderRadius = '6px';
-		trashFeatureIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		trashFeatureIntro.innerHTML = `
-			<p style="margin: 0 0 10px 0; font-weight: 600; font-size: 0.95em;">🗑️ 回收站功能</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6; font-size: 0.95em;">
-				<li><strong>安全删除</strong>：删除图片时自动移入回收站</li>
-				<li><strong>预览恢复</strong>：查看已删除图片的预览和详情</li>
-				<li><strong>批量操作</strong>：批量恢复或永久删除</li>
-				<li><strong>路径恢复</strong>：可恢复到原始路径或指定目录</li>
-			</ul>
-			<p style="margin: 10px 0 0 0; font-size: 0.9em;">💡 提示：仅通过插件删除的文件会进入回收站，直接删除无法拦截。</p>
-		`;
-
-		// 快速开始指南
-		const quickStartTitle = referenceSection.contentEl.createEl('h3', { text: '🚀 快速开始' });
-		quickStartTitle.style.marginTop = '24px';
-		quickStartTitle.style.marginBottom = '12px';
-		quickStartTitle.style.fontSize = '1em';
-		quickStartTitle.style.fontWeight = '600';
-
-		const quickStartGuide = referenceSection.contentEl.createDiv();
-		quickStartGuide.style.color = 'var(--text-muted)';
-		quickStartGuide.style.marginBottom = '24px';
-		quickStartGuide.style.padding = '12px 16px';
-		quickStartGuide.style.backgroundColor = 'var(--background-secondary)';
-		quickStartGuide.style.borderRadius = '6px';
-		quickStartGuide.style.borderLeft = '3px solid var(--interactive-success)';
-		quickStartGuide.innerHTML = `
-			<ol style="margin: 0; padding-left: 20px; line-height: 1.8; font-size: 0.95em;">
-				<li><strong>首次使用</strong>：点击左侧菜单"图片管理"打开主界面</li>
-				<li><strong>扫描图片</strong>：点击"扫描图片"按钮，插件会自动发现所有图片</li>
-				<li><strong>查看详情</strong>：点击图片卡片查看大图和引用信息</li>
-				<li><strong>搜索定位</strong>：使用搜索框快速找到需要的图片</li>
-				<li><strong>管理引用</strong>：在详情页查看和跳转到引用笔记</li>
-				<li><strong>批量操作</strong>：多选图片进行重命名、删除等操作</li>
-			</ol>
-		`;
-
-		// 常用快捷键说明
-		const shortcutsTitle = referenceSection.contentEl.createEl('h3', { text: '⌨️ 常用快捷键' });
-		shortcutsTitle.style.marginBottom = '12px';
-		shortcutsTitle.style.fontSize = '1em';
-		shortcutsTitle.style.fontWeight = '600';
-
-		const shortcutsGuide = referenceSection.contentEl.createDiv();
-		shortcutsGuide.style.color = 'var(--text-muted)';
-		shortcutsGuide.style.marginBottom = '24px';
-		shortcutsGuide.style.padding = '12px 16px';
-		shortcutsGuide.style.backgroundColor = 'var(--background-secondary)';
-		shortcutsGuide.style.borderRadius = '6px';
-		shortcutsGuide.style.borderLeft = '3px solid var(--interactive-accent)';
-		shortcutsGuide.innerHTML = `
-			<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.95em;">
-				<div><strong>Ctrl+Shift+F</strong><br/><span style="color: var(--text-faint);">聚焦搜索框</span></div>
-				<div><strong>← →</strong><br/><span style="color: var(--text-faint);">切换图片</span></div>
-				<div><strong>+ -</strong><br/><span style="color: var(--text-faint);">缩放图片</span></div>
-				<div><strong>R</strong><br/><span style="color: var(--text-faint);">旋转图片</span></div>
-				<div><strong>Delete</strong><br/><span style="color: var(--text-faint);">删除图片</span></div>
-				<div><strong>Esc</strong><br/><span style="color: var(--text-faint);">关闭详情页</span></div>
-			</div>
-			<p style="margin: 12px 0 0 0; font-size: 0.9em;">💡 提示：可在"键盘快捷键"设置页自定义所有快捷键。</p>
-		`;
-
-
-
-
-
-
-
-
 
 		// 11. 移动端适配
 		const mobileSection = { contentEl: this.tabPanels.get('mobile')! };
@@ -1242,7 +1028,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const mobileImagesPerRowSetting = new Setting(mobileSection.contentEl)
 			.setName('移动端每行图片数量')
-			.setDesc('自定义移动端显示的图片列数（1-5），留空则根据屏幕宽度自动调整');
+			.setDesc('统一设置移动设备（手机/平板）每行显示的图片数量。如需为不同设备分别设置，请展开下方的详细选项。留空则自动根据屏幕宽度调整');
 		
 		let mobileImagesPerRowText: any;
 		let mobileImagesPerRowSlider: any;
@@ -1295,7 +1081,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(mobileSection.contentEl)
 			.setName('启用紧凑工具栏')
-			.setDesc('在移动端使用更紧凑的工具栏布局，节省空间')
+			.setDesc('手机等小屏设备上使用更紧凑的工具栏，按钮变小、间距缩小，腾出更多空间显示图片内容')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableCompactToolbar || false)
 				.onChange(async (value) => {
@@ -1305,7 +1091,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(mobileSection.contentEl)
 			.setName('隐藏非必要信息')
-			.setDesc('在移动端隐藏图片尺寸、锁定图标等次要信息，保持界面简洁')
+			.setDesc('手机等小屏设备上隐藏图片尺寸、锁定图标等次要信息，只保留文件名和大小，让小屏幕能更专注地浏览图片本身')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.hideNonEssentialInfo !== false)
 				.onChange(async (value) => {
@@ -1315,7 +1101,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const tabletImagesPerRowSetting = new Setting(mobileSection.contentEl)
 			.setName('平板端每行图片数量')
-			.setDesc('平板设备（768-1199px）上每行显示的图片数量');
+			.setDesc('iPad 等平板设备上每行显示的图片数量。平板屏幕较宽，可适当增加，建议 3-4 张');
 		
 		let tabletImagesPerRowText: any;
 		let tabletImagesPerRowSlider: any;
@@ -1368,7 +1154,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const phoneLandscapeImagesPerRowSetting = new Setting(mobileSection.contentEl)
 			.setName('手机横屏每行图片数量')
-			.setDesc('手机横屏（480-767px）时每行显示的图片数量');
+			.setDesc('手机横屏（横向持握）时屏幕宽度增加，每行可显示更多图片，建议 2-3 张');
 		
 		let phoneLandscapeImagesPerRowText: any;
 		let phoneLandscapeImagesPerRowSlider: any;
@@ -1421,7 +1207,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		const phonePortraitImagesPerRowSetting = new Setting(mobileSection.contentEl)
 			.setName('手机竖屏每行图片数量')
-			.setDesc('手机竖屏（< 480px）时每行显示的图片数量');
+			.setDesc('手机竖屏（正常持握）时屏幕较窄，建议只显示 1 张，保证图片有足够展示空间')
 		
 		let phonePortraitImagesPerRowText: any;
 		let phonePortraitImagesPerRowSlider: any;
@@ -1484,7 +1270,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 12.1 库统计
 		new Setting(extensionSection.contentEl)
 			.setName('📊 库统计')
-			.setDesc('开启后在图片管理主页显示库统计信息（图片总数量、总大小、分类统计等）')
+			.setDesc('在图片管理主页显示统计按钮，点击可查看图片库的整体情况：总数量、总大小、各格式占比、本地/云端分布等数据')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.showStatistics)
 				.onChange(async (value) => {
@@ -1497,7 +1283,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 12.2 重复图片检测
 		new Setting(extensionSection.contentEl)
 			.setName('🔍 重复图片检测')
-			.setDesc('开启后可以检测并管理重复图片（在图片管理主页显示重复检测按钮）')
+			.setDesc('在图片管理主页显示重复检测按钮，可一键查找仓库中的重复图片。支持按文件名、MD5 哈希等多种方式检测。建议配合下方 MD5 去重使用，精确识别内容相同的图片')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableDuplicateDetection !== false) // 默认 true
 				.onChange(async (value) => {
@@ -1520,7 +1306,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 12.3 MD5去重检测（作为重复检测的子功能）
 		const md5Setting = new Setting(extensionSection.contentEl)
 			.setName('MD5 去重检测')
-			.setDesc('自动计算图片的 MD5 哈希值，精确检测内容完全相同的重复图片（节省存储空间）')
+			.setDesc('扫描时自动计算图片的 MD5 哈希值，精确检测内容完全相同的重复图片（即使文件名不同也能识别）。开启后首次扫描稍慢，后续可节省存储空间。扫描结果中可一键删除重复文件')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableDeduplication)
 				.onChange(async (value) => {
@@ -1533,7 +1319,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 12.4 空链接检测
 		new Setting(extensionSection.contentEl)
 			.setName('🈳 空链接检测')
-			.setDesc('开启后可以检测并管理笔记中的空链接')
+			.setDesc('在图片管理主页显示空链接检测按钮，可检测笔记中引用不存在的图片链接。分为本地链接（文件被删除/移动）和网络链接（404/DNS错误），支持一键跳转修复和重新缓存')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableBrokenLinksDetection !== false) // 默认 true
 				.onChange(async (value) => {
@@ -1542,6 +1328,21 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					// 刷新视图以更新按钮显示
 					this.refreshViewToolbar();
 				}));
+
+		// 空链接：新增链接位置（顶部/底部）
+		const brokenLinksPositionSetting = new Setting(extensionSection.contentEl)
+			.setName('空链接新增链接位置')
+			.setDesc('控制空链接页面中“新检测到的条目”插入到列表顶部还是底部')
+			.addDropdown(dropdown => dropdown
+				.addOption('bottom', '底部')
+				.addOption('top', '顶部')
+				.setValue(this.plugin.settings.brokenLinksNewItemPosition || 'bottom')
+				.onChange(async (value) => {
+					this.plugin.settings.brokenLinksNewItemPosition = (value === 'top' ? 'top' : 'bottom');
+					await this.plugin.saveSettings();
+				}));
+		// 作为“空链接检测”的子选项做一点缩进
+		brokenLinksPositionSetting.settingEl.style.marginLeft = '24px';
 
 		// 添加云端图片扫描状态提示
 		if (!this.plugin.settings.scanRemoteImages) {
@@ -1556,7 +1357,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 12.5 在Android相册中隐藏Obsidian图片
 		new Setting(extensionSection.contentEl)
 			.setName('🛡️ 在 Android 相册中隐藏图片')
-			.setDesc('开启后在笔记库根目录创建 .nomedia 文件，Android 相册将不再扫描此目录（仅对 Android 有效）')
+			.setDesc('在笔记库根目录创建 .nomedia 文件，Android 系统的相册应用将不再扫描此目录，避免笔记图片混入个人照片。仅对 Android 设备有效，iOS 无需此设置')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.createNomediaFile || false)
 				.onChange(async (value) => {
@@ -2129,7 +1930,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 扫描网络图片开关 - 移动到第一个位置
 	new Setting(uploadSection.contentEl)
 		.setName('扫描网络图片')
-		.setDesc('扫描 Markdown 文件中的网络图片链接（http://、https://），并在列表中显示。关闭后将停止所有自动扫描。')
+		.setDesc('自动扫描笔记中的网络图片链接（http://、https://），缓存到本地并显示在图片列表中。关闭后停止扫描，但已缓存的图片仍可正常显示')
 		.addToggle(toggle => toggle
 			.setValue(this.plugin.settings.scanRemoteImages ?? false)
 			.onChange(async (value) => {
@@ -2153,7 +1954,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 网络图片代理服务
 	new Setting(uploadSection.contentEl)
 		.setName('网络图片代理服务')
-		.setDesc('当直接加载失败时使用的代理服务（Obsidian 代理、公共代理或两者都尝试）')
+		.setDesc('某些网站（如微信、知乎）有防盗链机制，直接加载会失败。通过代理服务可绕过限制。建议：优先 Obsidian 代理，失败后再尝试公共代理')
 		.addDropdown(dropdown => dropdown
 			.addOption('none', '不使用代理')
 			.addOption('obsidian', '仅 Obsidian 代理')
@@ -2168,7 +1969,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 云端图片加载超时
 		const timeoutSetting = new Setting(uploadSection.contentEl)
 			.setName('云端图片加载超时')
-			.setDesc('云端图片加载的超时时间（毫秒，范围：3000-30000）');
+			.setDesc('网络图片加载的最大等待时间。网络较慢或图片较大时可适当增加。超时后视为加载失败并记录到黑名单，下次扫描时跳过');
 		
 		let remoteImageTimeoutText: any;
 		let remoteImageTimeoutSlider: any;
@@ -2222,27 +2023,13 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 自动重试代理加载
 	new Setting(uploadSection.contentEl)
 		.setName('自动重试代理加载')
-		.setDesc('当直接加载失败时，自动尝试通过代理服务加载图片')
+		.setDesc('直接加载网络图片失败后，自动尝试通过上方设置的代理服务重新加载。开启可提高加载成功率，但会增加加载时间')
 		.addToggle(toggle => toggle
 			.setValue(this.plugin.settings.autoRetryRemoteImage ?? true)
 			.onChange(async (value) => {
 				this.plugin.settings.autoRetryRemoteImage = value;
 				await this.plugin.saveSettings();
 			}));
-
-	// 网络链接
-	new Setting(uploadSection.contentEl)
-		.setName('网络链接')
-		.setDesc('失效网络图片 URL 列表（每行一个）')
-		.addTextArea(text => {
-			text.setValue((this.plugin.settings.remoteImageBlacklist || []).join('\n'));
-			text.setPlaceholder('http://example.com/broken-image.png');
-			text.inputEl.setAttribute('style', 'width: 100%; height: 200px; min-height: 200px; resize: vertical; font-family: monospace; font-size: 0.9em;');
-			text.onChange(async (value) => {
-				this.plugin.settings.remoteImageBlacklist = value.split('\n').filter(line => line.trim());
-				await this.plugin.saveSettings();
-			});
-		});
 
 	// 扫描网络图片开关
 	new Setting(uploadSection.contentEl)
@@ -2436,7 +2223,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 日志级别设置
 		new Setting(logsSection.contentEl)
 			.setName('日志级别')
-			.setDesc('设置记录的最小日志级别，低于此级别的日志不会被记录（DEBUG < INFO < WARNING < ERROR）')
+			.setDesc('设置记录的最小日志级别。DEBUG（最详细，调试用）、INFO（一般信息）、WARNING（警告）、ERROR（仅错误）。日常使用建议 INFO，排查问题时可选 DEBUG')
 			.addDropdown(dropdown => dropdown
 			.addOption('DEBUG', 'DEBUG（所有日志）')
 			.addOption('INFO', 'INFO（信息及以上）')
@@ -2457,7 +2244,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 控制台输出设置
 		new Setting(logsSection.contentEl)
 			.setName('输出到控制台')
-			.setDesc('是否将日志输出到浏览器控制台（生产环境建议关闭，避免控制台日志过多）')
+			.setDesc('同时将日志输出到 Obsidian 开发者工具的控制台（Ctrl+Shift+I 打开）。便于开发调试，日常使用建议关闭以减少干扰')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableConsoleLog || false)
 				.onChange(async (value) => {
@@ -2471,7 +2258,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// DEBUG日志设置
 		new Setting(logsSection.contentEl)
 			.setName('启用DEBUG日志')
-			.setDesc('是否记录DEBUG级别的日志（调试时启用，生产环境建议关闭）')
+			.setDesc('记录最详细的 DEBUG 级别日志，包括内部状态、变量值、执行流程等。仅在排查复杂问题时临时开启，日常使用和性能敏感场景建议关闭')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableDebugLog || false)
 				.onChange(async (value) => {

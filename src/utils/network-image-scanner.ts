@@ -121,8 +121,8 @@ export class NetworkImageScanner {
                         url = url.split(/\s+/)[0];
                     }
 
-                    // 检查是否在忽略的域名列表中
-                    if (this.isIgnoredDomain(url)) {
+                    // 检查是否在忽略的域名列表中（包括从空链接页面获取的失效链接）
+                    if (await this.isIgnoredDomain(url)) {
                         continue;
                     }
 
@@ -146,8 +146,8 @@ export class NetworkImageScanner {
                     
                     if (isInInlineCode) continue;
                     
-                    // 检查是否在忽略的域名列表中
-                    if (this.isIgnoredDomain(match[1])) {
+                    // 检查是否在忽略的域名列表中（包括从空链接页面获取的失效链接）
+                    if (await this.isIgnoredDomain(match[1])) {
                         continue;
                     }
                     
@@ -214,19 +214,132 @@ export class NetworkImageScanner {
         return results;
     }
     
+    // 缓存失效的网络链接列表（从空链接页面/数据库获取）
+    private brokenUrlsCache: Set<string> | null = null;
+    private brokenDomainsCache: Set<string> | null = null;
+    private lastCacheUpdate: number = 0;
+    private readonly cacheValidityMs: number = 5 * 60 * 1000; // 缓存有效期5分钟
+
     /**
      * 检查 URL 是否在忽略的域名列表中
+     * 同时检查是否在空链接页面的网络链接错误列表中
      * @param url - 要检查的 URL
      * @returns 是否应该忽略此 URL
      */
-    private isIgnoredDomain(url: string): boolean {
+    private async isIgnoredDomain(url: string): Promise<boolean> {
         try {
             const urlObj = new URL(url);
-            return this.ignoredDomains.has(urlObj.hostname);
+            const domain = urlObj.hostname;
+            
+            // 1. 检查硬编码的忽略域名
+            if (this.ignoredDomains.has(domain)) {
+                return true;
+            }
+            
+            // 2. 检查是否从空链接页面/数据库加载了失效链接
+            await this.loadBrokenUrlsCache();
+            
+            // 检查完整 URL 是否在失效列表中
+            if (this.brokenUrlsCache?.has(url)) {
+                return true;
+            }
+            
+            // 检查域名是否在失效域名列表中
+            if (this.brokenDomainsCache?.has(domain)) {
+                return true;
+            }
+            
+            return false;
         } catch (error) {
             // URL 解析失败，返回 false
             return false;
         }
+    }
+    
+    /**
+     * 从插件获取失效的网络链接列表（空链接页面数据）
+     * 
+     * 统一来源说明：
+     * - 失效 URL 与域名一律以「网络图片缓存系统」的 IndexedDB 数据为准
+     * - 不再直接依赖插件设置中的 remoteImageBlacklist 或 BlacklistManager 的内部列表
+     */
+    private async loadBrokenUrlsCache(): Promise<void> {
+        const now = Date.now();
+        
+        // 检查缓存是否仍然有效
+        if (this.brokenUrlsCache !== null && 
+            (now - this.lastCacheUpdate) < this.cacheValidityMs) {
+            return;
+        }
+        
+        this.brokenUrlsCache = new Set<string>();
+        this.brokenDomainsCache = new Set<string>();
+        
+        try {
+            const windowWithPlugin = window as WindowWithImageMgrPlugin;
+            const plugin = windowWithPlugin.ImageMgrPlugin;
+            
+            if (!plugin) {
+                return;
+            }
+            
+            // 1. 从网络图片数据库获取状态为 broken 的图片（URL 级别）
+            if (plugin.networkImageAPI) {
+                try {
+                    const brokenResult = await plugin.networkImageAPI.searchImagesByStatus('broken');
+                    for (const image of brokenResult.images) {
+                        if (image.url) {
+                            this.brokenUrlsCache.add(image.url);
+                            try {
+                                const urlObj = new URL(image.url);
+                                this.brokenDomainsCache.add(urlObj.hostname);
+                            } catch {
+                                // 忽略 URL 解析错误
+                            }
+                        }
+                    }
+                } catch (error) {
+                    // 静默处理数据库查询错误
+                }
+            }
+            
+            // 2. 从网络图片数据库获取黑名单记录（URL/域名统一从 IndexedDB 读取）
+            if (plugin.networkImageAPI && typeof plugin.networkImageAPI.getBlacklist === 'function') {
+                try {
+                    const blacklist = await plugin.networkImageAPI.getBlacklist();
+                    for (const entry of blacklist as any[]) {
+                        const url = entry.url as string | undefined;
+                        if (!url) continue;
+                        this.brokenUrlsCache.add(url);
+                        try {
+                            const urlObj = new URL(url);
+                            this.brokenDomainsCache.add(urlObj.hostname);
+                        } catch {
+                            // 忽略 URL 解析错误
+                        }
+                    }
+                } catch {
+                    // 静默处理黑名单读取错误
+                }
+            }
+            
+            this.lastCacheUpdate = now;
+            
+            if (this.logger && (this.brokenUrlsCache.size > 0 || this.brokenDomainsCache.size > 0)) {
+                this.logger(`已加载 ${this.brokenUrlsCache.size} 个失效链接，${this.brokenDomainsCache.size} 个失效域名到扫描跳过列表`);
+            }
+        } catch (error) {
+            // 静默处理缓存加载错误
+        }
+    }
+    
+    /**
+     * 手动刷新失效链接缓存（供外部调用）
+     */
+    public refreshBrokenUrlsCache(): void {
+        this.brokenUrlsCache = null;
+        this.brokenDomainsCache = null;
+        this.lastCacheUpdate = 0;
     }
     
     /**
@@ -281,30 +394,8 @@ export class NetworkImageScanner {
      */
     private async autoAddToBlacklist(domain: string, error: string): Promise<void> {
         try {
-            // 添加到忽略域名列表
+            // 添加到忽略域名列表（仅用于当前扫描进程内跳过）
             this.ignoredDomains.add(domain);
-
-            // 优先使用新的黑名单管理器（带本地缓存）
-            const windowWithPlugin = window as WindowWithImageMgrPlugin;
-            if (windowWithPlugin.ImageMgrPlugin && windowWithPlugin.ImageMgrPlugin.blacklistManager) {
-                const plugin = windowWithPlugin.ImageMgrPlugin;
-                await plugin.blacklistManager?.addToBlacklist(domain, 'connection_error');
-                console.log(`[NetworkImageScanner] 域名已添加到黑名单（带缓存）: ${domain}`);
-            }
-            // 兼容旧方式：添加到插件的黑名单设置
-            else if (windowWithPlugin.ImageMgrPlugin) {
-                const plugin = windowWithPlugin.ImageMgrPlugin;
-                if (plugin.settings && plugin.settings.remoteImageBlacklist) {
-                    const blacklist = plugin.settings.remoteImageBlacklist;
-                    if (!blacklist.includes(domain)) {
-                        blacklist.push(domain);
-                        if (plugin.saveSettings) {
-                            await plugin.saveSettings();
-                        }
-                        console.log(`[NetworkImageScanner] 域名已添加到黑名单（旧方式）: ${domain}`);
-                    }
-                }
-            }
 
             if (this.logger) {
                 this.logger(`自动添加域名到黑名单: ${domain}`, {

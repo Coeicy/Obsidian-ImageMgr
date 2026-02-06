@@ -85,6 +85,8 @@ export class BrokenLinksModal extends Modal {
 	private cachedElements: Map<string, HTMLElement | null> = new Map();
 	/** 黑名单缓存，避免重复从IndexedDB加载 */
 	private blacklistCache: any[] | null = null;
+	/** 是否已经渲染过主 UI（避免异步刷新时重复初始化布局） */
+	private hasRenderedUI: boolean = false;
 
 	/** 禁用默认的自动聚焦行为 */
 	shouldRestoreSelection = false;
@@ -199,6 +201,18 @@ export class BrokenLinksModal extends Modal {
 
 			return enhanced;
 		});
+	}
+
+	/**
+	 * 快速构建基础链接信息（不做日志匹配与黑名单读取）
+	 * 目的：首次打开时立刻渲染完整 UI，避免出现“只有标题+搜索框”的空壳画面。
+	 */
+	private buildEnhancedLinksFast(): void {
+		if (!this.brokenLinks) {
+			this.enhancedLinks = [];
+			return;
+		}
+		this.enhancedLinks = this.brokenLinks.map(link => ({ ...link }));
 	}
 
 	/**
@@ -394,18 +408,17 @@ export class BrokenLinksModal extends Modal {
 		(this as any).tabsContainer = tabsContainer;
 		(this as any).scrollContainer = scrollContainer;
 		
-		// 先加载并显示缓存的空链接
-		(async () => {
-			const cachedLinks = this.plugin?.data.brokenLinks || [];
-			if (cachedLinks.length > 0) {
-				this.brokenLinks = cachedLinks as any;
-				await this.displayResults(contentArea, false);
-			} else {
-				// 如果没有缓存，显示加载状态
-				this.displayLoadingState(contentArea);
-			}
-		})();
-
+		// 优先使用缓存数据：如果已经有缓存的空链接，直接渲染列表，避免多余的“加载中”画面
+		const cachedLinks = this.plugin?.data.brokenLinks || [];
+		if (cachedLinks.length > 0) {
+			this.brokenLinks = cachedLinks as any;
+			// 不必等待异步部分完成即可开始渲染，减少首屏空白时间
+			void this.displayResults(contentArea, false);
+		} else {
+			// 只有在没有任何缓存时才显示加载状态
+			this.displayLoadingState(contentArea);
+		}
+		
 		// 在后台继续检测新的空链接（增量更新）
 		this.detectBrokenLinks(contentArea);
 	}
@@ -472,11 +485,22 @@ export class BrokenLinksModal extends Modal {
 
 				// 如果有新链接，静默添加到列表
 				if (uniqueNewLinks.length > 0) {
+					// 给新增条目打上“进入列表时间”，用于顶部/底部插入策略 & 展示排序
+					const baseDetectedAt = Date.now();
+					const uniqueNewLinksWithDetectedAt = uniqueNewLinks.map((link: any, idx: number) => ({
+						...link,
+						detectedAt: typeof link.detectedAt === 'number' ? link.detectedAt : (baseDetectedAt + idx)
+					}));
+
+					const newItemPosition = (this.plugin?.settings?.brokenLinksNewItemPosition === 'top') ? 'top' : 'bottom';
+
 					// 更新 brokenLinks
-					this.brokenLinks = [...existingLinks, ...uniqueNewLinks];
+					this.brokenLinks = (newItemPosition === 'top')
+						? [...uniqueNewLinksWithDetectedAt, ...existingLinks]
+						: [...existingLinks, ...uniqueNewLinksWithDetectedAt];
 					
 					// 实时添加到 UI（只添加新的）
-					this.addLinksToUI(uniqueNewLinks);
+					this.addLinksToUI(uniqueNewLinksWithDetectedAt);
 					
 					// 更新统计信息
 					this.updateStats();
@@ -511,7 +535,7 @@ export class BrokenLinksModal extends Modal {
 	/**
 	 * 添加新链接到 UI（增量更新）- 选项卡布局
 	 */
-	private addLinksToUI(newLinks: Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string}>) {
+	private addLinksToUI(newLinks: Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string, detectedAt?: number}>) {
 		if (!this.listContainer || newLinks.length === 0) return;
 
 		// 查找恢复信息（只对新链接）
@@ -520,7 +544,10 @@ export class BrokenLinksModal extends Modal {
 		this.findRecoveryInfo();
 		const newEnhancedLinks = this.enhancedLinks;
 		this.brokenLinks = tempBrokenLinks;
-		this.enhancedLinks = [...this.enhancedLinks, ...newEnhancedLinks];
+		const newItemPosition = (this.plugin?.settings?.brokenLinksNewItemPosition === 'top') ? 'top' : 'bottom';
+		this.enhancedLinks = (newItemPosition === 'top')
+			? [...newEnhancedLinks, ...this.enhancedLinks]
+			: [...this.enhancedLinks, ...newEnhancedLinks];
 
 		// 按类型分组新链接
 		const remoteErrors: BrokenLinkInfo[] = [];
@@ -576,31 +603,10 @@ export class BrokenLinksModal extends Modal {
 	 */
 	async displayResults(containerEl: HTMLElement, isNewDetection: boolean = true) {
 		if (!this.brokenLinks) return;
-		
-		// 先查找恢复信息
-		this.findRecoveryInfo();
-		
-		// 获取黑名单数据
-		let blacklist: any[] = [];
-		if (this.blacklistCache !== null) {
-			blacklist = this.blacklistCache;
-		} else {
-			if (this.plugin?.networkImageAPI) {
-				blacklist = await this.plugin.networkImageAPI.getBlacklist();
-			} else if ((this.plugin as any)?.cacheManager) {
-				const cacheManager = (this.plugin as any).cacheManager;
-				if (cacheManager?.db) {
-					const tx = cacheManager.db.transaction(['blacklist'], 'readonly');
-					const store = tx.objectStore('blacklist');
-					blacklist = await new Promise((resolve, reject) => {
-						const request = store.getAll();
-						request.onsuccess = () => resolve(request.result || []);
-						request.onerror = () => reject(request.error);
-					});
-				}
-			}
-			this.blacklistCache = blacklist;
-		}
+
+		// 第一阶段：快速构建基础数据并立刻渲染 UI（不等待黑名单/日志匹配）
+		this.buildEnhancedLinksFast();
+		const blacklist = this.blacklistCache || [];
 		
 		if (this.enhancedLinks.length === 0 && blacklist.length === 0) {
 			this.displayEmptyState(containerEl);
@@ -613,20 +619,24 @@ export class BrokenLinksModal extends Modal {
 		
 		if (!scrollContainer || !tabsContainer) return;
 
-		// 清空旧内容
-		scrollContainer.empty();
-		tabsContainer.empty();
+		// 清空旧内容（仅首次渲染或明确刷新时清空，避免异步更新导致闪烁）
+		if (!this.hasRenderedUI || isNewDetection) {
+			scrollContainer.empty();
+			tabsContainer.empty();
+		}
 
 		// 创建列表容器（放在滚动容器内）
-		const listContainer = scrollContainer.createDiv('broken-links-list');
-		listContainer.style.cssText = `
-			display: flex;
-			flex-direction: column;
-			gap: 12px;
-			width: 100%;
-			box-sizing: border-box;
-		`;
-		this.listContainer = listContainer;
+		if (!this.listContainer || !this.hasRenderedUI || isNewDetection) {
+			const listContainer = scrollContainer.createDiv('broken-links-list');
+			listContainer.style.cssText = `
+				display: flex;
+				flex-direction: column;
+				gap: 12px;
+				width: 100%;
+				box-sizing: border-box;
+			`;
+			this.listContainer = listContainer;
+		}
 
 		// 按类型分组链接
 		const remoteErrors: BrokenLinkInfo[] = [];
@@ -647,81 +657,110 @@ export class BrokenLinksModal extends Modal {
 				title: '本地链接', 
 				links: localErrors, 
 				icon: '📄',
-				color: 'var(--text-accent)'
-			}
-		];
-		
-		// 如果有黑名单，添加黑名单选项卡
-		if (blacklist.length > 0) {
-			filterGroups.push({
+				color: 'var(--text-accent)',
+				disabled: false
+			},
+			{
 				id: 'blacklist',
 				title: '网络链接',
+				// 即使黑名单数据尚未加载完成，也先创建分组，后续再用后台加载结果刷新
 				links: blacklist as any,
 				icon: '🌐',
-				color: 'var(--text-accent)'
-			});
-		}
+				color: 'var(--text-accent)',
+				// 当 blacklistCache 为空时视为“正在加载中”，按钮展示但禁用
+				disabled: this.blacklistCache === null
+			}
+		];
 
 		// 创建分类选项卡（并排显示，固定在顶部）
-		const tabsInnerContainer = tabsContainer.createDiv('broken-links-tabs');
-		tabsInnerContainer.style.cssText = `
-			display: flex;
-			gap: 12px;
-		`;
+		let tabsInnerContainer = tabsContainer.querySelector('.broken-links-tabs') as HTMLElement | null;
+		if (!tabsInnerContainer || !this.hasRenderedUI || isNewDetection) {
+			tabsInnerContainer = tabsContainer.createDiv('broken-links-tabs');
+			tabsInnerContainer.style.cssText = `
+				display: flex;
+				gap: 12px;
+			`;
+		}
+		if (!tabsInnerContainer) return;
+		const tabsInnerEl = tabsInnerContainer;
 
 		// 创建内容区域
-		const contentContainer = listContainer.createDiv('broken-links-tab-content');
-		contentContainer.style.cssText = `
-			min-height: 200px;
-		`;
+		let contentContainer = this.listContainer!.querySelector('.broken-links-tab-content') as HTMLElement | null;
+		if (!contentContainer || !this.hasRenderedUI || isNewDetection) {
+			contentContainer = this.listContainer!.createDiv('broken-links-tab-content');
+			contentContainer.style.cssText = `
+				min-height: 200px;
+			`;
+		}
+		if (!contentContainer) return;
+		const contentEl = contentContainer;
 
 		// 当前选中的分类ID
 		this.activeFilterId = null;
 
-		// 创建分类选项卡
+		// 创建分类选项卡（首次创建；之后只更新计数与内容，避免反复重建导致闪烁）
 		for (const group of filterGroups) {
-			if (group.links.length === 0) continue;
 
-			const tabCard = tabsInnerContainer.createDiv('broken-links-tab');
+			const existingTab = tabsInnerContainer.querySelector(`[data-tab-id="${group.id}"]`) as HTMLElement | null;
+			const tabCard = existingTab || tabsInnerContainer.createDiv('broken-links-tab');
 			tabCard.setAttribute('data-tab-id', group.id);
-			tabCard.style.cssText = `
-				flex: 1;
-				background: var(--background-secondary);
-				border: 1px solid var(--background-modifier-border);
-				border-radius: 8px;
-				padding: 10px 12px;
-				cursor: pointer;
-				transition: all 0.2s ease;
-				display: flex;
-				align-items: center;
-				gap: 10px;
-			`;
+			if (!existingTab) {
+				tabCard.style.cssText = `
+					flex: 1;
+					background: var(--background-secondary);
+					border: 1px solid var(--background-modifier-border);
+					border-radius: 8px;
+					padding: 10px 12px;
+					cursor: pointer;
+					transition: all 0.2s ease;
+					display: flex;
+					align-items: center;
+					gap: 10px;
+				`;
+			}
 
 			// 图标
-			const iconEl = tabCard.createEl('span', { text: group.icon });
-			iconEl.style.fontSize = '1.2em';
+			if (!existingTab) {
+				const iconEl = tabCard.createEl('span', { text: group.icon });
+				iconEl.style.fontSize = '1.2em';
+			}
 
 			// 标题
-			const titleText = tabCard.createEl('span', { text: group.title });
-			titleText.style.cssText = `
-				flex: 1;
-				font-weight: 600;
-				font-size: 0.9em;
-				color: var(--text-normal);
-			`;
+			if (!existingTab) {
+				const titleText = tabCard.createEl('span', { text: group.title });
+				titleText.style.cssText = `
+					flex: 1;
+					font-weight: 600;
+					font-size: 0.9em;
+					color: var(--text-normal);
+				`;
+			}
 
 			// 数量徽章
-			const countBadge = tabCard.createEl('span', { 
+			const countBadge = (tabCard.querySelector('.broken-link-count') as HTMLElement) || tabCard.createEl('span', { 
 				text: String(group.links.length),
 				cls: 'broken-link-count'
 			});
+			// 黑名单尚未加载完成时，用“…”提示，并禁用点击
+			const isBlacklistTabLoading = group.id === 'blacklist' && this.blacklistCache === null;
+			if (isBlacklistTabLoading) {
+				countBadge.textContent = '…';
+				tabCard.style.opacity = '0.6';
+				tabCard.style.cursor = 'default';
+			} else {
+				countBadge.textContent = String(group.links.length);
+				tabCard.style.opacity = '1';
+				tabCard.style.cursor = 'pointer';
+			}
 
 			// 点击切换
 			tabCard.addEventListener('click', () => {
+				// 黑名单数据尚未加载完成时，按钮可见但不响应点击
+				if (group.id === 'blacklist' && this.blacklistCache === null) return;
 				if (this.activeFilterId === group.id) return;
 
 				// 更新所有选项卡样式和徽章
-				tabsInnerContainer.querySelectorAll('.broken-links-tab').forEach((tabEl) => {
+				tabsInnerEl.querySelectorAll('.broken-links-tab').forEach((tabEl) => {
 					const t = tabEl as HTMLElement;
 					t.style.background = 'var(--background-secondary)';
 					t.style.borderColor = 'var(--background-modifier-border)';
@@ -745,7 +784,12 @@ export class BrokenLinksModal extends Modal {
 				this.activeFilterId = group.id;
 
 				// 渲染内容
-				this.renderTabContent(contentContainer, group.links, group.id);
+				if (group.id === 'blacklist') {
+					// 始终使用最新的黑名单缓存作为数据源，避免使用初始化时的空 snapshot
+					this.renderTabContent(contentEl, this.blacklistCache || [], 'blacklist');
+				} else {
+					this.renderTabContent(contentEl, group.links, group.id);
+				}
 			});
 
 			// 悬停效果
@@ -773,7 +817,7 @@ export class BrokenLinksModal extends Modal {
 				countBadge.style.padding = '2px 8px';
 				countBadge.style.borderRadius = '10px';
 				countBadge.style.flexShrink = '0';
-				this.renderTabContent(contentContainer, group.links, group.id);
+				this.renderTabContent(contentEl, group.links, group.id);
 			} else {
 				// 未激活的徽章无背景色
 				countBadge.style.background = 'transparent';
@@ -783,6 +827,49 @@ export class BrokenLinksModal extends Modal {
 				countBadge.style.borderRadius = '10px';
 				countBadge.style.flexShrink = '0';
 			}
+		}
+
+		this.hasRenderedUI = true;
+
+		// 第二阶段（后台）：补齐恢复信息与黑名单数据，然后增量刷新 UI
+		// 1) 补齐恢复信息（日志匹配）
+		if (this.plugin?.logger) {
+			setTimeout(() => {
+				// 更新 enhancedLinks 中的 recoveryInfo
+				this.findRecoveryInfo();
+				// 仅在当前处于本地 tab 时刷新内容
+				if (this.activeFilterId === 'local' && contentContainer) {
+					this.renderTabContent(contentContainer, this.enhancedLinks.filter(l => !l.isRemoteError), 'local');
+				}
+			}, 0);
+		}
+
+		// 2) 补齐黑名单（IndexedDB）
+		if (this.blacklistCache === null && this.plugin?.networkImageAPI) {
+			(async () => {
+				try {
+					const loaded = await this.plugin!.networkImageAPI!.getBlacklist();
+					this.blacklistCache = loaded || [];
+
+					// 更新“网络链接”选项卡计数（如果存在）
+					const tabsEl = tabsContainer.querySelector(`[data-tab-id="blacklist"]`) as HTMLElement | null;
+					const badgeEl = tabsEl?.querySelector('.broken-link-count') as HTMLElement | null;
+					if (tabsEl) {
+						tabsEl.style.opacity = '1';
+						tabsEl.style.cursor = 'pointer';
+					}
+					if (badgeEl) {
+						badgeEl.textContent = String(this.blacklistCache.length);
+					}
+
+					// 如果当前正在看网络链接 tab，刷新内容
+					if (this.activeFilterId === 'blacklist' && contentContainer) {
+						this.renderTabContent(contentContainer, this.blacklistCache, 'blacklist');
+					}
+				} catch {
+					// 静默失败
+				}
+			})();
 		}
 	}
 
@@ -818,8 +905,19 @@ export class BrokenLinksModal extends Modal {
 			});
 		}
 
-		// 排序
+		// 排序策略：
+		// - 如果存在 detectedAt：按“新增链接位置”来决定新条目在顶部/底部
+		// - 兼容旧数据（没有 detectedAt）：保持原来的按路径/行号排序
+		const newItemPosition = (this.plugin?.settings?.brokenLinksNewItemPosition === 'top') ? 'top' : 'bottom';
+		const hasDetectedAt = filteredLinks.some(l => typeof (l as any).detectedAt === 'number');
 		filteredLinks.sort((a, b) => {
+			if (hasDetectedAt) {
+				const atA = (typeof (a as any).detectedAt === 'number') ? (a as any).detectedAt : 0;
+				const atB = (typeof (b as any).detectedAt === 'number') ? (b as any).detectedAt : 0;
+				if (atA !== atB) {
+					return newItemPosition === 'top' ? (atB - atA) : (atA - atB);
+				}
+			}
 			const pathComparison = a.filePath.localeCompare(b.filePath);
 			if (pathComparison !== 0) return pathComparison;
 			return a.lineNumber - b.lineNumber;
@@ -867,6 +965,17 @@ export class BrokenLinksModal extends Modal {
 				return url.includes(query) || error.includes(query);
 			});
 		}
+
+		// 排序：按 detectedAt 控制新条目在顶部/底部（没有 detectedAt 的视为 0）
+		const newItemPosition = (this.plugin?.settings?.brokenLinksNewItemPosition === 'top') ? 'top' : 'bottom';
+		filteredBlacklist = [...filteredBlacklist].sort((a, b) => {
+			const atA = (typeof a?.detectedAt === 'number') ? a.detectedAt : 0;
+			const atB = (typeof b?.detectedAt === 'number') ? b.detectedAt : 0;
+			if (atA !== atB) {
+				return newItemPosition === 'top' ? (atB - atA) : (atA - atB);
+			}
+			return String(a?.url || a?.id || '').localeCompare(String(b?.url || b?.id || ''));
+		});
 
 		// 创建链接列表容器
 		const linksContainer = containerEl.createDiv();
@@ -971,14 +1080,9 @@ export class BrokenLinksModal extends Modal {
 			refreshBtn.textContent = '⏳';
 			
 			try {
-				// 1. 从黑名单中移除该 URL 的域名
-				if (this.plugin?.blacklistManager && url) {
-					try {
-						const urlObj = new URL(url);
-						this.plugin.blacklistManager.removeFromBlacklist(urlObj.hostname);
-					} catch {
-						// URL 解析失败，忽略
-					}
+				// 1. 刷新网络图片扫描器的失效链接缓存，允许重新扫描该链接
+				if (this.plugin?.networkImageScanner) {
+					this.plugin.networkImageScanner.refreshBrokenUrlsCache();
 				}
 				
 				// 2. 尝试验证图片链接是否可用
@@ -987,6 +1091,22 @@ export class BrokenLinksModal extends Modal {
 				if (isValid) {
 					// 缓存成功，从列表中删除链接
 					new Notice('图片缓存成功');
+
+					// 尝试从 IndexedDB 黑名单中移除该 URL（统一黑名单：以 IndexedDB 为准）
+					try {
+						if (this.plugin?.networkImageAPI && url) {
+							const { hashUrl } = await import('../network-image/utils');
+							const urlId = await hashUrl(url);
+							const cacheManager = (this.plugin.networkImageAPI as any).getCacheManager?.();
+							const db = cacheManager?.['db'];
+							if (db) {
+								const tx = db.transaction(['blacklist'], 'readwrite');
+								tx.objectStore('blacklist').delete(urlId);
+							}
+						}
+					} catch {
+						// 静默失败：不影响 UI 操作
+					}
 					
 					linkItem.style.transition = 'all 0.3s ease';
 					linkItem.style.opacity = '0';
@@ -1055,6 +1175,29 @@ export class BrokenLinksModal extends Modal {
 			font-weight: normal;
 		`;
 		linkContent.textContent = url || '';
+
+		// 如果黑名单记录中提供了来源信息，在网络错误列表中直接展示“出现位置”
+		if (item.sourceFilePath) {
+			const locationRow = mainContent.createDiv();
+			locationRow.style.cssText = `
+				margin-top: 6px;
+				font-size: 0.8em;
+				color: var(--text-muted);
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+			`;
+
+			const locationLabel = locationRow.createEl('span', { text: '出现位置：' });
+			locationLabel.style.fontWeight = '500';
+
+			const locationTextParts: string[] = [item.sourceFilePath];
+			if (typeof item.line === 'number') {
+				locationTextParts.push(`第 ${item.line + 1} 行`);
+			}
+			const locationText = locationRow.createEl('span', { text: locationTextParts.join(' · ') });
+			locationText.style.wordBreak = 'break-all';
+		}
 
 		// 链接项悬停效果
 		linkItem.addEventListener('mouseenter', () => {
@@ -1388,13 +1531,6 @@ export class BrokenLinksModal extends Modal {
 		} else {
 			filteredLinks = localLinks;
 		}
-		
-		// 排序（按文件路径，然后按行号）
-		filteredLinks.sort((a, b) => {
-			const pathComparison = a.filePath.localeCompare(b.filePath);
-			if (pathComparison !== 0) return pathComparison;
-			return a.lineNumber - b.lineNumber;
-		});
 		
 		// 重新渲染当前选项卡内容
 		this.renderTabContent(contentContainer, filteredLinks, this.activeFilterId);

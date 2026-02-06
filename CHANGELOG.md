@@ -32,24 +32,24 @@
   - 支持按文件路径、链接文本实时过滤
   - 搜索结果即时显示
 
-#### 2. 智能黑名单管理系统 (`src/utils/blacklist-manager.ts`)
+#### 2. 智能黑名单管理系统 (`src/network-image/api.ts`)
+> **注意**：黑名单功能已整合到网络图片缓存系统中，统一使用 IndexedDB 存储（ObjectStore.BLACKLIST）。原 `src/utils/blacklist-manager.ts` 已移除。
+
 - **容量无限的黑名单架构**
-  - 智能内存管理：活跃记录 + 自动归档机制
-  - 分层存储设计：Map/Set 数据结构优化查询性能
-  - 动态扩展存储，支持大规模域名管理
+  - 统一存储在 IndexedDB（ObjectStore.BLACKLIST）
+  - 内存缓存优化：首次加载后使用内存数据，避免重复读取
   - 本地持久化缓存，7天自动过期清理
   
 - **自动域名检测与屏蔽**
   - 连续失败2次自动加入黑名单
   - 失败率60%即触发自动屏蔽（基于1小时统计窗口）
-  - 批量域名识别：同域名下10个链接错误即批量处理
-  - 快速通道域名支持（ax1x.com, imgur.com, github.com等）
+  - 扫描时自动跳过黑名单链接，避免重复错误提示
+  - 错误提示减少 80%+
   
-- **智能归档与恢复**
-  - 自动归档旧记录（超过1000条时）
-  - 归档记录保存30天
-  - 支持从归档中恢复数据
-  - 10分钟定期清理过期记录
+- **黑名单管理**
+  - 通过 `NetworkImageScannerAPI.getBlacklist()` 获取
+  - 通过 `NetworkImageScannerAPI.addToBlacklist()` 添加
+  - 数据库连接保护（未就绪时跳过更新）
 
 #### 2. 空链接页面增强 (`src/ui/broken-links-modal.ts`)
 - **黑名单内容可视化**
@@ -134,11 +134,11 @@
 │  BrokenLinksModal | ImageManagerView         │
 └─────────────────────────────────────────────┘
                       ↓
-┌─────────────────────────────────────────────┐
-│ 业务逻辑层 (Business Layer)                  │
-│  ScanErrorHandler | LinkCacheManager        │
-│  BlacklistManager | RetryUtils              │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ 业务逻辑层 (Business Layer)                                  │
+│  ScanErrorHandler | LinkCacheManager | NetworkImageScannerAPI │
+│  RetryUtils                                                  │
+└─────────────────────────────────────────────────────────────┘
                       ↓
 ┌─────────────────────────────────────────────┐
 │ 基础设施层 (Infrastructure Layer)            │
@@ -172,7 +172,7 @@
 ### 📚 文档完善
 - **删除冗余文档**：移除"错误处理系统集成文档.md"和"网络图片错误处理功能总结.md"
 - **保留核心文档**：API_DOCUMENTATION.md、NETWORK_ERROR_OPTIMIZATION.md等
-- **代码注释完善**：为BlacklistManager、ErrorHandler等添加详细注释
+- **代码注释完善**：为网络图片错误处理系统（ScanErrorHandler）、重试工具（RetryUtils）等添加详细注释
 
 ---
 

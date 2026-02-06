@@ -205,7 +205,10 @@ export class ImageManagerView extends ItemView {
 			entries.forEach(entry => {
 				const target = entry.target as HTMLElement;
 				if (entry.isIntersecting) {
-					this.loadImage(target);
+					// 异步加载图片
+					this.loadImage(target).catch(() => {
+						// 加载失败静默处理
+					});
 				} else {
 					this.unloadImage(target);
 				}
@@ -213,7 +216,7 @@ export class ImageManagerView extends ItemView {
 		}, options);
 	}
 
-	private loadImage(previewEl: HTMLElement) {
+	private async loadImage(previewEl: HTMLElement) {
 		const src = previewEl.dataset.src;
 		if (!src || previewEl.classList.contains('loaded')) return;
 		
@@ -223,6 +226,23 @@ export class ImageManagerView extends ItemView {
 		if (isIgnored) {
 			// 如果是忽略的域名，跳过加载
 			return;
+		}
+		
+		// 检查是否在黑名单中（网络图片）
+		if (src.startsWith('http')) {
+			const isBlacklisted = await this.isUrlBlacklisted(src);
+			if (isBlacklisted) {
+				// 如果在黑名单中，直接显示加载失败，不尝试加载
+				previewEl.style.backgroundImage = 'none';
+				previewEl.style.display = 'flex';
+				previewEl.style.alignItems = 'center';
+				previewEl.style.justifyContent = 'center';
+				previewEl.style.color = 'var(--text-muted)';
+				previewEl.style.fontSize = '0.9em';
+				previewEl.textContent = '图片加载失败';
+				previewEl.dataset.retried = 'true';
+				return;
+			}
 		}
 
 		const img = new Image();
@@ -1878,7 +1898,9 @@ export class ImageManagerView extends ItemView {
 					this.imageObserver.observe(previewEl);
 				} else {
 					// 如果 Observer 未初始化（异常情况），回退到直接加载
-					this.loadImage(previewEl);
+					this.loadImage(previewEl).catch(() => {
+						// 加载失败静默处理
+					});
 				}
 			}
 
@@ -3528,42 +3550,17 @@ export class ImageManagerView extends ItemView {
 			}
 		}
 		
-		// 从设置中加载黑名单
-		const blacklist = this.plugin.settings.remoteImageBlacklist || [];
-		
 		// 并行验证需要检测的网络链接（优化批量处理，提升速度）
 		// 注意：requestUrl 会下载完整响应到内存，但我们可以通过增加批次大小和减少延迟来提升速度
 		const BATCH_SIZE = 12; // 从5增加到12，提升并发度（如果内存充足可以进一步增加）
 		const BATCH_DELAY = 50; // 从100ms减少到50ms，减少等待时间
 		
 		if (linksToValidate.length > 0) {
-			// 先处理黑名单中的链接（直接标记为失效，不验证）
-			const blacklistLinks: typeof remoteLinksToValidate = [];
+			// 统一由网络图片缓存系统决定哪些 URL 已经失效 / 在黑名单中
 			const validLinksToValidate: typeof remoteLinksToValidate = [];
+			validLinksToValidate.push(...linksToValidate);
 			
-			for (const item of linksToValidate) {
-				if (blacklist.includes(item.url)) {
-					// 黑名单中的链接，直接添加到失效列表
-					blacklistLinks.push(item);
-				} else {
-					// 需要验证的链接
-					validLinksToValidate.push(item);
-				}
-			}
-			
-			// 处理黑名单链接
-			for (const item of blacklistLinks) {
-				brokenLinks.push({
-					filePath: item.filePath,
-					lineNumber: item.lineNumber,
-					linkText: item.linkText,
-					extractedPath: item.url,
-					isRemoteError: true,
-					remoteError: '黑名单（已验证失效）'
-				});
-			}
-			
-			// 验证非黑名单链接
+			// 验证链接
 			if (validLinksToValidate.length > 0) {
 				for (let i = 0; i < validLinksToValidate.length; i += BATCH_SIZE) {
 					const batch = validLinksToValidate.slice(i, i + BATCH_SIZE);
@@ -3621,13 +3618,37 @@ export class ImageManagerView extends ItemView {
 	}
 
 	/**
+	 * 检查 URL 是否在黑名单中
+	 * @param url - 要检查的 URL
+	 * @returns 是否在黑名单中
+	 */
+	private async isUrlBlacklisted(url: string): Promise<boolean> {
+		try {
+			// 统一检查网络图片数据库的黑名单
+			if (this.plugin.networkImageAPI) {
+				const { hashUrl } = await import('../network-image/utils');
+				const imageId = await hashUrl(url);
+				const blacklist_entries = await this.plugin.networkImageAPI.getBlacklist();
+				if (blacklist_entries.some((entry: any) => entry.id === imageId || entry.url === url)) {
+					return true;
+				}
+			}
+			
+			return false;
+		} catch (error) {
+			// URL 解析失败或其他错误，默认不拦截
+			return false;
+		}
+	}
+
+	/**
 	 * 添加 URL 到黑名单
 	 * @param url - 要添加到黑名单的 URL
 	 * @param errorMessage - 错误信息
 	 */
 	private async addToBlacklist(url: string, errorMessage: string): Promise<void> {
 		try {
-			// 优先使用 networkImageAPI 的黑名单系统
+			// 统一黑名单：只使用 networkImageAPI（IndexedDB）
 			if (this.plugin.networkImageAPI) {
 				const { hashUrl } = await import('../network-image/utils');
 				const imageId = await hashUrl(url);
@@ -3637,21 +3658,6 @@ export class ImageManagerView extends ItemView {
 					reason: 'network_error',
 					errorMessage: errorMessage
 				}]);
-			}
-			
-			// 同时添加到设置中的黑名单（用于兼容）
-			const blacklist = this.plugin.settings.remoteImageBlacklist || [];
-			if (!blacklist.includes(url)) {
-				blacklist.push(url);
-				this.plugin.settings.remoteImageBlacklist = blacklist;
-				await this.plugin.saveSettings();
-				
-				if (this.plugin?.logger) {
-					await this.plugin.logger.info(OperationType.VIEW, `已将失效图片添加到黑名单: ${url}`, {
-						imagePath: url,
-						details: { errorMessage, blacklistSize: blacklist.length }
-					});
-				}
 			}
 		} catch (error) {
 			// 静默失败，不影响主流程
@@ -4195,43 +4201,100 @@ export class ImageManagerView extends ItemView {
 			return { updatedRefs: 0 };
 		}
 
+		// 验证路径安全性
+		if (!PathValidator.isSafePath(newPath)) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(
+					OperationType.RENAME,
+					`路径不安全，无法重命名: ${image.name} -> ${newFileName}`,
+					{
+						imagePath: image.path,
+						imageName: image.name,
+						details: {
+							newPath: newPath,
+							newFileName: newFileName
+						}
+					}
+				);
+			}
+			return null;
+		}
+		
+		// 验证文件名合法性
+		if (!PathValidator.isValidFileName(newFileName)) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(
+					OperationType.RENAME,
+					`文件名包含非法字符: ${newFileName}`,
+					{
+						imagePath: image.path,
+						imageName: image.name,
+						details: {
+							newFileName: newFileName
+						}
+					}
+				);
+			}
+			return null;
+		}
+
 		// 保存旧值
 		const oldPath = image.path;
 		const oldName = image.name;
 		
-		// 执行重命名
-		await this.app.vault.rename(file, newPath);
-		
-		// 更新图片对象的路径和名称信息
-		image.path = newPath;
-		image.name = newFileName;
-		
-		// 更新分组数据（如果图片在某个分组中）
-		await this.updateGroupDataOnMove(oldPath, newPath);
-		
-		// 提取所有引用该图片的文件，并去重
-		const referenceFiles = Array.from(new Set(references.map(r => r.file)));
-		
-		// 更新笔记中的引用链接
-		// 传入 referenceFiles 参数，避免在 updateReferencesInNotes 中进行全库扫描
-		const result = await this.updateReferencesInNotes(oldPath, newPath, oldName, newFileName, 'auto', referenceFiles);
-		
-		const updatedRefs = result.updatedCount || 0;
-		
-		// 返回日志条目（如果启用了日志记录）
-		if (!suppressLogging) {
-			return { 
-				updatedRefs,
-				logEntry: {
-					oldPath,
-					newPath,
-					oldName,
-					newName: newFileName,
-					updatedRefs
-				}
-			};
-		} else {
-			return { updatedRefs };
+		try {
+			// 执行重命名
+			await this.app.vault.rename(file, newPath);
+			
+			// 更新图片对象的路径和名称信息
+			image.path = newPath;
+			image.name = newFileName;
+			
+			// 更新分组数据（如果图片在某个分组中）
+			await this.updateGroupDataOnMove(oldPath, newPath);
+			
+			// 提取所有引用该图片的文件，并去重
+			const referenceFiles = Array.from(new Set(references.map(r => r.file)));
+			
+			// 更新笔记中的引用链接
+			// 传入 referenceFiles 参数，避免在 updateReferencesInNotes 中进行全库扫描
+			const result = await this.updateReferencesInNotes(oldPath, newPath, oldName, newFileName, 'auto', referenceFiles);
+			
+			const updatedRefs = result.updatedCount || 0;
+			
+			// 返回日志条目（如果启用了日志记录）
+			if (!suppressLogging) {
+				return { 
+					updatedRefs,
+					logEntry: {
+						oldPath,
+						newPath,
+						oldName,
+						newName: newFileName,
+						updatedRefs
+					}
+				};
+			} else {
+				return { updatedRefs };
+			}
+		} catch (error) {
+			// 记录错误日志
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(
+					OperationType.RENAME,
+					`重命名失败: ${oldName} -> ${newFileName}`,
+					{
+						error: error instanceof Error ? error : new Error(String(error)),
+						imagePath: oldPath,
+						imageName: oldName,
+						details: {
+							newPath: newPath,
+							newFileName: newFileName
+						}
+					}
+				);
+			}
+			return null;
 		}
 	}
 	

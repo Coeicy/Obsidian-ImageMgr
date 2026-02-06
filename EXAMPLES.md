@@ -507,11 +507,7 @@ async function retryCacheNetworkImage(url: string) {
     const plugin = app.plugins.plugins['imagemgr'];
     
     try {
-        // 1. 从黑名单中移除域名
-        const urlObj = new URL(url);
-        plugin.blacklistManager.removeFromBlacklist(urlObj.hostname);
-        
-        // 2. 尝试验证图片链接
+        // 1. 尝试验证图片链接是否可用
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
         
@@ -523,7 +519,7 @@ async function retryCacheNetworkImage(url: string) {
         
         clearTimeout(timeoutId);
         
-        new Notice('✅ 图片链接可用，下次扫描时将自动缓存');
+        new Notice('✅ 图片链接可用，下次扫描时将自动缓存（黑名单由网络图片系统自动维护）');
         return true;
     } catch (error) {
         new Notice('❌ 图片链接仍然不可用：' + error.message);

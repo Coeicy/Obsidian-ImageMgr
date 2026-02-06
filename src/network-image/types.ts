@@ -177,6 +177,20 @@ export interface BlacklistRecord {
     
     /** 错误信息 */
     errorMessage: string;
+	
+	/**
+	 * 最近一次检测到该失效链接时的来源信息
+	 * 说明：
+	 * - 为了避免过度放大存储，仅记录「最后一次」出现位置
+	 * - 用于在空链接页面和网络错误列表中展示“该链接出现在哪个笔记的第几行”
+	 */
+	sourceFilePath?: string;
+	
+	/** 来源笔记的行号（0-based，显示时需 +1） */
+	line?: number;
+	
+	/** 行内列位置/索引（可选，用于精确定位） */
+	column?: number;
     
     /** 检测时间 */
     detectedAt: number;

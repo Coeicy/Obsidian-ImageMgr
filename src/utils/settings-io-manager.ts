@@ -446,7 +446,6 @@ export class SettingsIOManager {
     
     // 过滤其他可能的敏感信息
     delete settings.ignoredHashMetadata;
-    delete settings.remoteImageBlacklist;
   }
 
   /**
@@ -469,7 +468,6 @@ export class SettingsIOManager {
     
     // 过滤其他可能的敏感信息
     delete filteredSettings.ignoredHashMetadata;
-    delete filteredSettings.remoteImageBlacklist;
     
     return filteredSettings;
   }

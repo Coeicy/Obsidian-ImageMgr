@@ -10,7 +10,6 @@ import { ReferenceManager, parseWikiLink, parseHtmlImageSize } from './utils/ref
 import { TrashManager } from './utils/trash-manager';
 import { LockListManager } from './utils/lock-list-manager';
 import { HistoryManager } from './utils/history-manager';
-import { BlacklistManager } from './utils/blacklist-manager';
 
 // ==================== 网络图片缓存系统导入 ====================
 import {
@@ -42,10 +41,9 @@ import { NetworkImageScanner } from './utils/network-image-scanner';
  *    - LockListManager: 锁定列表
  * 3. 初始化网络图片系统：
  *    - IndexedDBManager: 数据库管理
- *    - NetworkImageScannerAPI: 扫描API
+ *    - NetworkImageScannerAPI: 扫描API（含黑名单管理）
  *    - NetworkImageCacheManager: 缓存管理
  *    - NetworkImageScanner: 扫描器
- *    - BlacklistManager: 黑名单管理
  * 4. 注册视图（IMAGE_MANAGER_VIEW_TYPE）
  * 5. 注册命令（各种快捷命令）
  * 6. 注册事件监听器：
@@ -98,14 +96,8 @@ import { NetworkImageScanner } from './utils/network-image-scanner';
  * - 网络图片扫描
  * - 增量扫描算法
  * - 图片验证
- * - 黑名单管理
+ * - 黑名单管理（统一使用 IndexedDB 存储 URL 与域名）
  * - 缓存清理
- * 
- * **BlacklistManager（黑名单管理器）**：
- * - 域名黑名单
- * - URL黑名单
- * - 自动添加策略
- * - 容量管理
  * 
  * 缓存机制：
  * 
@@ -241,7 +233,7 @@ import { NetworkImageScanner } from './utils/network-image-scanner';
 export default class ImageManagementPlugin extends Plugin {
 	// ==================== 核心管理器 ====================
 	/** 插件设置对象 */
-	settings: ImageManagementSettings;
+	settings!: ImageManagementSettings;
 	/** 日志管理器 - 负责记录所有操作日志 */
 	logger: Logger;
 	/** 错误处理器 - 统一处理和记录错误 */
@@ -268,10 +260,6 @@ networkImageCacheManager: NetworkImageCacheManager;
 networkImageErrorHandler: ScanErrorHandler;
 /** 网络图片扫描器 */
 networkImageScanner: NetworkImageScanner;
-
-// ==================== 黑名单管理系统 ====================
-/** 黑名单管理器 */
-blacklistManager: BlacklistManager;
 
 	// ==================== 缓存机制 ====================
 	/** 显示文本缓存：filePath -> lineNumber -> displayText
@@ -377,9 +365,6 @@ blacklistManager: BlacklistManager;
 	// 初始化锁定列表管理器 - 管理和监控锁定文件列表
 	this.lockListManager = new LockListManager(this);
 	await this.lockListManager.initialize();
-	
-	// 初始化黑名单管理器 - 管理网络图片黑名单
-	this.blacklistManager = new BlacklistManager(this);
 	
 	// 初始化网络图片缓存系统（仅在启用扫描网络图片时）
 	if (this.settings.scanRemoteImages) {
@@ -703,7 +688,14 @@ blacklistManager: BlacklistManager;
 		);
 		
 		// 4. 创建错误处理器
-		this.networkImageErrorHandler = new ScanErrorHandler(100, true);
+		this.networkImageErrorHandler = new ScanErrorHandler(200, true);
+		if (this.logger) {
+			// 仅记录到插件日志，不在控制台刷屏
+			await this.logger.info(
+				OperationType.PLUGIN_OPERATION,
+				`网络图片错误记录功能已启用（最多保留最近 ${this.networkImageErrorHandler.getMaxErrorLogSize()} 条错误记录用于排查）`
+			);
+		}
 		
 		// 5. 创建缓存管理器
 		this.networkImageCacheManager = new NetworkImageCacheManager(db);
@@ -1129,7 +1121,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 				// 提取所有设置属性（包括锁定列表相关属性）
 				const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
 					'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
-					'enableDuplicateDetection', 'enableBrokenLinksDetection',
+					'enableDuplicateDetection', 'enableBrokenLinksDetection', 'brokenLinksNewItemPosition',
 					'autoGenerateNames', 'keepModalOpen', 'pathNamingDepth',
 					'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
 					'defaultWheelMode', 'showImageName', 'showImageSize', 
@@ -1224,7 +1216,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 			// 排除所有设置属性（不包括锁定列表，因为它们通过 saveSettings 单独管理）
 			const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
 				'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
-				'enableDuplicateDetection', 'enableBrokenLinksDetection',
+				'enableDuplicateDetection', 'enableBrokenLinksDetection', 'brokenLinksNewItemPosition',
 				'autoGenerateNames', 'keepModalOpen', 'pathNamingDepth',
 				'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
 				'defaultWheelMode', 'showImageName', 'showImageSize', 

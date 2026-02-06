@@ -62,13 +62,16 @@ export class ScanErrorHandler {
      * @param maxErrorLogSize - 错误日志最大大小（默认 100，建议 50-500）
      * @param enableLogging - 是否启用控制台日志（默认 true，生产环境建议 false）
      */
-    constructor(maxErrorLogSize: number = 100, enableLogging: boolean = true) {
+    constructor(maxErrorLogSize: number = 200, enableLogging: boolean = true) {
         this.maxErrorLogSize = Math.max(10, Math.min(1000, maxErrorLogSize)); // 限制范围
         this.enableLogging = enableLogging;
-        
-        if (this.enableLogging) {
-            console.log(`ScanErrorHandler initialized with max log size: ${this.maxErrorLogSize}`);
-        }
+    }
+
+    /**
+     * 获取当前错误日志容量上限（用于在插件日志中展示配置）
+     */
+    public getMaxErrorLogSize(): number {
+        return this.maxErrorLogSize;
     }
     
     /**

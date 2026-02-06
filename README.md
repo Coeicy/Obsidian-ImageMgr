@@ -100,8 +100,8 @@ ImageMgr 是一个功能丰富的 Obsidian 图片管理插件，帮助您轻松�
 - **稳定性：** 显著提升
 
 #### 📄 相关文档
-- [代码问题总结报告](./ISSUES_SUMMARY.md) - 详细的问题分析和修复记录
-- [技术架构指南](./TECHNICAL_GUIDE.md) - 深入了解插件架构
+- [P1 修复总结](./P1_FIXES_SUMMARY.md) - P1 高优先级问题修复进度
+- [技术架构指南](./TECHNICAL_GUIDE_CN.md) - 深入了解插件架构
 - [API 文档](./API_DOCUMENTATION.md) - 开发接口说明
 
 ### v1.0.0 (2025-01-24)
@@ -290,6 +290,7 @@ graph TD
 - **一键跳转**：点击行号徽章直接跳转到对应笔记并选中链接
 - **重新缓存**：网络链接支持点击🔄按钮重新尝试缓存，成功自动移除
 - **预计算缓存**：扫描时预计算，打开时立即显示
+- **新增链接位置**：在「设置 → 扩展 → 空链接」中可选择新检测到的条目插入列表顶部或底部
 
 ### 🔗 链接格式转换
 
@@ -388,9 +389,8 @@ graph TD
 | 🈳 **空链接检测指南** | 所有用户 | 空链接检测功能详解、操作说明 | [BROKEN_LINKS_GUIDE.md](./BROKEN_LINKS_GUIDE.md) |
 | 🔧 **API文档** | 开发者 | API接口、事件系统、示例代码 | [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) |
 | 💡 **使用示例** | 所有用户 | 详细教程、代码示例、最佳实践 | [EXAMPLES.md](./EXAMPLES.md) |
-| 🏗️ **技术指南** | 贡献者 | 架构设计、流程图、性能优化 | [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md) |
+| 🏗️ **技术指南** | 贡献者 | 架构设计、流程图、性能优化、网络图片系统 | [TECHNICAL_GUIDE_CN.md](./TECHNICAL_GUIDE_CN.md) |
 | 📋 **更新日志** | 所有用户 | 版本历史、新功能、Bug修复 | [CHANGELOG.md](./CHANGELOG.md) |
-| 🌐 **网络错误优化** | 开发者 | 错误处理系统技术实现 | [NETWORK_ERROR_OPTIMIZATION.md](./NETWORK_ERROR_OPTIMIZATION.md) |
 
 ### 快速导航
 
@@ -402,12 +402,11 @@ graph TD
 
 ### 文档统计
 
-- 总字数：约110,000字
-- 代码示例：55+
+- 核心文档：7篇（用户指南、API文档、技术指南、使用示例、更新日志等）
+- 代码示例：50+
 - 流程图：5+
 - 覆盖功能：50+
 - API接口：20+
-- 功能指南：7篇
 
 ## 📋 完整功能清单
 
@@ -848,7 +847,7 @@ src/
 - 📋 [开发审查报告](./DEVELOPMENT_REVIEW.md) - 代码质量和功能逻辑审查
 - 🔧 [API文档](./API_DOCUMENTATION.md) - 完整的API接口说明
 - 💡 [使用示例](./EXAMPLES.md) - 详细的代码示例和教程
-- 📊 [问题报告](./ISSUES_SUMMARY.md) - 代码问题分析和修复状态
+- 📊 [P1 修复总结](./P1_FIXES_SUMMARY.md) - P1 高优先级问题修复进度
 
 ## 🤝 贡献
 

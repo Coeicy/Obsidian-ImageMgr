@@ -36,6 +36,12 @@ export interface BrokenLinkInfo {
 	isRemoteError?: boolean;
 	/** 网络链接错误信息（如 ERR_NAME_NOT_RESOLVED） */
 	remoteError?: string;
+	/**
+	 * 记录该条目进入列表的时间戳（毫秒）
+	 * - 用于“新增链接位置（顶部/底部）”的展示顺序控制
+	 * - 旧数据可能不存在该字段
+	 */
+	detectedAt?: number;
 }
 
 /**
@@ -296,6 +302,12 @@ export interface ImageManagerSettings {
 	enableDuplicateDetection?: boolean;
 	/** 是否启用空链接检测（在首页显示按钮） */
 	enableBrokenLinksDetection?: boolean;
+	/**
+	 * 空链接页面：新增链接插入位置
+	 * - bottom: 新检测到的条目追加到列表底部（默认）
+	 * - top: 新检测到的条目插入到列表顶部
+	 */
+	brokenLinksNewItemPosition?: 'top' | 'bottom';
 	
 	// ==================== 显示设置 ====================
 	/** 每行显示的图片数量（1-10） */
@@ -444,9 +456,6 @@ export interface ImageManagerSettings {
 	remoteImageTimeout?: number;
 	/** 是否自动尝试代理加载失败的云端图片 */
 	autoRetryRemoteImage?: boolean;
-	/** 失效网络图片黑名单 - 自动检测失效的图片 URL 并加入此列表 */
-	remoteImageBlacklist?: string[];
-	
 	// ==================== 图床上传设置 ====================
 	/** 图床配置 */
 	uploadConfig?: {
@@ -476,16 +485,18 @@ export interface ImageManagerSettings {
 export interface WindowWithImageMgrPlugin {
 	/** ImageMgr 插件实例 */
 	ImageMgrPlugin?: {
-		/** 黑名单管理器 */
-		blacklistManager?: {
-			addToBlacklist(domain: string, reason: string): Promise<void>;
+		/** 网络图片 API */
+		networkImageAPI?: {
+			searchImagesByStatus(status: 'active' | 'deleted' | 'broken' | 'pending'): Promise<{
+				images: Array<{ url?: string; status?: string; sourceFilePath?: string; line?: number; originalText?: string; validationResult?: { error?: string } }>;
+				total: number;
+			}>;
+			getBlacklist(): Promise<Array<{ id?: string; url?: string; errorMessage?: string; sourceFilePath?: string; line?: number; column?: number }>>;
 		};
-		/** 设置对象 */
-		settings?: {
-			remoteImageBlacklist?: string[];
+		/** 网络图片扫描器 */
+		networkImageScanner?: {
+			refreshBrokenUrlsCache(): void;
 		};
-		/** 保存设置方法 */
-		saveSettings?: () => Promise<void>;
 	};
 }
 

@@ -428,7 +428,8 @@ export class SettingsValidator {
       'multipleReferencesHandling': ['first', 'latest', 'prompt', 'all'],
       'statisticsPosition': ['top', 'bottom', 'sidebar'],
       'logLevel': ['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-      'remoteImageProxy': ['none', 'obsidian', 'weserv', 'both']
+      'remoteImageProxy': ['none', 'obsidian', 'weserv', 'both'],
+      'brokenLinksNewItemPosition': ['top', 'bottom']
     };
 
     Object.entries(enumFields).forEach(([field, validValues]) => {
