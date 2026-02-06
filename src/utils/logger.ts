@@ -388,6 +388,16 @@ export class Logger {
 	private plugin: ImageManagementPlugin;
 	/** 是否为开发模式 */
 	private isDevMode: boolean;
+	/** 批量保存队列 */
+	private saveQueue: Promise<void> | null = null;
+	/** 需要保存的标志 */
+	private needsSave = false;
+	/** 错误去重映射表：key = operation + imagePath + errorMessage, value = { count, firstTime, lastTime } */
+	private errorDeduplicationMap: Map<string, { count: number; firstTime: number; lastTime: number; entry: LogEntry }> = new Map();
+	/** 错误聚合窗口时间（毫秒），在此时间内的相同错误会被聚合 */
+	private readonly ERROR_AGGREGATION_WINDOW = 60000; // 60秒
+	/** 错误聚合阈值，超过此数量的相同错误会被聚合统计 */
+	private readonly ERROR_AGGREGATION_THRESHOLD = 3;
 
 	/**
 	 * 创建日志管理器实例
@@ -397,6 +407,8 @@ export class Logger {
 		this.plugin = plugin;
 		this.isDevMode = isDevelopmentMode();
 		this.loadLogs();
+		// 自动清理过期的日志（保留最近7天的日志）
+		this.performCleanup().catch(() => {});
 	}
 
 	/**
@@ -497,17 +509,38 @@ export class Logger {
 	}
 
 	/**
-	 * 保存日志（带错误处理）
+	 * 保存日志（带错误处理和批量优化）
 	 */
 	private async saveLogs(): Promise<void> {
-		try {
-			const data = this.plugin.data || {};
-			data.logs = this.logs;
-			await this.plugin.saveData(data);
-		} catch (error) {
-			// 保存日志失败时，只输出到控制台，避免循环错误
-			console.error('[ImageMgr] 保存日志失败:', error);
+		// 如果已经在保存队列中，直接返回
+		if (this.saveQueue) {
+			this.needsSave = true;
+			return this.saveQueue;
 		}
+
+		// 创建新的保存队列
+		this.saveQueue = (async () => {
+			try {
+				// 短暂延迟，允许更多的日志条目累积
+				await new Promise(resolve => setTimeout(resolve, 100));
+
+				// 检查是否需要保存
+				if (this.needsSave) {
+					this.needsSave = false;
+					const data = this.plugin.data || {};
+					data.logs = this.logs;
+					await this.plugin.saveData(data);
+				}
+			} catch (error) {
+				// 保存日志失败时，只输出到控制台，避免循环错误
+				console.error('[ImageMgr] 保存日志失败:', error);
+			} finally {
+				this.saveQueue = null;
+			}
+		})();
+
+		this.needsSave = true;
+		return this.saveQueue;
 	}
 
 	/**
@@ -539,33 +572,71 @@ export class Logger {
 	}
 
 	/**
+	 * 生成错误去重键
+	 * @param operation - 操作类型
+	 * @param imagePath - 图片路径
+	 * @param errorMessage - 错误消息
+	 * @returns 去重键
+	 */
+	private getErrorDeduplicationKey(operation: OperationType, imagePath: string, errorMessage: string): string {
+		// 提取错误类型（如 ERR_HTTP2_PROTOCOL_ERROR, ERR_CONNECTION_CLOSED 等）
+		const errorType = errorMessage.match(/(ERR_\w+|net::\w+|Request failed)/)?.[0] || 'UNKNOWN';
+		return `${operation}:${imagePath}:${errorType}`;
+	}
+
+	/**
+	 * 清理过期的去重记录
+	 * @param now - 当前时间戳
+	 */
+	private cleanupDeduplicationMap(now: number): void {
+		const cleanupThreshold = this.ERROR_AGGREGATION_WINDOW * 2;
+		for (const [key, value] of this.errorDeduplicationMap.entries()) {
+			if (now - value.lastTime > cleanupThreshold) {
+				this.errorDeduplicationMap.delete(key);
+			}
+		}
+	}
+
+	/**
+	 * 脱敏处理路径（防止敏感信息泄露）
+	 * @param path - 原始路径
+	 * @returns 脱敏后的路径（只显示文件名）
+	 */
+	private sanitizePath(path: string): string {
+		if (!path) return '';
+		const parts = path.split('/');
+		// 只返回文件名部分，隐藏目录结构
+		return parts[parts.length - 1];
+	}
+
+	/**
 	 * 格式化控制台输出消息（简洁版本）
 	 */
 	private formatConsoleMessage(entry: LogEntry): string {
-		const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', { 
+		const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', {
 			hour12: false,
 			hour: '2-digit',
 			minute: '2-digit',
 			second: '2-digit'
 		});
-		
+
 		const levelIcon = {
 			[LogLevel.DEBUG]: '🔍',
 			[LogLevel.INFO]: 'ℹ️',
 			[LogLevel.WARNING]: '⚠️',
 			[LogLevel.ERROR]: '❌'
 		}[entry.level] || '';
-		
+
 		let message = `[${time}] ${levelIcon} [${entry.operation}] ${entry.message}`;
-		
-		// 如果有图片信息，添加到消息中
+
+		// 如果有图片信息，添加到消息中（脱敏处理）
 		if (entry.imageName) {
 			message += ` | 图片: ${entry.imageName}`;
 		} else if (entry.imagePath) {
-			const pathParts = entry.imagePath.split('/');
-			message += ` | 路径: ${pathParts[pathParts.length - 1]}`;
+			// 只显示文件名，不显示完整路径
+			message += ` | 文件: ${this.sanitizePath(entry.imagePath)}`;
 		}
-		
+
 		return message;
 	}
 
@@ -608,13 +679,89 @@ export class Logger {
 			if (options?.error) {
 				if (options.error instanceof Error) {
 					entry.error = options.error.message;
-					entry.stackTrace = options.error.stack;
+					// 对于网络图片加载错误，不记录完整堆栈信息以减少日志大小
+					if (operation === OperationType.VIEW && entry.imagePath && entry.imagePath.startsWith('http')) {
+						// 只记录简化的错误信息，不记录堆栈
+						entry.stackTrace = undefined;
+					} else {
+						entry.stackTrace = options.error.stack;
+					}
 				} else {
 					entry.error = options.error;
 				}
 			}
 
-			this.logs.push(entry);
+			// 错误去重和聚合处理（仅对 WARNING 和 ERROR 级别的网络图片加载错误）
+			if ((level === LogLevel.WARNING || level === LogLevel.ERROR) && 
+			    operation === OperationType.VIEW && 
+			    entry.imagePath && 
+			    entry.imagePath.startsWith('http')) {
+				
+				const dedupKey = this.getErrorDeduplicationKey(operation, entry.imagePath, entry.error || message);
+				const now = Date.now();
+				const existing = this.errorDeduplicationMap.get(dedupKey);
+				
+					if (existing) {
+					// 检查是否在聚合窗口内
+					if (now - existing.lastTime < this.ERROR_AGGREGATION_WINDOW) {
+						// 在窗口内，增加计数
+						existing.count++;
+						existing.lastTime = now;
+						
+						// 如果超过阈值，使用聚合消息并更新现有条目
+						if (existing.count >= this.ERROR_AGGREGATION_THRESHOLD) {
+							// 更新聚合消息
+							entry.message = `${message} (已发生 ${existing.count} 次，首次: ${new Date(existing.firstTime).toLocaleTimeString('zh-CN')})`;
+							entry.details = {
+								...(entry.details || {}),
+								aggregatedCount: existing.count,
+								firstOccurrence: existing.firstTime,
+								lastOccurrence: now
+							};
+							
+							// 替换之前的日志条目（如果存在）
+							const existingIndex = this.logs.findIndex(log => log.id === existing.entry.id);
+							if (existingIndex !== -1) {
+								// 更新现有条目
+								this.logs[existingIndex] = entry;
+								existing.entry = entry;
+								// 超过阈值后只更新现有条目，不添加新条目，但继续执行后续的保存和输出逻辑
+							} else {
+								// 如果之前的条目已被清理，添加新的聚合条目
+								this.logs.push(entry);
+								existing.entry = entry;
+							}
+							// 注意：这里不 return，继续执行后续的保存和输出逻辑
+						} else {
+							// 未超过阈值，正常记录
+							this.logs.push(entry);
+							existing.entry = entry;
+						}
+					} else {
+						// 超出窗口，重置计数
+						existing.count = 1;
+						existing.firstTime = now;
+						existing.lastTime = now;
+						existing.entry = entry;
+						this.logs.push(entry);
+					}
+				} else {
+					// 首次出现，记录并初始化
+					this.errorDeduplicationMap.set(dedupKey, {
+						count: 1,
+						firstTime: now,
+						lastTime: now,
+						entry: entry
+					});
+					this.logs.push(entry);
+				}
+				
+				// 清理过期的去重记录（超过聚合窗口2倍时间）
+				this.cleanupDeduplicationMap(now);
+			} else {
+				// 非网络图片错误，正常记录
+				this.logs.push(entry);
+			}
 
 			// 限制日志数量（保持最新的日志）
 			if (this.logs.length > this.MAX_LOGS) {
@@ -667,7 +814,7 @@ export class Logger {
 	}
 
 	/**
-	 * 记录调试日志
+	 * 记录调试日志（同步版本，不阻塞操作）
 	 * 
 	 * 用于记录详细的调试信息，仅在启用 DEBUG 日志时记录。
 	 * 
@@ -675,7 +822,22 @@ export class Logger {
 	 * @param message - 日志消息
 	 * @param options - 可选参数（图片信息、详情等）
 	 */
-	async debug(operation: OperationType, message: string, options?: {
+	debug(operation: OperationType, message: string, options?: {
+		imageHash?: string;
+		imagePath?: string;
+		imageName?: string;
+		details?: any;
+		error?: Error | string;
+	}) {
+		this.log(LogLevel.DEBUG, operation, message, options).catch(() => {});
+	}
+
+	/**
+	 * 记录调试日志（异步版本）
+	 * 
+	 * 用于需要等待日志记录完成的情况。
+	 */
+	async debugAsync(operation: OperationType, message: string, options?: {
 		imageHash?: string;
 		imagePath?: string;
 		imageName?: string;
@@ -686,7 +848,7 @@ export class Logger {
 	}
 
 	/**
-	 * 记录信息日志
+	 * 记录信息日志（同步版本，不阻塞操作）
 	 * 
 	 * 用于记录正常的操作信息，如成功的操作。
 	 * 
@@ -694,7 +856,22 @@ export class Logger {
 	 * @param message - 日志消息
 	 * @param options - 可选参数（图片信息、详情等）
 	 */
-	async info(operation: OperationType, message: string, options?: {
+	info(operation: OperationType, message: string, options?: {
+		imageHash?: string;
+		imagePath?: string;
+		imageName?: string;
+		details?: any;
+		error?: Error | string;
+	}) {
+		this.log(LogLevel.INFO, operation, message, options).catch(() => {});
+	}
+
+	/**
+	 * 记录信息日志（异步版本）
+	 * 
+	 * 用于需要等待日志记录完成的情况。
+	 */
+	async infoAsync(operation: OperationType, message: string, options?: {
 		imageHash?: string;
 		imagePath?: string;
 		imageName?: string;
@@ -705,7 +882,7 @@ export class Logger {
 	}
 
 	/**
-	 * 记录警告日志
+	 * 记录警告日志（同步版本，不阻塞操作）
 	 * 
 	 * 用于记录可能的问题或异常情况，但不影响功能。
 	 * 
@@ -713,7 +890,22 @@ export class Logger {
 	 * @param message - 日志消息
 	 * @param options - 可选参数（图片信息、详情等）
 	 */
-	async warn(operation: OperationType, message: string, options?: {
+	warn(operation: OperationType, message: string, options?: {
+		imageHash?: string;
+		imagePath?: string;
+		imageName?: string;
+		details?: any;
+		error?: Error | string;
+	}) {
+		this.log(LogLevel.WARNING, operation, message, options).catch(() => {});
+	}
+
+	/**
+	 * 记录警告日志（异步版本）
+	 * 
+	 * 用于需要等待日志记录完成的情况。
+	 */
+	async warnAsync(operation: OperationType, message: string, options?: {
 		imageHash?: string;
 		imagePath?: string;
 		imageName?: string;
@@ -724,7 +916,7 @@ export class Logger {
 	}
 
 	/**
-	 * 记录错误日志
+	 * 记录错误日志（同步版本，不阻塞操作）
 	 * 
 	 * 用于记录错误信息，包括异常和失败的操作。
 	 * 
@@ -732,7 +924,22 @@ export class Logger {
 	 * @param message - 日志消息
 	 * @param options - 可选参数（图片信息、详情、错误对象等）
 	 */
-	async error(operation: OperationType, message: string, options?: {
+	error(operation: OperationType, message: string, options?: {
+		imageHash?: string;
+		imagePath?: string;
+		imageName?: string;
+		details?: any;
+		error?: Error | string;
+	}) {
+		this.log(LogLevel.ERROR, operation, message, options).catch(() => {});
+	}
+
+	/**
+	 * 记录错误日志（异步版本）
+	 * 
+	 * 用于需要等待日志记录完成的情况。
+	 */
+	async errorAsync(operation: OperationType, message: string, options?: {
 		imageHash?: string;
 		imagePath?: string;
 		imageName?: string;
@@ -824,6 +1031,8 @@ export class Logger {
 		}
 	}
 	
+
+
 	/**
 	 * 清除指定时间范围之前的日志
 	 */
@@ -839,7 +1048,24 @@ export class Logger {
 			throw error;
 		}
 	}
-	
+
+	/**
+	 * 执行日志清理（保留最近7天）
+	 */
+	private async performCleanup(): Promise<void> {
+		try {
+			const now = Date.now();
+			const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000); // 7天前
+			const removed = await this.clearLogsBefore(sevenDaysAgo);
+			if (removed > 0) {
+				console.log(`[ImageMgr] 自动清理了 ${removed} 条过期日志`);
+			}
+		} catch (error) {
+			// 清理失败不影响插件运行
+			console.error('[ImageMgr] 清理过期日志失败:', error);
+		}
+	}
+
 	/**
 	 * 获取日志数量统计
 	 */

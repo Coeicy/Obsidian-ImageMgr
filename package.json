@@ -1,7 +1,7 @@
 {
 	"name": "imagemgr",
-	"version": "0.2.0",
-	"description": "强大的 Obsidian 图片管理插件，支持智能扫描、批量重命名、MD5 去重、引用追踪、链接格式转换、空链接检测、回收站等功能。",
+	"version": "0.3.1",
+	"description": "强大的 Obsidian 图片管理插件，支持智能扫描、批量重命名、MD5 去重、引用追踪、云端图片管理、链接格式转换、空链接检测、回收站、操作日志、移动端适配等功能。新增网络图片缓存与增量扫描系统，性能提升15倍！",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
@@ -16,15 +16,15 @@
 		"batch-rename",
 		"md5-deduplication"
 	],
-	"author": "Coeicy",
+	"author": "Coeris",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Coeicy/Obsidian-ImageMgr.git"
+		"url": "https://github.com/Coeris/Obsidian-ImageMgr.git"
 	},
 	"bugs": {
-		"url": "https://github.com/Coeicy/Obsidian-ImageMgr/issues"
+		"url": "https://github.com/Coeris/Obsidian-ImageMgr/issues"
 	},
-	"homepage": "https://github.com/Coeicy/Obsidian-ImageMgr#readme",
+	"homepage": "https://github.com/Coeris/Obsidian-ImageMgr#readme",
 	"license": "MIT",
 	"devDependencies": {
 		"@types/node": "^16.11.6",

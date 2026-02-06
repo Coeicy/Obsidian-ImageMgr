@@ -151,11 +151,6 @@ export const LIMITS = {
 		IMAGE_GAP: 12,
 	},
 	
-	/** 滚动加载配置 - 用于无限滚动功能 */
-	SCROLL: {
-		/** 滚动触发比例 - 0.8，当滚动到 80% 时触发加载更多 */
-		TRIGGER_RATIO: 0.8,
-	},
 } as const;
 
 // ==================== 样式常量 ====================
@@ -208,22 +203,5 @@ export function calculateItemWidth(
 	gap: number = LIMITS.DEFAULTS.IMAGE_GAP
 ): string {
 	return `calc((100% - ${(imagesPerRow - 1) * gap}px) / ${imagesPerRow})`;
-}
-
-/**
- * 检查是否需要加载更多（滚动加载）
- * @param scrollTop 当前滚动位置
- * @param scrollHeight 总滚动高度
- * @param clientHeight 可见高度
- * @param ratio 触发比例（默认 0.8）
- * @returns 是否应该加载更多
- */
-export function shouldLoadMore(
-	scrollTop: number,
-	scrollHeight: number,
-	clientHeight: number,
-	ratio: number = LIMITS.SCROLL.TRIGGER_RATIO
-): boolean {
-	return scrollTop + clientHeight >= scrollHeight * ratio;
 }
 

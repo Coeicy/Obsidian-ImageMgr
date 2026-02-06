@@ -56,16 +56,24 @@ export class HistoryManager {
 	 * 保存历史记录到插件数据
 	 */
 	private async saveHistories() {
-		const data = this.plugin.data || {};
-		const historiesObj: { [key: string]: ImageChangeHistory[] } = {};
+		try {
+			const data = this.plugin.data || {};
+			const historiesObj: { [key: string]: ImageChangeHistory[] } = {};
 
-		// 将 Map 转换为对象
-		for (const [path, history] of this.histories.entries()) {
-			historiesObj[path] = history;
+			// 将 Map 转换为对象
+			for (const [path, history] of this.histories.entries()) {
+				historiesObj[path] = history;
+			}
+
+			data.histories = historiesObj;
+			await this.plugin.saveData(data);
+		} catch (error) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.PLUGIN_ERROR, '保存历史记录失败', {
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
 		}
-
-		data.histories = historiesObj;
-		await this.plugin.saveData(data);
 	}
 
 	/**

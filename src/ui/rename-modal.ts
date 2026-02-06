@@ -5,8 +5,9 @@
  * 支持使用占位符自定义命名格式。
  */
 
-import { App, Modal, Setting } from 'obsidian';
+import { App, Modal, Setting, Notice } from 'obsidian';
 import { makeModalResizable } from '../utils/resizable-modal';
+import { PathValidator } from '../utils/path-validator';
 
 /**
  * 批量重命名模态框类
@@ -70,7 +71,33 @@ export class RenameModal extends Modal {
 				.setButtonText('确定')
 				.setCta()
 				.onClick(() => {
-					this.onSubmit(this.renamePattern);
+					// 验证输入模式
+					const trimmedPattern = this.renamePattern.trim();
+					if (!trimmedPattern) {
+						new Notice('❌ 命名格式不能为空');
+						return;
+					}
+					
+					// 验证模式中不包含危险字符（在替换占位符后）
+					// 使用示例文件名进行验证
+					const testName = trimmedPattern
+						.replace('{index}', '001')
+						.replace('{name}', 'test');
+					
+					// 检查是否包含路径分隔符（不允许）
+					if (testName.includes('/') || testName.includes('\\')) {
+						new Notice('❌ 命名格式不能包含路径分隔符');
+						return;
+					}
+					
+					// 验证生成的文件名是否合法
+					const testFileName = testName + '.png';
+					if (!PathValidator.isValidFileName(testFileName)) {
+						new Notice('❌ 命名格式生成的文件名包含非法字符');
+						return;
+					}
+					
+					this.onSubmit(trimmedPattern);
 					this.close();
 				}));
 	}

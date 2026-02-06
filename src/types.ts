@@ -32,6 +32,16 @@ export interface BrokenLinkInfo {
 	linkText: string;
 	/** 从链接中提取的图片路径 */
 	extractedPath?: string;
+	/** 是否为网络链接错误 */
+	isRemoteError?: boolean;
+	/** 网络链接错误信息（如 ERR_NAME_NOT_RESOLVED） */
+	remoteError?: string;
+	/**
+	 * 记录该条目进入列表的时间戳（毫秒）
+	 * - 用于“新增链接位置（顶部/底部）”的展示顺序控制
+	 * - 旧数据可能不存在该字段
+	 */
+	detectedAt?: number;
 }
 
 /**
@@ -52,6 +62,10 @@ export interface LinkFormatStats {
 	relative: number;
 	/** 绝对路径格式数量 */
 	absolute: number;
+	/** 网络图片链接数量 */
+	remote: number;
+	/** 网络图片链接列表 */
+	remoteLinks?: string[];
 	/** 总链接数量 */
 	total: number;
 }
@@ -87,6 +101,8 @@ export interface ImageInfo {
 	referenceCount?: number;
 	/** 引用信息最后更新时间戳 */
 	referencesUpdatedAt?: number;
+	/** 是否为网络图片 */
+	isRemote?: boolean;
 }
 
 /**
@@ -214,7 +230,7 @@ export interface PluginData {
 			md5?: string;
 			/** 引用该图片的笔记列表（缓存） */
 			references?: ImageReferenceInfo[];
-			/** 引用数量 */
+			/** 引用数量（快速访问） */
 			referenceCount?: number;
 			/** 引用信息最后更新时间戳 */
 			referencesUpdatedAt?: number;
@@ -233,6 +249,19 @@ export interface PluginData {
 	
 	/** 空链接最后更新时间戳 */
 	brokenLinksUpdatedAt?: number;
+	
+	/** 网络链接验证结果缓存
+	 * 存储已验证的网络链接结果，避免重复验证
+	 * 结构：{ URL: { valid: boolean, error?: string, timestamp: number } }
+	 * 缓存有效期：24小时（86400000毫秒）
+	 */
+	remoteLinkValidationCache?: {
+		[url: string]: {
+			valid: boolean;
+			error?: string;
+			timestamp: number;
+		};
+	};
 	
 	/** 链接格式统计缓存
 	 * 存储各种链接格式的数量统计
@@ -269,6 +298,16 @@ export interface ImageManagerSettings {
 	includeSubfolders: boolean;
 	/** 是否启用 MD5 去重功能 */
 	enableDeduplication: boolean;
+	/** 是否启用重复图片检测（在首页显示按钮） */
+	enableDuplicateDetection?: boolean;
+	/** 是否启用空链接检测（在首页显示按钮） */
+	enableBrokenLinksDetection?: boolean;
+	/**
+	 * 空链接页面：新增链接插入位置
+	 * - bottom: 新检测到的条目追加到列表底部（默认）
+	 * - top: 新检测到的条目插入到列表顶部
+	 */
+	brokenLinksNewItemPosition?: 'top' | 'bottom';
 	
 	// ==================== 显示设置 ====================
 	/** 每行显示的图片数量（1-10） */
@@ -309,8 +348,6 @@ export interface ImageManagerSettings {
 	// ==================== 引用与预览设置 ====================
 	/** 前往笔记时是否保持详情页打开 */
 	keepModalOpen: boolean;
-	/** 是否显示引用时间 */
-	showReferenceTime: boolean;
 	/** 鼠标滚轮默认模式：scroll-切换图片、zoom-缩放图片 */
 	defaultWheelMode: 'scroll' | 'zoom';
 	
@@ -325,8 +362,6 @@ export interface ImageManagerSettings {
 	ignoredHashMetadata?: Record<string, { fileName: string; filePath: string; addedTime: number }>;
 	
 	// ==================== 性能设置 ====================
-	/** 是否启用懒加载 */
-	enableLazyLoading: boolean;
 	/** 懒加载延迟时间（毫秒） */
 	lazyLoadDelay: number;
 	/** 最大缓存数量 */
@@ -345,6 +380,26 @@ export interface ImageManagerSettings {
 	showImageIndex: boolean;
 	/** 是否统一卡片高度（同一行的卡片高度一致） */
 	uniformCardHeight: boolean;
+	
+	// ==================== 移动端适配设置 ====================
+	/** 移动端每行图片数量（1-5，默认根据屏幕宽度自动调整） */
+	mobileImagesPerRow?: number;
+	/** 是否启用紧凑工具栏（移动端优化） */
+	enableCompactToolbar?: boolean;
+	/** 移动端是否隐藏非必要信息（尺寸、锁定图标等） */
+	hideNonEssentialInfo?: boolean;
+	/** 平板端每行图片数量（1-5，默认3） */
+	tabletImagesPerRow?: number;
+	/** 手机横屏每行图片数量（1-5，默认2） */
+	phoneLandscapeImagesPerRow?: number;
+	/** 手机竖屏每行图片数量（1-2，默认1） */
+	phonePortraitImagesPerRow?: number;
+	
+	// ==================== 移动端隐私设置 ====================
+	/** 是否创建 .nomedia 文件（防止手机相册扫描图片） */
+	createNomediaFile?: boolean;
+	/** .nomedia 文件的目标路径（相对路径，空表示根目录） */
+	nomediaPath?: string;
 	
 	// ==================== 删除设置 ====================
 	/** 删除前是否需要确认 */
@@ -389,5 +444,59 @@ export interface ImageManagerSettings {
 	// ==================== 快捷键设置 ====================
 	/** 自定义快捷键配置（快捷键ID -> 快捷键字符串） */
 	keyboardShortcuts?: Record<string, string>;
+	
+	// ==================== 云端图片设置 ====================
+	/** 是否扫描网络图片 - 扫描 Markdown 文件中的网络图片链接 */
+	scanRemoteImages?: boolean;
+	/** 网络图片代理服务 - 当直接加载失败时使用的代理服务 */
+	remoteImageProxy?: 'none' | 'obsidian' | 'weserv' | 'both';
+	/** 是否在列表中显示云端图片标识 */
+	showRemoteImageBadge?: boolean;
+	/** 云端图片加载超时时间（毫秒） */
+	remoteImageTimeout?: number;
+	/** 是否自动尝试代理加载失败的云端图片 */
+	autoRetryRemoteImage?: boolean;
+	// ==================== 图床上传设置 ====================
+	/** 图床配置 */
+	uploadConfig?: {
+		type: 'qiniu' | 'aliyun' | 'custom';
+		qiniu?: {
+			accessKey: string;
+			secretKey: string;
+			bucket: string;
+			domain: string;
+			region: string;
+		};
+		aliyun?: {
+			accessKeyId: string;
+			accessKeySecret: string;
+			bucket: string;
+			region: string;
+			customDomain?: string;
+		};
+	};
+}
+
+/**
+ * Window 扩展接口
+ *
+ * 定义全局 window 对象上的插件实例
+ */
+export interface WindowWithImageMgrPlugin {
+	/** ImageMgr 插件实例 */
+	ImageMgrPlugin?: {
+		/** 网络图片 API */
+		networkImageAPI?: {
+			searchImagesByStatus(status: 'active' | 'deleted' | 'broken' | 'pending'): Promise<{
+				images: Array<{ url?: string; status?: string; sourceFilePath?: string; line?: number; originalText?: string; validationResult?: { error?: string } }>;
+				total: number;
+			}>;
+			getBlacklist(): Promise<Array<{ id?: string; url?: string; errorMessage?: string; sourceFilePath?: string; line?: number; column?: number }>>;
+		};
+		/** 网络图片扫描器 */
+		networkImageScanner?: {
+			refreshBrokenUrlsCache(): void;
+		};
+	};
 }
 

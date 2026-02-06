@@ -4,15 +4,72 @@
  * 插件的核心视图，提供图片浏览和管理功能。
  * 
  * 主要功能：
- * - 图片网格展示（支持虚拟滚动）
- * - 搜索、排序、筛选
- * - 批量操作（选择、删除、重命名）
- * - 分组显示
- * - 键盘快捷键支持
- * - 拖拽框选
+ * - 图片网格展示（支持虚拟滚动，性能优化）
+ * - 搜索、排序、筛选（支持多种条件和组合）
+ * - 批量操作（选择、删除、重命名、移动）
+ * - 分组显示（按文件夹、日期、类型等）
+ * - 键盘快捷键支持（完整的键盘导航和操作）
+ * - 拖拽框选（支持矩形选择和反选）
+ * - 引用检测（显示图片在笔记中的引用状态）
+ * 
+ * 虚拟滚动机制：
+ * - 仅渲染可视区域内的图片，大幅提升性能
+ * - 使用 IntersectionObserver 实现懒加载
+ * - 动态计算渲染范围，滚动时平滑过渡
+ * - 支持大量图片（1000+）的流畅滚动
+ * 
+ * 性能优化：
+ * - DOM 缓存（复用已渲染的元素）
+ * - 虚拟滚动（减少DOM数量）
+ * - 图片懒加载（仅在需要时加载）
+ * - 筛选和排序缓存（避免重复计算）
+ * - 防抖和节流（优化事件处理）
+ * 
+ * 状态管理：
+ * - images: 所有扫描到的图片列表
+ * - filteredImages: 经过搜索、排序、筛选后的图片列表
+ * - selectedImages: 用户选中的图片列表
+ * - referenceCache: 引用状态缓存
+ * - operationHistory: 操作历史（用于智能清除）
+ * 
+ * 交互设计：
+ * - 单击：选中图片
+ * - 双击：打开详情模态框
+ * - 滚轮：切换视图或缩放
+ * - 拖拽：框选多个图片
+ * - 键盘：完整导航和操作支持
+ * 
+ * 与其他组件的交互：
+ * - ImageDetailModal: 打开图片详情
+ * - RenameModal: 批量重命名
+ * - SortModal: 排序选项设置
+ * - FilterModal: 筛选条件设置
+ * - SearchModal: 搜索功能
+ * - GroupModal: 分组功能
+ * - ReferenceManager: 引用检测和更新
+ * 
+ * 使用示例：
+ * ```typescript
+ * // 在插件中注册视图
+ * app.workspace.registerView(
+ *     IMAGE_MANAGER_VIEW_TYPE,
+ *     (leaf) => new ImageManagerView(leaf, plugin)
+ * );
+ * 
+ * // 打开视图
+ * app.workspace.getLeaf().setViewState({
+ *     type: IMAGE_MANAGER_VIEW_TYPE
+ * });
+ * 
+ * // 刷新图片列表
+ * await view.refreshImages();
+ * 
+ * // 获取选中的图片
+ * const selected = view.getSelectedImages();
+ * ```
  */
 
-import { ItemView, Notice, TFile, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Notice, TFile, WorkspaceLeaf, requestUrl, arrayBufferToBase64 } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { ImageInfo } from '../types';
 import { ImageProcessor } from '../utils/image-processor';
@@ -23,18 +80,19 @@ import { SearchModal } from './search-modal';
 import { StatsModal } from './stats-modal';
 import { ImageDetailModal } from './image-detail-modal';
 import { BrokenLinksModal } from './broken-links-modal';
-// import { calculateFileHash } from '../utils/image-hash'; // 已迁移到 ImageScanner
 import { ConfirmModal } from './confirm-modal';
 import { GroupModal } from './group-modal';
 import { DuplicateDetectionModal } from './duplicate-detection-modal';
 import { ReferenceManager } from '../utils/reference-manager';
 import { OperationType } from '../utils/logger';
-import { UI_SIZE, TIMING, LIMITS, STYLES, calculateItemWidth, shouldLoadMore } from '../constants';
+import { UI_SIZE, TIMING, LIMITS, STYLES, calculateItemWidth } from '../constants';
 import { isFileIgnored } from '../utils/file-filter';
 import { PathValidator } from '../utils/path-validator';
 import { matchesShortcut, isInputElement, SHORTCUT_DEFINITIONS } from '../utils/keyboard-shortcut-manager';
 import { DragSelectManager } from '../utils/drag-select-manager';
 import { LinkFormatModal } from './link-format-modal';
+import { ObjectStore } from '../network-image/types';
+import { DOMCache } from '../utils/dom-cache';
 
 /** 图片管理视图的类型标识符 */
 export const IMAGE_MANAGER_VIEW_TYPE = 'image-manager-view';
@@ -74,6 +132,10 @@ export class ImageManagerView extends ItemView {
 	private referenceCache: Map<string, boolean> = new Map();
 	/** 是否正在扫描图片的标志 */
 	private isScanning: boolean = false;
+	/** 是否正在检测空链接的标志 */
+	private isDetectingBrokenLinks: boolean = false;
+	/** 是否正在检测重复图片的标志 */
+	private isDetectingDuplicates: boolean = false;
 	/** 键盘事件处理器引用（用于快捷键） */
 	private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
 	/** 滚轮事件处理器引用（用于缩放或切换） */
@@ -88,6 +150,14 @@ export class ImageManagerView extends ItemView {
 	private operationHistory: Array<'search' | 'sort' | 'filter' | 'group'> = [];
 	/** 清除按钮元素引用 */
 	private clearBtnElement: HTMLElement | null = null;
+	/** 清除按钮单击处理标志（用于区分单击和双击） */
+	private clearButtonSingleClickHandled: boolean = false;
+	/** 图片懒加载观察器 */
+	private imageObserver: IntersectionObserver | null = null;
+	/** 预扫描的重复图片哈希映射（用于快速显示重复图片检测） */
+	private duplicateHashMap: Map<string, ImageInfo[]> = new Map();
+	/** 工具栏按钮元素缓存（避免重复DOM查询） */
+	private toolbarButtons: Map<string, HTMLElement | null> = new Map();
 
 	constructor(leaf: WorkspaceLeaf, plugin: ImageManagementPlugin) {
 		super(leaf);
@@ -114,16 +184,226 @@ export class ImageManagerView extends ItemView {
 		return 'image';
 	}
 
+	private initImageObserver() {
+		if (this.imageObserver) return;
+
+		// 使用列表容器作为滚动根元素
+		// 注意：在 renderImageList 中，滚动容器被认为是 this.contentEl.parentElement
+		// 但 this.contentEl 是 listContainer ('image-manager-list')
+		// 实际上滚动条通常在 listContainer 上，或者它的父级
+		// 我们这里使用 this.contentEl.parentElement 作为 root，或者 null (视口)
+		// 为了更精确的控制，我们尝试使用 contentEl 本身如果它是滚动容器，或者是 parent
+		// 在 Obsidian 中，通常 View 的 containerEl 或者 contentEl 是滚动的
+		
+		const options = {
+			root: this.contentEl.parentElement || this.contentEl, 
+			rootMargin: '800px 0px', // 预加载上下 800px
+			threshold: 0
+		};
+
+		this.imageObserver = new IntersectionObserver((entries) => {
+			entries.forEach(entry => {
+				const target = entry.target as HTMLElement;
+				if (entry.isIntersecting) {
+					// 异步加载图片
+					this.loadImage(target).catch(() => {
+						// 加载失败静默处理
+					});
+				} else {
+					this.unloadImage(target);
+				}
+			});
+		}, options);
+	}
+
+	private async loadImage(previewEl: HTMLElement) {
+		const src = previewEl.dataset.src;
+		if (!src || previewEl.classList.contains('loaded')) return;
+		
+		// 检查是否在忽略的域名列表中（代码块中的示例域名）
+		const ignoredDomains = ['static.runoob.com', 'example.com', 'placeholder.com', 'localhost', '127.0.0.1'];
+		const isIgnored = ignoredDomains.some(domain => src.includes(domain));
+		if (isIgnored) {
+			// 如果是忽略的域名，跳过加载
+			return;
+		}
+		
+		// 检查是否在黑名单中（网络图片）
+		if (src.startsWith('http')) {
+			const isBlacklisted = await this.isUrlBlacklisted(src);
+			if (isBlacklisted) {
+				// 如果在黑名单中，直接显示加载失败，不尝试加载
+				previewEl.style.backgroundImage = 'none';
+				previewEl.style.display = 'flex';
+				previewEl.style.alignItems = 'center';
+				previewEl.style.justifyContent = 'center';
+				previewEl.style.color = 'var(--text-muted)';
+				previewEl.style.fontSize = '0.9em';
+				previewEl.textContent = '图片加载失败';
+				previewEl.dataset.retried = 'true';
+				return;
+			}
+		}
+
+		const img = new Image();
+		img.referrerPolicy = 'no-referrer'; // 添加防盗链策略
+
+		img.onload = () => {
+			if (this.plugin.settings.adaptiveImageSize) {
+				previewEl.style.backgroundImage = `url('${img.src}')`; // 使用加载成功的 src
+				previewEl.style.backgroundSize = 'contain';
+				previewEl.style.backgroundPosition = 'center';
+				previewEl.style.backgroundRepeat = 'no-repeat';
+				// 根据图片实际比例设置高度，防止塌陷
+				if (img.naturalWidth && img.naturalHeight) {
+					const aspectRatio = img.naturalWidth / img.naturalHeight;
+					previewEl.style.setProperty('aspect-ratio', `${aspectRatio}`);
+					// 更新界面上的尺寸显示
+					const itemEl = previewEl.closest('.image-gallery-item');
+					if (itemEl) {
+						const dimEl = itemEl.querySelector('.image-dimensions');
+						if (dimEl) {
+							dimEl.textContent = `${img.naturalWidth}x${img.naturalHeight}`;
+						}
+					}
+				}
+			} else {
+				previewEl.style.backgroundImage = `url('${img.src}')`; // 使用加载成功的 src
+				previewEl.style.backgroundSize = 'cover';
+				previewEl.style.backgroundPosition = 'center';
+			}
+			previewEl.classList.add('loaded');
+			// 清除错误提示（如果有）
+			if (previewEl.textContent === '图片加载失败') {
+				previewEl.textContent = '';
+			}
+		};
+		
+		img.onerror = async () => {
+			// 检查是否是网络图片且尚未完成所有重试
+			if (src.startsWith('http')) {
+				const retryCount = parseInt(previewEl.dataset.retryCount || '0');
+				const isRetried = previewEl.dataset.retried === 'true';
+				
+				// Level 1: Obsidian Proxy
+				if (retryCount === 0 && !isRetried) {
+					previewEl.dataset.retryCount = '1';
+					if (this.plugin?.logger) {
+						await this.plugin.logger.debug(OperationType.VIEW, `Level 1 - 代理加载: ${src}`, {
+							imagePath: src
+						});
+					}
+					try {
+						const response = await requestUrl({ 
+							url: src,
+							headers: {
+								'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+								'Referer': ''
+							}
+						});
+						
+						if (response.status < 400) {
+							const base64 = arrayBufferToBase64(response.arrayBuffer);
+							const contentType = response.headers['content-type'] || 'image/jpeg';
+							img.src = `data:${contentType};base64,${base64}`;
+							return;
+						}
+					} catch (e: any) {
+						const errorMsg = e?.message || String(e);
+						const isDnsError = errorMsg.includes('ERR_NAME_NOT_RESOLVED') || 
+						                   errorMsg.includes('ENOTFOUND') ||
+						                   errorMsg.includes('getaddrinfo');
+						const isConnectionError = errorMsg.includes('ERR_CONNECTION_CLOSED') ||
+						                      errorMsg.includes('ECONNREFUSED') ||
+						                      errorMsg.includes('ECONNRESET') ||
+						                      errorMsg.includes('net::ERR_');
+						
+						if (this.plugin?.logger) {
+							await this.plugin.logger.warn(OperationType.VIEW, `Level 1 代理失败: ${errorMsg}`, {
+								imagePath: src,
+								error: e,
+								details: { isDnsError, isConnectionError }
+							});
+							
+							if (isDnsError || isConnectionError) {
+								const errorType = isDnsError ? 'DNS 解析失败' : '网络连接失败';
+								await this.plugin.logger.warn(OperationType.VIEW, `${errorType}，域名可能无法访问: ${src}`, {
+									imagePath: src
+								});
+								
+								// 自动添加到黑名单
+								await this.addToBlacklist(src, errorMsg);
+							}
+						}
+						
+						// 直接进入 Level 2，不触发 onerror
+						previewEl.dataset.retryCount = '2';
+						previewEl.dataset.retried = 'true';
+						if (this.plugin?.logger) {
+							await this.plugin.logger.debug(OperationType.VIEW, `Level 2 - 公共代理加载: ${src}`, {
+								imagePath: src
+							});
+						}
+						const cleanUrl = src.replace(/^https?:\/\//, '');
+						// 移除 default=error 参数，避免产生错误 URL
+						img.src = `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}`;
+						return;
+					}
+				}
+				
+				// Level 2: Weserv Proxy (仅在 Level 1 失败且尚未尝试 Level 2 时)
+				if (retryCount === 1 && !isRetried) {
+					previewEl.dataset.retryCount = '2';
+					previewEl.dataset.retried = 'true'; // 标记已完成所有重试
+					if (this.plugin?.logger) {
+						await this.plugin.logger.debug(OperationType.VIEW, `Level 2 - 公共代理加载: ${src}`, {
+							imagePath: src
+						});
+					}
+					const cleanUrl = src.replace(/^https?:\/\//, '');
+					// 移除 default=error 参数，避免产生错误 URL
+					img.src = `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}`;
+					return;
+				}
+			}
+
+			// 所有重试都失败，显示错误提示
+			if (this.plugin?.logger) {
+				await this.plugin.logger.warn(OperationType.VIEW, `图片加载最终失败: ${src}`, {
+					imagePath: src
+				});
+			}
+			
+			// 如果最终失败，添加到黑名单
+			await this.addToBlacklist(src, 'Network error');
+			previewEl.style.backgroundImage = 'none';
+			previewEl.style.display = 'flex';
+			previewEl.style.alignItems = 'center';
+			previewEl.style.justifyContent = 'center';
+			previewEl.style.color = 'var(--text-muted)';
+			previewEl.style.fontSize = '0.9em';
+			previewEl.textContent = '图片加载失败';
+			previewEl.dataset.retried = 'true'; // 确保标记为已重试，避免无限循环
+		};
+		
+		img.src = src;
+	}
+
+	private unloadImage(previewEl: HTMLElement) {
+		// 释放资源，防止内存占用过多
+		// 只有当图片已加载时才释放
+		if (previewEl.classList.contains('loaded')) {
+			previewEl.style.backgroundImage = '';
+			previewEl.classList.remove('loaded');
+		}
+	}
+
 	async onOpen() {
 		const { containerEl } = this;
 		containerEl.empty();
 		
 		// 重置临时显示数量（恢复为设置中的默认值）
 		this.tempImagesPerRow = null;
-
-		// 创建标题栏
-		const headerEl = containerEl.createDiv('image-manager-header');
-		headerEl.createEl('h2', { text: '图片管理' });
 
 		// 创建工具栏
 		const toolbarEl = containerEl.createDiv('image-manager-toolbar');
@@ -158,17 +438,21 @@ export class ImageManagerView extends ItemView {
 		this.updateButtonIndicator(pathRenameBtn, 'path-rename');
 		pathRenameBtn.addEventListener('click', () => this.batchPathRename());
 
-		// 重复检测按钮
-		const duplicateBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
-		duplicateBtn.setAttribute('id', 'duplicate-btn');
-		this.updateButtonIndicator(duplicateBtn, 'duplicate');
-		duplicateBtn.addEventListener('click', () => this.showDuplicates());
+		// 重复检测按钮（根据设置显示/隐藏）
+		if (this.plugin.settings.enableDuplicateDetection !== false) {
+			const duplicateBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
+			duplicateBtn.setAttribute('id', 'duplicate-btn');
+			this.updateButtonIndicator(duplicateBtn, 'duplicate');
+			duplicateBtn.addEventListener('click', () => this.showDuplicates());
+		}
 
-		// 空链接按钮
-		const brokenLinksBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
-		brokenLinksBtn.setAttribute('id', 'broken-links-btn');
-		this.updateButtonIndicator(brokenLinksBtn, 'broken-links');
-		brokenLinksBtn.addEventListener('click', () => this.showBrokenLinks());
+		// 空链接按钮（根据设置显示/隐藏）
+		if (this.plugin.settings.enableBrokenLinksDetection !== false) {
+			const brokenLinksBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
+			brokenLinksBtn.setAttribute('id', 'broken-links-btn');
+			this.updateButtonIndicator(brokenLinksBtn, 'broken-links');
+			brokenLinksBtn.addEventListener('click', () => this.showBrokenLinks());
+		}
 
 		// 链接转换按钮
 		const linkFormatBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
@@ -176,11 +460,13 @@ export class ImageManagerView extends ItemView {
 		this.updateButtonIndicator(linkFormatBtn, 'link-format');
 		linkFormatBtn.addEventListener('click', () => this.showLinkFormatModal());
 
-		// 库统计按钮
-		const statsBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
-		statsBtn.setAttribute('id', 'stats-btn');
-		this.updateButtonIndicator(statsBtn, 'stats');
-		statsBtn.addEventListener('click', () => this.showImageInfo());
+		// 库统计按钮（根据设置显示/隐藏）
+		if (this.plugin.settings.showStatistics !== false) {
+			const statsBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
+			statsBtn.setAttribute('id', 'stats-btn');
+			this.updateButtonIndicator(statsBtn, 'stats');
+			statsBtn.addEventListener('click', () => this.showImageInfo());
+		}
 
 		// 回收站按钮（仅在启用插件回收站时显示）
 		if (this.plugin.settings.enablePluginTrash) {
@@ -203,14 +489,29 @@ export class ImageManagerView extends ItemView {
 		refreshBtn.title = '刷新显示（智能检测变化，只刷新有变化的内容）';
 		const view = this;
 		refreshBtn.addEventListener('click', async () => {
-			await view.smartRefresh();
+			await view.smartRefresh(true);
 		});
 
 		// 合并的清除按钮（初始隐藏）
 		const clearBtn = toolbarEl.createEl('button', { cls: 'toolbar-btn' });
 		clearBtn.setAttribute('id', 'clear-btn');
 		clearBtn.style.display = 'none';
-		clearBtn.addEventListener('click', () => this.handleClearButtonClick());
+		// 单击：按顺序清除一个操作
+		clearBtn.addEventListener('click', () => {
+			this.clearButtonSingleClickHandled = false;
+			// 延迟执行，如果双击则取消
+			setTimeout(() => {
+				if (!this.clearButtonSingleClickHandled) {
+					this.handleClearButtonSingleClick();
+				}
+			}, 250);
+		});
+		// 双击：清除所有操作
+		clearBtn.addEventListener('dblclick', (e) => {
+			e.preventDefault();
+			this.clearButtonSingleClickHandled = true;
+			this.handleClearAll();
+		});
 		this.clearBtnElement = clearBtn;
 
 		// 创建图片列表容器
@@ -219,6 +520,9 @@ export class ImageManagerView extends ItemView {
 
 		// 初始化时扫描图片
 		await this.scanImages();
+		
+		// 注册拖拽上传事件
+		this.setupDragDropUpload(containerEl);
 		
 		// 注册文件变化监听器，自动刷新
 		this.setupFileWatcher();
@@ -245,6 +549,144 @@ export class ImageManagerView extends ItemView {
 		
 		// 更新清除按钮状态（检查是否有分组、筛选、排序等）
 		this.updateClearButtonState();
+
+		// 初始化图片懒加载观察器
+		this.initImageObserver();
+	}
+
+	/**
+	 * 设置拖拽上传功能
+	 * 允许用户直接将图片文件拖入插件视图进行上传
+	 */
+	setupDragDropUpload(containerEl: HTMLElement) {
+		// 创建拖拽覆盖层
+		const overlay = containerEl.createDiv('drag-upload-overlay');
+		overlay.style.cssText = `
+			position: absolute;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background-color: rgba(var(--interactive-accent-rgb), 0.2);
+			border: 4px dashed var(--interactive-accent);
+			z-index: 1000;
+			display: none;
+			justify-content: center;
+			align-items: center;
+			pointer-events: none;
+		`;
+		
+		const message = overlay.createDiv('drag-upload-message');
+		message.style.cssText = `
+			font-size: 24px;
+			font-weight: bold;
+			color: var(--text-normal);
+			background-color: var(--background-primary);
+			padding: 20px 40px;
+			border-radius: 8px;
+			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+		`;
+		message.setText('释放以上传图片');
+
+		// 监听拖拽事件
+		containerEl.addEventListener('dragenter', (e) => {
+			if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+				e.preventDefault();
+				overlay.style.display = 'flex';
+			}
+		});
+
+		containerEl.addEventListener('dragover', (e) => {
+			if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+				e.preventDefault();
+			}
+		});
+
+		containerEl.addEventListener('dragleave', (e) => {
+			if (e.target === overlay) {
+				e.preventDefault();
+				overlay.style.display = 'none';
+			}
+		});
+
+		containerEl.addEventListener('drop', async (e) => {
+			if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+				e.preventDefault();
+				overlay.style.display = 'none';
+				
+				const files = Array.from(e.dataTransfer.files);
+				const imageFiles = files.filter(file => {
+					const ext = file.name.split('.').pop()?.toLowerCase();
+					return ext && ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext);
+				});
+
+				if (imageFiles.length > 0) {
+					await this.handleImageUpload(imageFiles);
+				} else {
+					new Notice('未检测到有效的图片文件');
+				}
+			}
+		});
+	}
+
+	/**
+	 * 处理图片上传
+	 */
+	async handleImageUpload(files: File[]) {
+		const uploadFolder = this.plugin.settings.defaultImageFolder || '';
+		
+		// 确保目标文件夹存在
+		if (uploadFolder && !(await this.app.vault.adapter.exists(uploadFolder))) {
+			try {
+				await this.app.vault.createFolder(uploadFolder);
+			} catch (error) {
+				new Notice(`无法创建文件夹: ${uploadFolder}`);
+				return;
+			}
+		}
+
+		let successCount = 0;
+		let failCount = 0;
+
+		for (const file of files) {
+			try {
+				const buffer = await file.arrayBuffer();
+				const fileName = file.name;
+				const targetPath = uploadFolder ? `${uploadFolder}/${fileName}` : fileName;
+
+				// 检查文件是否存在，如果存在则自动重命名
+				let finalPath = targetPath;
+				let counter = 1;
+				while (await this.app.vault.adapter.exists(finalPath)) {
+					const nameParts = fileName.split('.');
+					const ext = nameParts.pop();
+					const name = nameParts.join('.');
+					finalPath = uploadFolder ? `${uploadFolder}/${name} (${counter}).${ext}` : `${name} (${counter}).${ext}`;
+					counter++;
+				}
+
+				await this.app.vault.createBinary(finalPath, buffer);
+				successCount++;
+			} catch (error) {
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.CREATE, `上传失败: ${file.name}`, {
+						imageName: file.name,
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
+				failCount++;
+			}
+		}
+
+		if (successCount > 0) {
+			new Notice(`成功上传 ${successCount} 张图片`);
+			// 刷新图片列表
+			await this.scanImages();
+		}
+		
+		if (failCount > 0) {
+			new Notice(`${failCount} 张图片上传失败`);
+		}
 	}
 	
 	// 设置文件监听器
@@ -317,6 +759,7 @@ export class ImageManagerView extends ItemView {
 			hasActiveFilter = this.filterOptions.filterType !== defaultFilterType ||
 							  this.filterOptions.lockFilter !== undefined ||
 							  this.filterOptions.referenceFilter !== undefined ||
+							  this.filterOptions.locationFilter !== undefined ||
 							  hasSizeFilter ||
 							  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
 							  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
@@ -371,7 +814,7 @@ export class ImageManagerView extends ItemView {
 		}, delay);
 	}
 
-	async scanImages() {
+	async scanImages(force: boolean = false) {
 		// 如果正在扫描，直接返回
 		if (this.isScanning) {
 			return;
@@ -456,10 +899,15 @@ export class ImageManagerView extends ItemView {
 			// 执行扫描
 			const result = await scanner.scanImages(
 				updateProgress,
-				this.plugin.settings.enableDeduplication
+				this.plugin.settings.enableDeduplication,
+				force
 			);
 
 			this.images = result.images;
+			// 保存预扫描的重复图片哈希映射（用于快速显示重复图片检测）
+			if (result.hashMap) {
+				this.duplicateHashMap = result.hashMap;
+			}
 
 			// 恢复分组信息并应用分组逻辑
 			if (this.plugin.data.imageGroups) {
@@ -538,10 +986,17 @@ export class ImageManagerView extends ItemView {
 	 * - 减少 UI 重绘开销
 	 * - 提供更精确的用户反馈
 	 */
-	async smartRefresh() {
+	async smartRefresh(force: boolean = false) {
 		// 如果正在扫描，直接返回
 		if (this.isScanning) {
 			new Notice('正在扫描中，请稍候...');
+			return;
+		}
+
+		// 如果强制刷新，跳过检测直接扫描
+		if (force) {
+			await this.scanImages(true);
+			new Notice('已刷新图片列表和引用信息');
 			return;
 		}
 		
@@ -740,6 +1195,24 @@ export class ImageManagerView extends ItemView {
 				}
 			}
 			
+			// 按位置类型筛选（云端/本地）
+			// 如果关闭了云端图片扫描，跳过云端图片筛选
+			const scanRemoteImagesDisabled = this.plugin.settings.scanRemoteImages === false;
+			if (this.filterOptions.locationFilter && this.filterOptions.locationFilter !== 'all') {
+				const isRemote = image.isRemote === true;
+				// 如果关闭了云端图片扫描，且筛选的是云端图片，但当前图片不是云端图片，返回false
+				// 同时允许已缓存的云端图片正常显示
+				if (scanRemoteImagesDisabled && this.filterOptions.locationFilter === 'remote' && !isRemote) {
+					return false;
+				}
+				if (this.filterOptions.locationFilter === 'remote' && !isRemote) {
+					return false;
+				}
+				if (this.filterOptions.locationFilter === 'local' && isRemote) {
+					return false;
+				}
+			}
+			
 			// 按大小筛选（范围）
 			if (this.filterOptions.sizeFilter) {
 				const sizeMB = image.size / 1024 / 1024;
@@ -851,7 +1324,10 @@ export class ImageManagerView extends ItemView {
 				this.searchQuery = query;
 				this.addToOperationHistory('search');
 				this.applySortAndFilter();
-				this.updateButtonIndicator(document.getElementById('search-btn') as HTMLElement, 'search');
+				const searchBtn = this.getToolbarButton('search-btn');
+				if (searchBtn) {
+					this.updateButtonIndicator(searchBtn, 'search');
+				}
 				
 				// 更新清除按钮的显示状态和文本
 				this.updateClearButtonState();
@@ -872,7 +1348,10 @@ export class ImageManagerView extends ItemView {
 				this.sortOptions = options;
 				this.addToOperationHistory('sort');
 				this.applySortAndFilter();
-				this.updateButtonIndicator(document.getElementById('sort-btn') as HTMLElement, 'sort');
+				const sortBtn = this.getToolbarButton('sort-btn');
+				if (sortBtn) {
+					this.updateButtonIndicator(sortBtn, 'sort');
+				}
 				
 				// 更新清除按钮的显示状态和文本
 				this.updateClearButtonState();
@@ -892,7 +1371,10 @@ export class ImageManagerView extends ItemView {
 			this.filterOptions = options;
 			this.addToOperationHistory('filter');
 			this.applySortAndFilter();
-			this.updateButtonIndicator(document.getElementById('filter-btn') as HTMLElement, 'filter');
+			const filterBtn = this.getToolbarButton('filter-btn');
+			if (filterBtn) {
+				this.updateButtonIndicator(filterBtn, 'filter');
+			}
 			
 			// 更新清除按钮的显示状态和文本
 			this.updateClearButtonState();
@@ -1138,6 +1620,36 @@ export class ImageManagerView extends ItemView {
 		}
 	}
 
+	/**
+	 * 获取工具栏按钮元素（带缓存，避免重复DOM查询）
+	 * @param buttonId - 按钮ID
+	 * @returns 按钮元素，如果不存在则返回null
+	 */
+	private getToolbarButton(buttonId: string): HTMLElement | null {
+		// 检查缓存
+		if (this.toolbarButtons.has(buttonId)) {
+			const cached = this.toolbarButtons.get(buttonId);
+			// 验证元素是否仍然在DOM中
+			if (cached && document.body.contains(cached)) {
+				return cached;
+			}
+			// 如果元素已不在DOM中，清除缓存
+			this.toolbarButtons.delete(buttonId);
+		}
+		
+		// 查询DOM并缓存
+		const button = document.getElementById(buttonId);
+		this.toolbarButtons.set(buttonId, button);
+		return button;
+	}
+
+	/**
+	 * 清除工具栏按钮缓存（在视图关闭或重新渲染时调用）
+	 */
+	private clearToolbarButtonCache(): void {
+		this.toolbarButtons.clear();
+	}
+
     private isIgnoredFile(filename: string, md5?: string, filePath?: string): boolean {
         // 使用 LockListManager 进行检查（三要素匹配：文件名、哈希值、路径）
         if (this.plugin.lockListManager) {
@@ -1281,15 +1793,17 @@ export class ImageManagerView extends ItemView {
 			previewEl.style.transition = 'transform 0.2s ease, box-shadow 0.2s ease';
 			previewEl.style.marginBottom = '0';
 			
-			// 添加悬停效果（Notion 风格）
-			itemEl.addEventListener('mouseenter', () => {
-				previewEl.style.transform = 'translateY(-2px)';
-				previewEl.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-			});
-			itemEl.addEventListener('mouseleave', () => {
-				previewEl.style.transform = 'translateY(0)';
-				previewEl.style.boxShadow = 'none';
-			});
+			// 添加悬停效果（Notion 风格）- 根据设置决定是否启用
+			if (this.plugin.settings.enableHoverEffect) {
+				itemEl.addEventListener('mouseenter', () => {
+					previewEl.style.transform = 'translateY(-2px)';
+					previewEl.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+				});
+				itemEl.addEventListener('mouseleave', () => {
+					previewEl.style.transform = 'translateY(0)';
+					previewEl.style.boxShadow = 'none';
+				});
+			}
 
 			// 选择复选框（右上角）
 			const selectCheckbox = previewEl.createEl('input');
@@ -1348,53 +1862,45 @@ export class ImageManagerView extends ItemView {
 				previewEl.style.minHeight = '0'; // 移除最小高度限制，完全自适应
 				previewEl.style.maxHeight = UI_SIZE.IMAGE_PREVIEW.ADAPTIVE_MAX_HEIGHT;
 			} else {
-				// 固定高度模式
-				previewEl.style.height = UI_SIZE.IMAGE_PREVIEW.FIXED_HEIGHT;
+				// 固定高度模式：使用设置中的固定高度，如果没有则使用常量
+				const fixedHeight = this.plugin.settings.fixedImageHeight 
+					? `${this.plugin.settings.fixedImageHeight}px` 
+					: UI_SIZE.IMAGE_PREVIEW.FIXED_HEIGHT;
+				previewEl.style.height = fixedHeight;
 			}
 			
-			// 延迟加载图片
-			const abstractFile = this.app.vault.getAbstractFileByPath(image.path);
-			const imgFile = abstractFile instanceof TFile ? abstractFile : null;
-			if (imgFile) {
-				const imageUrl = this.app.vault.getResourcePath(imgFile);
-				if (imageUrl) {
-					const img = new Image();
-					img.onload = () => {
-						if (this.plugin.settings.adaptiveImageSize) {
-							// 自适应模式：使用 contain 保持完整图片
-							previewEl.style.backgroundImage = `url(${imageUrl})`;
-							previewEl.style.backgroundSize = 'contain';
-							previewEl.style.backgroundPosition = 'center';
-							previewEl.style.backgroundRepeat = 'no-repeat';
-							
-							// 根据实际图片尺寸计算合适的宽高比
-							if (image.width && image.height) {
-								const aspectRatio = image.width / image.height;
-								previewEl.style.setProperty('aspect-ratio', `${aspectRatio}`);
-								previewEl.style.minHeight = '0'; // 移除最小高度限制，完全根据宽高比自适应
-							} else {
-								// 如果没有尺寸信息，使用默认宽高比，但保持 minHeight 为 0
-								previewEl.style.minHeight = '0';
-							}
-						} else {
-							// 固定高度模式：使用 cover 填充
-							previewEl.style.backgroundImage = `url(${imageUrl})`;
-							previewEl.style.backgroundSize = 'cover';
-							previewEl.style.backgroundPosition = 'center';
-						}
-					};
-					img.onerror = () => {
-						// 图片加载失败时显示错误提示
-						previewEl.style.backgroundImage = 'none';
-						previewEl.style.display = 'flex';
-						previewEl.style.alignItems = 'center';
-						previewEl.style.justifyContent = 'center';
-						previewEl.style.color = 'var(--text-muted)';
-						previewEl.style.fontSize = '0.9em';
-						previewEl.textContent = '图片加载失败';
-						previewEl.title = `无法加载图片: ${image.name}`;
-					};
-					img.src = imageUrl;
+			// 延迟加载图片 - 使用 IntersectionObserver 懒加载 + 预加载
+			let imageUrl: string | null = null;
+			
+			if (image.isRemote) {
+				imageUrl = image.path;
+			} else {
+				const abstractFile = this.app.vault.getAbstractFileByPath(image.path);
+				const imgFile = abstractFile instanceof TFile ? abstractFile : null;
+				if (imgFile) {
+					imageUrl = this.app.vault.getResourcePath(imgFile);
+				}
+			}
+
+			if (imageUrl) {
+				// 将 URL 存储在 data-src 中
+				previewEl.dataset.src = imageUrl;
+				
+				// 如果有尺寸信息，预先设置宽高比，防止布局抖动
+				if (this.plugin.settings.adaptiveImageSize && image.width && image.height) {
+					const aspectRatio = image.width / image.height;
+					previewEl.style.setProperty('aspect-ratio', `${aspectRatio}`);
+					previewEl.style.minHeight = '0';
+				}
+				
+				// 加入观察列表
+				if (this.imageObserver) {
+					this.imageObserver.observe(previewEl);
+				} else {
+					// 如果 Observer 未初始化（异常情况），回退到直接加载
+					this.loadImage(previewEl).catch(() => {
+						// 加载失败静默处理
+					});
 				}
 			}
 
@@ -1495,29 +2001,36 @@ export class ImageManagerView extends ItemView {
 					});
 				}
 				
-// 分组标签不再显示（分组标题已经显示了分组名称）
+				// 网络图片标识 (放在锁图标后面)
+				if (image.isRemote) {
+					const remoteIcon = metaRow.createSpan('remote-icon');
+					remoteIcon.textContent = '🌩️';
+					remoteIcon.style.fontSize = '12px';
+					remoteIcon.title = '网络图片';
+					remoteIcon.style.cursor = 'help';
+				}
+				
+				// 分组标签不再显示（分组标题已经显示了分组名称）
 
-				// 文件大小
-				if (this.plugin.settings.showImageSize) {
+				// 文件大小 (网络图片不显示大小)
+				if (this.plugin.settings.showImageSize && !image.isRemote) {
 					const sizeEl = metaRow.createSpan('image-size');
 					sizeEl.textContent = ImageProcessor.formatFileSize(image.size);
 				}
 				
 				// 图片尺寸（完善显示）
 				if (this.plugin.settings.showImageDimensions) {
+					// 即使尺寸未知也创建一个元素，以便加载完成后更新
+					const dimEl = metaRow.createSpan('image-dimensions');
 					if (image.width && image.height) {
-						const dimEl = metaRow.createSpan('image-dimensions');
-						// 显示格式：宽度×高度（像素）
-						dimEl.textContent = `${image.width}×${image.height}`;
-						dimEl.title = `图片尺寸: ${image.width} × ${image.height} 像素`;
+						dimEl.textContent = `${image.width}x${image.height}`;
+						dimEl.title = `图片尺寸: ${image.width} x ${image.height} 像素`;
 					} else {
-						// 尺寸信息缺失时显示提示
-						const dimEl = metaRow.createSpan('image-dimensions');
-						dimEl.textContent = '尺寸未知';
+						// 网络图片初始显示加载中，本地图片显示尺寸未知
+						dimEl.textContent = image.isRemote ? '加载中...' : '尺寸未知';
 						dimEl.style.opacity = '0.6';
-						dimEl.style.fontStyle = 'italic';
-						dimEl.title = '图片尺寸信息不可用';
 					}
+					dimEl.style.fontSize = '0.9em';
 				}
 			}
 			
@@ -1674,7 +2187,7 @@ export class ImageManagerView extends ItemView {
 								
 								metaRow.appendChild(lockIcon);
 								
-// 分组标签不再显示（分组标题已经显示了分组名称）
+								// 分组标签不再显示（分组标题已经显示了分组名称）
 
 								// 添加其他内容（文件大小、尺寸等）
 								if (this.plugin.settings.showImageSize) {
@@ -1743,19 +2256,22 @@ export class ImageManagerView extends ItemView {
         };
         
         // 获取当前的分组模式
-        let currentGroupMode: 'folder' | 'type' | 'reference' | 'lock' | 'custom' | null = null;
+        let currentGroupMode: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom' | null = null;
         
         // 优先检查是否有其他分组（静态分组）
         if (this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0) {
             // 从第一个分组的元数据获取类型
             const firstGroupName = Object.keys(this.plugin.data.imageGroups)[0];
             const groupType = this.plugin.data.groupMeta?.[firstGroupName]?.type;
-            if (groupType === 'folder' || groupType === 'type' || groupType === 'reference' || groupType === 'custom') {
+            if (groupType === 'folder' || groupType === 'type' || groupType === 'reference' || groupType === 'location' || groupType === 'custom') {
                 currentGroupMode = groupType;
             }
         } else if (this.plugin.data.groupMeta?.['_lock_group']?.type === 'lock') {
             // 只有当没有其他分组时，才检查锁定分组
             currentGroupMode = 'lock';
+        } else if (this.plugin.data.groupMeta?.['_location_group']?.type === 'location') {
+            // 检查位置分组（动态分组）
+            currentGroupMode = 'location';
         }
         
         const modal = new GroupModal(this.app, counts, async (options: any) => {
@@ -1770,7 +2286,7 @@ export class ImageManagerView extends ItemView {
                 await this.plugin.saveData(this.plugin.data);
                 this.renderImageList();
                 // 更新分组按钮绿点
-                const groupBtn = document.getElementById('group-btn') as HTMLElement;
+                const groupBtn = this.getToolbarButton('group-btn');
                 if (groupBtn) this.updateButtonIndicator(groupBtn, 'group');
                 // 更新清除按钮状态
                 this.updateClearButtonState();
@@ -1853,6 +2369,14 @@ export class ImageManagerView extends ItemView {
                 if (!this.plugin.data.groupMeta) this.plugin.data.groupMeta = {};
                 this.plugin.data.groupMeta['_lock_group'] = { type: 'lock' };
                 notice = '已启用按锁定状态分组（动态）';
+            } else if (options.mode === 'location') {
+                // 位置分组不保存到 imageGroups，只标记为 'location' 类型
+                // 在渲染时动态从 isRemote 属性获取
+                // 清空 imageGroups，因为位置分组是动态的
+                this.plugin.data.imageGroups = {};
+                if (!this.plugin.data.groupMeta) this.plugin.data.groupMeta = {};
+                this.plugin.data.groupMeta['_location_group'] = { type: 'location' };
+                notice = '已启用按位置类型分组（云端/本地）';
             } else if (options.mode === 'custom') {
                 const name = options.name as string;
                 // 仅添加未分组的图片
@@ -1892,7 +2416,7 @@ export class ImageManagerView extends ItemView {
         // 应用分组到图片（排除回收站中的图片）
         this.images.forEach(img => { img.group = undefined; });
         
-        // 检查是否有其他分组（不包括锁定分组）
+        // 检查是否有其他分组（不包括锁定分组和位置分组）
         const hasOtherGroups = this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0;
         
         // 如果有其他分组，应用它们
@@ -1920,6 +2444,20 @@ export class ImageManagerView extends ItemView {
                     ? this.plugin.lockListManager.isFileLockedByNameOrHash(img.name, img.md5, img.path)
                     : this.isIgnoredFile(img.name, img.md5, img.path);
                 img.group = isLocked ? '已锁定' : '未锁定';
+            });
+        } else if (this.plugin.data.groupMeta?.['_location_group']?.type === 'location') {
+            // 只有当没有其他分组和锁定分组时，才应用位置分组（动态分组）
+            this.images.forEach(img => {
+                // 不对回收站中的图片应用分组
+                if (img.path.startsWith('.trash')) {
+                    return;
+                }
+                
+				// 根据 isRemote 属性分组
+				// 如果关闭了云端图片扫描，已缓存的云端图片仍然保持云端分组，但不再扫描新的云端图片
+				const scanRemoteImagesDisabled = this.plugin.settings.scanRemoteImages === false;
+				// 已存在的云端图片保持云端分组，新的云端图片扫描被禁用
+				img.group = img.isRemote === true ? '🌩️ 云端图片' : '💾 本地图片';
             });
         }
     }
@@ -2474,7 +3012,7 @@ export class ImageManagerView extends ItemView {
 
 	showImageInfo() {
 		// 显示整个笔记库的统计信息
-		const modal = new StatsModal(this.app, this.images);
+		const modal = new StatsModal(this.app, this.images, this.plugin.data.linkFormatStats);
 		modal.open();
 	}
 
@@ -2486,6 +3024,15 @@ export class ImageManagerView extends ItemView {
 	}
 
 	async showDuplicates() {
+		// 检查是否有其他检测正在进行
+		if (this.isDetectingBrokenLinks) {
+			new Notice('空链接检测正在进行中，请稍候...');
+			return;
+		}
+
+		// 标记为正在检测重复图片
+		this.isDetectingDuplicates = true;
+
 		// 打开重复图片检测模态框
 		const modal = new DuplicateDetectionModal(
 			this.app,
@@ -2494,17 +3041,42 @@ export class ImageManagerView extends ItemView {
 				// 删除后刷新图片列表
 				this.scanImages();
 			},
-			this.plugin
+			this.plugin,
+			this.duplicateHashMap // 传递预扫描的哈希映射
 		);
+		
+		// 保存原始的 onClose 方法
+		const originalOnClose = modal.onClose.bind(modal);
+		// 重写 onClose，在关闭时清除检测标志
+		modal.onClose = () => {
+			this.isDetectingDuplicates = false;
+			originalOnClose();
+		};
+
 		modal.open();
 	}
 
 	async showBrokenLinks() {
-		// 查找所有找不到链接的图片链接
-		const brokenLinks = await this.findBrokenImageLinks();
+		// 检查是否有其他检测正在进行
+		if (this.isDetectingDuplicates) {
+			new Notice('重复图片检测正在进行中，请稍候...');
+			return;
+		}
+
+		// 标记为正在检测空链接
+		this.isDetectingBrokenLinks = true;
+
+		// 立即打开模态框，在模态框内显示加载提示并检测
+		const modal = new BrokenLinksModal(this.app, undefined, this.plugin, this);
 		
-		// 创建模态框显示错误链接
-		const modal = new BrokenLinksModal(this.app, brokenLinks, this.plugin);
+		// 保存原始的 onClose 方法
+		const originalOnClose = modal.onClose.bind(modal);
+		// 重写 onClose，在关闭时清除检测标志
+		modal.onClose = () => {
+			this.isDetectingBrokenLinks = false;
+			originalOnClose();
+		};
+
 		modal.open();
 	}
 
@@ -2517,32 +3089,309 @@ export class ImageManagerView extends ItemView {
 		this.app.setting.openTabById('imagemgr');
 	}
 
-	async findBrokenImageLinks(): Promise<Array<{filePath: string, lineNumber: number, linkText: string}>> {
-		const brokenLinks: Array<{filePath: string, lineNumber: number, linkText: string}> = [];
+	async findBrokenImageLinks(): Promise<Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string}>> {
+		// 检查是否有其他检测正在进行
+		if (this.isDetectingDuplicates) {
+			throw new Error('重复图片检测正在进行中，请稍候再试');
+		}
+
+		const brokenLinks: Array<{filePath: string, lineNumber: number, linkText: string, extractedPath?: string, isRemoteError?: boolean, remoteError?: string}> = [];
+		
+		// 1. 优先从网络图片缓存系统获取已标记为 broken 的图片（增量显示）
+		// 如果关闭了云端图片扫描，跳过网络图片相关的检测
+		const scanRemoteImagesDisabled = this.plugin.settings.scanRemoteImages === false;
+		if (this.plugin.networkImageAPI && !scanRemoteImagesDisabled) {
+			try {
+				// 获取所有 broken 状态的图片（这些已经验证过并记录在数据库中）
+				const brokenImagesResult = await this.plugin.networkImageAPI.searchImagesByStatus('broken');
+				
+				for (const image of brokenImagesResult.images) {
+					if (image.status === 'deleted') {
+						continue; // 跳过已删除的
+					}
+					
+					// 检查文件是否仍然存在
+					const file = this.app.vault.getAbstractFileByPath(image.sourceFilePath);
+					if (!file || !(file instanceof TFile)) {
+						continue; // 文件已删除，跳过
+					}
+					
+					// 从验证结果中获取错误信息
+					const errorMessage = image.validationResult?.error || 'Network error';
+					
+					brokenLinks.push({
+						filePath: image.sourceFilePath,
+						lineNumber: image.line + 1, // line 是 0-based，需要 +1
+						linkText: image.originalText || image.url,
+						extractedPath: image.url,
+						isRemoteError: true,
+						remoteError: errorMessage
+					});
+				}
+				
+				// 同时从黑名单获取失败的链接（作为补充）
+				const blacklist = await this.plugin.networkImageAPI.getBlacklist();
+				const db = this.plugin.networkImageDBManager.getDB();
+				const tx = db.transaction(['network_images'], 'readonly');
+				const imageStore = tx.objectStore('network_images');
+				const imageIndex = imageStore.index('by-url');
+				
+				// 记录已添加的链接，避免重复
+				const addedUrls = new Set(brokenLinks.map(link => link.extractedPath));
+				
+				for (const blacklistItem of blacklist) {
+					// 如果已经在 broken 列表中，跳过
+					if (addedUrls.has(blacklistItem.url)) {
+						continue;
+					}
+					
+					// 查找使用该 URL 的所有图片记录
+					const images = await new Promise<any[]>((resolve, reject) => {
+						const request = imageIndex.getAll(blacklistItem.url);
+						request.onsuccess = () => resolve(request.result || []);
+						request.onerror = () => reject(request.error);
+					});
+					
+					// 为每个图片记录创建失败链接信息
+					for (const image of images) {
+						if (image.status === 'deleted') {
+							continue; // 跳过已删除的
+						}
+						
+						// 检查文件是否仍然存在
+						const file = this.app.vault.getAbstractFileByPath(image.sourceFilePath);
+						if (!file || !(file instanceof TFile)) {
+							continue; // 文件已删除，跳过
+						}
+						
+						brokenLinks.push({
+							filePath: image.sourceFilePath,
+							lineNumber: image.line + 1, // line 是 0-based，需要 +1
+							linkText: image.originalText || image.url,
+							extractedPath: image.url,
+							isRemoteError: true,
+							remoteError: blacklistItem.errorMessage || 'Network error'
+						});
+						addedUrls.add(image.url);
+					}
+				}
+			} catch (error) {
+				if (this.plugin?.logger) {
+					await this.plugin.logger.warn(OperationType.SCAN, '获取失效图片缓存失败', {
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
+			}
+		}
+		
 		const allFiles = this.app.vault.getMarkdownFiles();
 		const metadataCache = this.app.metadataCache;
 		
-		for (const file of allFiles) {
+		// 辅助函数：检查是否为网络链接
+		const isRemoteLink = (path: string) => path.startsWith('http://') || path.startsWith('https://');
+		
+		// 加载网络链接验证结果缓存
+		const CACHE_VALIDITY = 24 * 60 * 60 * 1000; // 24小时缓存有效期
+		const validationCache = this.plugin.data.remoteLinkValidationCache || {};
+		const now = Date.now();
+		
+		// 清理过期的缓存项
+		const validCache: { [url: string]: { valid: boolean; error?: string; isTimeout?: boolean; timestamp: number } } = {};
+		for (const [url, cached] of Object.entries(validationCache)) {
+			if (now - cached.timestamp < CACHE_VALIDITY) {
+				validCache[url] = cached;
+			}
+		}
+		
+		// 记录已从缓存系统获取的 URL，避免重复验证
+		const cachedUrls = new Set(brokenLinks.map(link => link.extractedPath).filter(Boolean));
+		
+		// 获取已扫描的文件列表（用于增量扫描）
+		const scannedFiles = new Set<string>();
+		if (this.plugin.networkImageAPI && !scanRemoteImagesDisabled) {
 			try {
+				const db = this.plugin.networkImageDBManager.getDB();
+				const tx = db.transaction([ObjectStore.FILES], 'readonly');
+				const fileStore = tx.objectStore(ObjectStore.FILES);
+				const allScannedFiles = await new Promise<any[]>((resolve, reject) => {
+					const request = fileStore.getAll();
+					request.onsuccess = () => resolve(request.result || []);
+					request.onerror = () => reject(request.error);
+				});
+				
+				for (const scannedFile of allScannedFiles) {
+					if (scannedFile.status !== 'deleted') {
+						scannedFiles.add(scannedFile.id);
+					}
+				}
+			} catch (error) {
+				if (this.plugin?.logger) {
+					await this.plugin.logger.warn(OperationType.SCAN, '获取已扫描文件失败', {
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
+			}
+		}
+		
+		// 辅助函数：从缓存获取验证结果
+		const getCachedValidation = (url: string): { valid: boolean; error?: string; isTimeout?: boolean } | null => {
+			const cached = validCache[url];
+			if (cached && (now - cached.timestamp < CACHE_VALIDITY)) {
+				return { valid: cached.valid, error: cached.error, isTimeout: cached.isTimeout };
+			}
+			return null;
+		};
+		
+		// 辅助函数：保存验证结果到缓存
+		const saveToCache = (url: string, result: { valid: boolean; error?: string; isTimeout?: boolean }) => {
+			validCache[url] = {
+				valid: result.valid,
+				error: result.error,
+				isTimeout: result.isTimeout,
+				timestamp: now
+			};
+		};
+		
+		// 辅助函数：验证网络链接（带超时和快速失败，优化内存使用）
+		const validateRemoteLink = async (url: string): Promise<{ valid: boolean; error?: string; isTimeout?: boolean }> => {
+			// 使用 Promise.race 实现超时控制（5秒超时，给慢速网络更多时间）
+			const timeoutPromise = new Promise<{ valid: boolean; error: string; isTimeout: boolean }>((resolve) => {
+				setTimeout(() => {
+					resolve({ valid: false, error: 'ERR_TIMED_OUT (连接超时，可能网络较慢)', isTimeout: true });
+				}, 5000); // 5秒超时，给慢速网络更多时间
+			});
+
+			const requestPromise = (async () => {
+				try {
+					// 使用 requestUrl 验证链接
+					// 注意：requestUrl 会下载完整响应到内存，但我们可以通过检查响应头快速判断
+					// 对于无法解析的域名，会快速失败并抛出 ERR_NAME_NOT_RESOLVED 错误
+					const response = await requestUrl({
+						url: url,
+						headers: {
+							'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+							'Referer': ''
+						},
+						throw: false // 不抛出异常，返回响应对象
+					});
+					
+					// 只检查状态码：< 400 表示链接有效
+					if (response.status >= 400) {
+						return { valid: false, error: `HTTP ${response.status}: ${response.statusText}` };
+					}
+					
+					// 状态码 < 400，链接有效
+					return { valid: true, isTimeout: false };
+				} catch (error: any) {
+					// 提取错误信息
+					let errorMsg = '网络错误';
+					if (error.message) {
+						errorMsg = error.message;
+					} else if (error.toString) {
+						errorMsg = error.toString();
+					}
+					
+					// 提取常见的错误类型
+					if (errorMsg.includes('ERR_NAME_NOT_RESOLVED')) {
+						errorMsg = 'ERR_NAME_NOT_RESOLVED (域名无法解析)';
+					} else if (errorMsg.includes('ERR_CONNECTION_REFUSED')) {
+						errorMsg = 'ERR_CONNECTION_REFUSED (连接被拒绝)';
+					} else if (errorMsg.includes('ERR_TIMED_OUT')) {
+						errorMsg = 'ERR_TIMED_OUT (连接超时，可能网络较慢)';
+					} else if (errorMsg.includes('ERR_CERT_AUTHORITY_INVALID')) {
+						errorMsg = 'ERR_CERT_AUTHORITY_INVALID (证书无效)';
+					}
+					
+					return { valid: false, error: errorMsg, isTimeout: false };
+				}
+			})();
+
+			// 使用 Promise.race 实现超时控制
+			return Promise.race([requestPromise, timeoutPromise]);
+		};
+		
+		// 收集所有需要验证的网络链接（用于并行处理）
+		const remoteLinksToValidate: Array<{
+			filePath: string;
+			lineNumber: number;
+			linkText: string;
+			url: string;
+		}> = [];
+
+		// 第一遍：收集所有网络链接，同时检查本地链接（增量扫描：只处理新增或修改的文件）
+		for (const file of allFiles) {
+			// 增量扫描：如果文件已扫描过且未修改，跳过（网络链接错误已从缓存系统获取）
+			if (scannedFiles.has(file.path)) {
+				// 检查文件是否修改（通过 mtime 和 size）
+				try {
+					const db = this.plugin.networkImageDBManager?.getDB();
+					if (db) {
+						const tx = db.transaction([ObjectStore.FILES], 'readonly');
+						const fileStore = tx.objectStore(ObjectStore.FILES);
+						const cachedFile = await new Promise<any>((resolve, reject) => {
+							const request = fileStore.get(file.path);
+							request.onsuccess = () => resolve(request.result);
+							request.onerror = () => reject(request.error);
+						});
+						
+						// 如果文件未修改（mtime 和 size 都相同），跳过扫描
+						if (cachedFile && 
+							cachedFile.mtime === file.stat.mtime && 
+							cachedFile.size === file.stat.size) {
+							continue; // 文件未修改，跳过（网络链接错误已从缓存系统获取）
+						}
+					}
+				} catch (error) {
+					// 如果检查失败，继续扫描（保守策略）
+				}
+			}
+			
+			try {
+				const content = await this.app.vault.read(file);
+				const lines = content.split('\n');
 				const cache = metadataCache.getFileCache(file);
 				if (!cache) continue;
 				
 				// 检查 embeds（图片嵌入）
 				if (cache.embeds) {
 					for (const embed of cache.embeds) {
-						// 尝试解析链接目标
-						const destFile = metadataCache.getFirstLinkpathDest(embed.link, file.path);
+						const linkPath = embed.link;
+						
+					// 检查是否是网络链接
+					if (isRemoteLink(linkPath)) {
+						// 如果关闭了云端图片扫描，跳过网络链接的验证
+						if (scanRemoteImagesDisabled) {
+							continue;
+						}
+						
+						// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
+						if (cachedUrls.has(linkPath)) {
+							continue;
+						}
+						
+						const lineIndex = embed.position.start.line;
+						const fullLine = lines[lineIndex];
+						remoteLinksToValidate.push({
+							filePath: file.path,
+							lineNumber: lineIndex + 1,
+							linkText: fullLine,
+							url: linkPath
+						});
+						continue;
+					}
+						
+						// 本地链接：尝试解析链接目标
+						const destFile = metadataCache.getFirstLinkpathDest(linkPath, file.path);
 						if (!destFile) {
 							// 找不到目标文件，记录错误链接
-							const content = await this.app.vault.read(file);
-							const lines = content.split('\n');
 							const lineIndex = embed.position.start.line;
 							const fullLine = lines[lineIndex];
 							
 							brokenLinks.push({
 								filePath: file.path,
 								lineNumber: lineIndex + 1,
-								linkText: fullLine
+								linkText: fullLine,
+								extractedPath: linkPath
 							});
 						}
 					}
@@ -2551,23 +3400,110 @@ export class ImageManagerView extends ItemView {
 				// 检查 links（普通链接，可能包含图片引用）
 				if (cache.links) {
 					for (const link of cache.links) {
-						// 尝试解析链接目标
-						const destFile = metadataCache.getFirstLinkpathDest(link.link, file.path);
-						if (!destFile) {
-							// 只检查图片文件扩展名的链接
-							const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
-							const linkLower = link.link.toLowerCase();
+						const linkPath = link.link;
+						
+						// 检查是否是网络链接
+						if (isRemoteLink(linkPath)) {
+							// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
+							if (cachedUrls.has(linkPath)) {
+								continue;
+							}
 							
-							if (imageExtensions.some(ext => linkLower.endsWith(ext))) {
-								const content = await this.app.vault.read(file);
-								const lines = content.split('\n');
-								const lineIndex = link.position.start.line;
-								const fullLine = lines[lineIndex];
-								
+							// 收集所有网络链接进行验证
+							const lineIndex = link.position.start.line;
+							const fullLine = lines[lineIndex];
+							remoteLinksToValidate.push({
+								filePath: file.path,
+								lineNumber: lineIndex + 1,
+								linkText: fullLine,
+								url: linkPath
+							});
+							continue;
+						}
+						
+						// 本地链接：尝试解析链接目标
+						const destFile = metadataCache.getFirstLinkpathDest(linkPath, file.path);
+						if (!destFile) {
+							// 找不到目标文件，记录错误链接
+							const lineIndex = link.position.start.line;
+							const fullLine = lines[lineIndex];
+							
+							brokenLinks.push({
+								filePath: file.path,
+								lineNumber: lineIndex + 1,
+								linkText: fullLine,
+								extractedPath: linkPath
+							});
+						}
+					}
+				}
+				
+				// 检查 Markdown 格式的图片链接 ![...](...)
+				for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+					const line = lines[lineNum];
+					const mdMatches = line.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g);
+					
+					for (const match of mdMatches) {
+						let linkPath = match[2].trim();
+						// 处理 Markdown 链接中的 Title 部分：[alt](url "title")
+						if (linkPath.includes(' ')) {
+							linkPath = linkPath.split(' ')[0];
+						}
+						
+						// 检查是否是网络链接
+						if (isRemoteLink(linkPath)) {
+							// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
+							if (cachedUrls.has(linkPath)) {
+								continue;
+							}
+							
+							remoteLinksToValidate.push({
+								filePath: file.path,
+								lineNumber: lineNum + 1,
+								linkText: match[0],
+								url: linkPath
+							});
+						} else {
+							// 本地链接：检查是否存在
+							const destFile = metadataCache.getFirstLinkpathDest(linkPath, file.path);
+							if (!destFile) {
 								brokenLinks.push({
 									filePath: file.path,
-									lineNumber: lineIndex + 1,
-									linkText: fullLine
+									lineNumber: lineNum + 1,
+									linkText: match[0],
+									extractedPath: linkPath
+								});
+							}
+						}
+					}
+					
+					// 检查 HTML 格式的图片链接 <img src="...">
+					const htmlMatches = line.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi);
+					for (const match of htmlMatches) {
+						const linkPath = match[1].trim();
+						
+						// 检查是否是网络链接
+						if (isRemoteLink(linkPath)) {
+							// 如果该 URL 已经在缓存系统中标记为 broken，跳过（已从缓存系统获取）
+							if (cachedUrls.has(linkPath)) {
+								continue;
+							}
+							
+							remoteLinksToValidate.push({
+								filePath: file.path,
+								lineNumber: lineNum + 1,
+								linkText: match[0],
+								url: linkPath
+							});
+						} else {
+							// 本地链接：检查是否存在
+							const destFile = metadataCache.getFirstLinkpathDest(linkPath, file.path);
+							if (!destFile) {
+								brokenLinks.push({
+									filePath: file.path,
+									lineNumber: lineNum + 1,
+									linkText: match[0],
+									extractedPath: linkPath
 								});
 							}
 						}
@@ -2579,8 +3515,159 @@ export class ImageManagerView extends ItemView {
 				});
 			}
 		}
+
+		// 使用缓存优化：分离需要验证和已缓存的链接
+		const linksToValidate: typeof remoteLinksToValidate = [];
+		const cachedResults: Map<string, { valid: boolean; error?: string }> = new Map();
+		
+		for (const item of remoteLinksToValidate) {
+			const cached = getCachedValidation(item.url);
+			if (cached) {
+				// 使用缓存结果
+				cachedResults.set(item.url, cached);
+			} else {
+				// 需要验证
+				linksToValidate.push(item);
+			}
+		}
+		
+		// 处理缓存的验证结果
+		for (const item of remoteLinksToValidate) {
+			const cached = cachedResults.get(item.url);
+			if (cached && !cached.valid) {
+				// 缓存显示链接无效，直接添加到错误列表
+				const isTimeout = cached.isTimeout || (cached.error && cached.error.includes('ERR_TIMED_OUT'));
+				brokenLinks.push({
+					filePath: item.filePath,
+					lineNumber: item.lineNumber,
+					linkText: item.linkText,
+					extractedPath: item.url,
+					isRemoteError: true,
+					remoteError: isTimeout 
+						? `${cached.error}（验证超时，链接可能有效，请手动检查）`
+						: cached.error
+				});
+			}
+		}
+		
+		// 并行验证需要检测的网络链接（优化批量处理，提升速度）
+		// 注意：requestUrl 会下载完整响应到内存，但我们可以通过增加批次大小和减少延迟来提升速度
+		const BATCH_SIZE = 12; // 从5增加到12，提升并发度（如果内存充足可以进一步增加）
+		const BATCH_DELAY = 50; // 从100ms减少到50ms，减少等待时间
+		
+		if (linksToValidate.length > 0) {
+			// 统一由网络图片缓存系统决定哪些 URL 已经失效 / 在黑名单中
+			const validLinksToValidate: typeof remoteLinksToValidate = [];
+			validLinksToValidate.push(...linksToValidate);
+			
+			// 验证链接
+			if (validLinksToValidate.length > 0) {
+				for (let i = 0; i < validLinksToValidate.length; i += BATCH_SIZE) {
+					const batch = validLinksToValidate.slice(i, i + BATCH_SIZE);
+					const validations = await Promise.all(
+						batch.map(async (item) => {
+							const validation = await validateRemoteLink(item.url);
+							// 保存到缓存
+							saveToCache(item.url, validation);
+							return { ...item, validation };
+						})
+					);
+
+					// 收集验证失败的链接
+					for (const { filePath, lineNumber, linkText, url, validation } of validations) {
+						if (!validation.valid) {
+							const isTimeout = validation.isTimeout || (validation.error && validation.error.includes('ERR_TIMED_OUT'));
+							const isDnsError = validation.error && validation.error.includes('ERR_NAME_NOT_RESOLVED');
+							
+							// 所有验证失败的链接都添加到空链接列表
+							// 但超时的情况会提示"验证超时，可能需要手动检查"
+							brokenLinks.push({
+								filePath,
+								lineNumber,
+								linkText,
+								extractedPath: url,
+								isRemoteError: true,
+								remoteError: isTimeout 
+									? `${validation.error}（验证超时，链接可能有效，请手动检查）`
+									: validation.error
+							});
+							
+							// 只有明确的 DNS 错误才添加到黑名单，超时的情况不添加（可能是网络慢）
+							if (isDnsError) {
+								await this.addToBlacklist(url, validation.error);
+							}
+						}
+					}
+
+					// 每批之间稍微延迟，避免过载，并给垃圾回收器时间清理内存
+					if (i + BATCH_SIZE < validLinksToValidate.length) {
+						await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+					}
+				}
+			}
+
+			// 保存更新后的缓存到插件数据
+			this.plugin.data.remoteLinkValidationCache = validCache;
+			await this.plugin.saveData(this.plugin.data);
+		}
+
+		// 注意：本地链接已在第一遍中检查完成，不需要第二遍扫描
+		// 这样可以避免重复检测，提高性能
 		
 		return brokenLinks;
+	}
+
+	/**
+	 * 检查 URL 是否在黑名单中
+	 * @param url - 要检查的 URL
+	 * @returns 是否在黑名单中
+	 */
+	private async isUrlBlacklisted(url: string): Promise<boolean> {
+		try {
+			// 统一检查网络图片数据库的黑名单
+			if (this.plugin.networkImageAPI) {
+				const { hashUrl } = await import('../network-image/utils');
+				const imageId = await hashUrl(url);
+				const blacklist_entries = await this.plugin.networkImageAPI.getBlacklist();
+				if (blacklist_entries.some((entry: any) => entry.id === imageId || entry.url === url)) {
+					return true;
+				}
+			}
+			
+			return false;
+		} catch (error) {
+			// URL 解析失败或其他错误，默认不拦截
+			return false;
+		}
+	}
+
+	/**
+	 * 添加 URL 到黑名单
+	 * @param url - 要添加到黑名单的 URL
+	 * @param errorMessage - 错误信息
+	 */
+	private async addToBlacklist(url: string, errorMessage: string): Promise<void> {
+		try {
+			// 统一黑名单：只使用 networkImageAPI（IndexedDB）
+			if (this.plugin.networkImageAPI) {
+				const { hashUrl } = await import('../network-image/utils');
+				const imageId = await hashUrl(url);
+				await this.plugin.networkImageAPI.addToBlacklist([{
+					id: imageId,
+					url: url,
+					reason: 'network_error',
+					errorMessage: errorMessage
+				}]);
+			}
+		} catch (error) {
+			// 静默失败，不影响主流程
+			if (this.plugin?.logger) {
+				await this.plugin.logger.warn(OperationType.VIEW, `添加到黑名单失败: ${url}`, {
+					imagePath: url,
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
+		}
 	}
 
 	openImageDetail(image: ImageInfo) {
@@ -3114,43 +4201,100 @@ export class ImageManagerView extends ItemView {
 			return { updatedRefs: 0 };
 		}
 
+		// 验证路径安全性
+		if (!PathValidator.isSafePath(newPath)) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(
+					OperationType.RENAME,
+					`路径不安全，无法重命名: ${image.name} -> ${newFileName}`,
+					{
+						imagePath: image.path,
+						imageName: image.name,
+						details: {
+							newPath: newPath,
+							newFileName: newFileName
+						}
+					}
+				);
+			}
+			return null;
+		}
+		
+		// 验证文件名合法性
+		if (!PathValidator.isValidFileName(newFileName)) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(
+					OperationType.RENAME,
+					`文件名包含非法字符: ${newFileName}`,
+					{
+						imagePath: image.path,
+						imageName: image.name,
+						details: {
+							newFileName: newFileName
+						}
+					}
+				);
+			}
+			return null;
+		}
+
 		// 保存旧值
 		const oldPath = image.path;
 		const oldName = image.name;
 		
-		// 执行重命名
-		await this.app.vault.rename(file, newPath);
-		
-		// 更新图片对象的路径和名称信息
-		image.path = newPath;
-		image.name = newFileName;
-		
-		// 更新分组数据（如果图片在某个分组中）
-		await this.updateGroupDataOnMove(oldPath, newPath);
-		
-		// 提取所有引用该图片的文件，并去重
-		const referenceFiles = Array.from(new Set(references.map(r => r.file)));
-		
-		// 更新笔记中的引用链接
-		// 传入 referenceFiles 参数，避免在 updateReferencesInNotes 中进行全库扫描
-		const result = await this.updateReferencesInNotes(oldPath, newPath, oldName, newFileName, 'auto', referenceFiles);
-		
-		const updatedRefs = result.updatedCount || 0;
-		
-		// 返回日志条目（如果启用了日志记录）
-		if (!suppressLogging) {
-			return { 
-				updatedRefs,
-				logEntry: {
-					oldPath,
-					newPath,
-					oldName,
-					newName: newFileName,
-					updatedRefs
-				}
-			};
-		} else {
-			return { updatedRefs };
+		try {
+			// 执行重命名
+			await this.app.vault.rename(file, newPath);
+			
+			// 更新图片对象的路径和名称信息
+			image.path = newPath;
+			image.name = newFileName;
+			
+			// 更新分组数据（如果图片在某个分组中）
+			await this.updateGroupDataOnMove(oldPath, newPath);
+			
+			// 提取所有引用该图片的文件，并去重
+			const referenceFiles = Array.from(new Set(references.map(r => r.file)));
+			
+			// 更新笔记中的引用链接
+			// 传入 referenceFiles 参数，避免在 updateReferencesInNotes 中进行全库扫描
+			const result = await this.updateReferencesInNotes(oldPath, newPath, oldName, newFileName, 'auto', referenceFiles);
+			
+			const updatedRefs = result.updatedCount || 0;
+			
+			// 返回日志条目（如果启用了日志记录）
+			if (!suppressLogging) {
+				return { 
+					updatedRefs,
+					logEntry: {
+						oldPath,
+						newPath,
+						oldName,
+						newName: newFileName,
+						updatedRefs
+					}
+				};
+			} else {
+				return { updatedRefs };
+			}
+		} catch (error) {
+			// 记录错误日志
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(
+					OperationType.RENAME,
+					`重命名失败: ${oldName} -> ${newFileName}`,
+					{
+						error: error instanceof Error ? error : new Error(String(error)),
+						imagePath: oldPath,
+						imageName: oldName,
+						details: {
+							newPath: newPath,
+							newFileName: newFileName
+						}
+					}
+				);
+			}
+			return null;
 		}
 	}
 	
@@ -3291,6 +4435,14 @@ export class ImageManagerView extends ItemView {
 
 
 	async onClose() {
+		// 清除工具栏按钮缓存
+		this.clearToolbarButtonCache();
+		// 清理图片懒加载观察器
+		if (this.imageObserver) {
+			this.imageObserver.disconnect();
+			this.imageObserver = null;
+		}
+
 		// 清理键盘事件监听器
 		if (this.keyboardHandler) {
 			window.removeEventListener('keydown', this.keyboardHandler);
@@ -3533,20 +4685,42 @@ export class ImageManagerView extends ItemView {
 				return;
 			}
 
-			// 切换锁定
-			const toggleLockKey = shortcuts['manager-toggle-lock'] || SHORTCUT_DEFINITIONS['manager-toggle-lock'].defaultKey;
-			if (matchesShortcut(e, toggleLockKey)) {
-				e.preventDefault();
-				const selectedImages = this.getSelectedImages();
-				if (selectedImages.length > 0) {
-					await this.toggleSelectedImagesLock(selectedImages);
-				} else {
-					new Notice('请先选中要锁定/解锁的图片');
-				}
-				return;
+		// 切换锁定
+		const toggleLockKey = shortcuts['manager-toggle-lock'] || SHORTCUT_DEFINITIONS['manager-toggle-lock'].defaultKey;
+		if (matchesShortcut(e, toggleLockKey)) {
+			e.preventDefault();
+			const selectedImages = this.getSelectedImages();
+			if (selectedImages.length > 0) {
+				await this.toggleSelectedImagesLock(selectedImages);
+			} else {
+				new Notice('请先选中要锁定/解锁的图片');
 			}
+			return;
+		}
 
-			// 键盘导航（仅当没有选中图片时）
+		// 新增快捷键：快速操作
+		const toggleSidebarKey = shortcuts['manager-toggle-sidebar'] || SHORTCUT_DEFINITIONS['manager-toggle-sidebar'].defaultKey;
+		if (matchesShortcut(e, toggleSidebarKey)) {
+			e.preventDefault();
+			this.toggleSidebar();
+			return;
+		}
+
+		const refreshKey = shortcuts['manager-refresh'] || SHORTCUT_DEFINITIONS['manager-refresh'].defaultKey;
+		if (matchesShortcut(e, refreshKey)) {
+			e.preventDefault();
+			this.refreshImages();
+			return;
+		}
+
+		const toggleSelectionKey = shortcuts['manager-toggle-selection'] || SHORTCUT_DEFINITIONS['manager-toggle-selection'].defaultKey;
+		if (matchesShortcut(e, toggleSelectionKey)) {
+			e.preventDefault();
+			this.toggleSelectionMode();
+			return;
+		}
+
+		// 键盘导航（仅当没有选中图片时）
 			const selectedImages = this.getSelectedImages();
 			if (selectedImages.length === 0 && this.filteredImages.length > 0) {
 				if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
@@ -3573,6 +4747,59 @@ export class ImageManagerView extends ItemView {
 		};
 
 		window.addEventListener('keydown', this.keyboardHandler);
+	}
+
+	/**
+	 * 切换侧边栏显示状态
+	 */
+	private toggleSidebar(): void {
+		const sidebar = this.containerEl.querySelector('.image-manager-sidebar');
+		if (sidebar) {
+			const isVisible = sidebar.style.display !== 'none';
+			sidebar.style.display = isVisible ? 'none' : 'block';
+			const sidebarToggleBtn = this.containerEl.querySelector('.toggle-sidebar-btn');
+			if (sidebarToggleBtn) {
+				sidebarToggleBtn.setAttribute('data-state', isVisible ? 'collapsed' : 'expanded');
+			}
+			new Notice(isVisible ? '📱 侧边栏已隐藏' : '📱 侧边栏已显示');
+		}
+	}
+
+	/**
+	 * 刷新图片列表
+	 */
+	private refreshImages(): void {
+		this.plugin.scanAllImages()
+			.then(() => {
+				this.images = this.plugin.images;
+				this.filterImages();
+				new Notice('🔄 图片列表已刷新');
+			})
+			.catch(async error => {
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.SCAN, '刷新图片列表失败', {
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
+				new Notice('❌ 刷新失败，请检查控制台');
+			});
+	}
+
+	/**
+	 * 切换选择模式（单选/多选）
+	 */
+	private toggleSelectionMode(): void {
+		// 检查是否有选中的图片
+		const selectedImages = this.getSelectedImages();
+		if (selectedImages.length > 0) {
+			// 清空选择，切换到单选模式
+			this.clearSelection();
+			new Notice('🖱️ 切换到单选模式');
+		} else {
+			// 全选，切换到多选模式
+			this.selectAllImages();
+			new Notice('🖱️ 切换到多选模式');
+		}
 	}
 
 	/**
@@ -3997,12 +5224,17 @@ export class ImageManagerView extends ItemView {
 		const hasFilter = this.filterOptions.filterType !== this.plugin.settings.defaultFilterType ||
 						  this.filterOptions.lockFilter !== undefined ||
 						  this.filterOptions.referenceFilter !== undefined ||
+						  this.filterOptions.locationFilter !== undefined ||
 						  (this.filterOptions.sizeFilter && 
 						   (this.filterOptions.sizeFilter.min !== undefined || 
 							this.filterOptions.sizeFilter.max !== undefined)) ||
 						  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
 						  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
-		const hasGroup = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+		// 检查是否有分组：包括自定义分组和动态分组（锁定分组、位置分组）
+		const hasCustomGroups = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+		const hasLockGroup = !!(this.plugin.data?.groupMeta?.['_lock_group']?.type === 'lock');
+		const hasLocationGroup = !!(this.plugin.data?.groupMeta?.['_location_group']?.type === 'location');
+		const hasGroup = hasCustomGroups || hasLockGroup || hasLocationGroup;
 
 		// 从栈顶向下遍历，找到第一个有效的操作
 		for (let i = this.operationHistory.length - 1; i >= 0; i--) {
@@ -4016,10 +5248,10 @@ export class ImageManagerView extends ItemView {
 	}
 
 	/**
-	 * 处理清除按钮点击
+	 * 处理清除按钮单击
 	 * 按操作顺序倒序清除（后操作的先清除）
 	 */
-	private handleClearButtonClick() {
+	private handleClearButtonSingleClick() {
 		const topOperation = this.getTopValidOperation();
 		if (topOperation === 'search') {
 			this.clearSearch();
@@ -4033,6 +5265,60 @@ export class ImageManagerView extends ItemView {
 	}
 
 	/**
+	 * 清除所有操作（搜索、排序、筛选、分组）
+	 * 通过双击清除按钮触发
+	 */
+	private async handleClearAll() {
+		// 检查是否有任何操作需要清除
+		const hasSearch = this.searchQuery.trim() !== '';
+		const hasSort = this.sortOptions.rules.length > 1 || 
+						this.sortOptions.rules[0].sortBy !== this.plugin.settings.defaultSortBy ||
+						this.sortOptions.rules[0].sortOrder !== this.plugin.settings.defaultSortOrder;
+		const hasFilter = this.filterOptions.filterType !== this.plugin.settings.defaultFilterType ||
+						  this.filterOptions.lockFilter !== undefined ||
+						  this.filterOptions.referenceFilter !== undefined ||
+						  this.filterOptions.locationFilter !== undefined ||
+						  (this.filterOptions.sizeFilter && 
+						   (this.filterOptions.sizeFilter.min !== undefined || 
+							this.filterOptions.sizeFilter.max !== undefined)) ||
+						  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
+						  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
+		const hasCustomGroups = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+		const hasLockGroup = !!(this.plugin.data?.groupMeta?.['_lock_group']?.type === 'lock');
+		const hasLocationGroup = !!(this.plugin.data?.groupMeta?.['_location_group']?.type === 'location');
+		const hasGroup = hasCustomGroups || hasLockGroup || hasLocationGroup;
+
+		if (!hasSearch && !hasSort && !hasFilter && !hasGroup) {
+			new Notice('没有需要清除的操作');
+			return;
+		}
+
+		// 清除所有操作（按操作顺序倒序清除）
+		// 从操作历史栈的栈顶开始，依次清除
+		const operationsToClear = [...this.operationHistory].reverse();
+		
+		for (const op of operationsToClear) {
+			if (op === 'search' && hasSearch) {
+				this.clearSearch();
+			} else if (op === 'sort' && hasSort) {
+				this.clearSort();
+			} else if (op === 'filter' && hasFilter) {
+				this.clearFilter();
+			} else if (op === 'group' && hasGroup) {
+				await this.clearGroup();
+			}
+		}
+
+		// 清空操作历史栈
+		this.operationHistory = [];
+
+		// 更新清除按钮状态
+		this.updateClearButtonState();
+
+		new Notice('✅ 已清除所有操作');
+	}
+
+	/**
 	 * 更新清除按钮的状态和文本
 	 */
 	private updateClearButtonState() {
@@ -4043,18 +5329,47 @@ export class ImageManagerView extends ItemView {
 		if (topOperation) {
 			this.clearBtnElement.style.display = '';
 			
+			// 检查是否有多个操作需要清除
+			const hasSearch = this.searchQuery.trim() !== '';
+			const hasSort = this.sortOptions.rules.length > 1 || 
+							this.sortOptions.rules[0].sortBy !== this.plugin.settings.defaultSortBy ||
+							this.sortOptions.rules[0].sortOrder !== this.plugin.settings.defaultSortOrder;
+			const hasFilter = this.filterOptions.filterType !== this.plugin.settings.defaultFilterType ||
+							  this.filterOptions.lockFilter !== undefined ||
+							  this.filterOptions.referenceFilter !== undefined ||
+							  this.filterOptions.locationFilter !== undefined ||
+							  (this.filterOptions.sizeFilter && 
+							   (this.filterOptions.sizeFilter.min !== undefined || 
+								this.filterOptions.sizeFilter.max !== undefined)) ||
+							  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
+							  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
+			const hasCustomGroups = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+			const hasLockGroup = !!(this.plugin.data?.groupMeta?.['_lock_group']?.type === 'lock');
+			const hasLocationGroup = !!(this.plugin.data?.groupMeta?.['_location_group']?.type === 'location');
+			const hasGroup = hasCustomGroups || hasLockGroup || hasLocationGroup;
+			
+			const operationCount = [hasSearch, hasSort, hasFilter, hasGroup].filter(Boolean).length;
+			
 			if (topOperation === 'search') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除搜索</span>';
-				this.clearBtnElement.title = '清除搜索条件';
+				this.clearBtnElement.title = operationCount > 1 
+					? `清除搜索条件（双击清除所有 ${operationCount} 个操作）`
+					: '清除搜索条件';
 			} else if (topOperation === 'sort') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除排序</span>';
-				this.clearBtnElement.title = '清除排序条件';
+				this.clearBtnElement.title = operationCount > 1 
+					? `清除排序条件（双击清除所有 ${operationCount} 个操作）`
+					: '清除排序条件';
 			} else if (topOperation === 'filter') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除筛选</span>';
-				this.clearBtnElement.title = '清除筛选条件';
+				this.clearBtnElement.title = operationCount > 1 
+					? `清除筛选条件（双击清除所有 ${operationCount} 个操作）`
+					: '清除筛选条件';
 			} else if (topOperation === 'group') {
 				this.clearBtnElement.innerHTML = '<span class="icon">🧹</span><span class="btn-text">清除分组</span>';
-				this.clearBtnElement.title = '清除所有分组';
+				this.clearBtnElement.title = operationCount > 1 
+					? `清除所有分组（双击清除所有 ${operationCount} 个操作）`
+					: '清除所有分组';
 			}
 		} else {
 			this.clearBtnElement.style.display = 'none';
@@ -4068,7 +5383,10 @@ export class ImageManagerView extends ItemView {
 		this.searchQuery = '';
 		this.removeFromOperationHistory('search');
 		this.applySortAndFilter();
-		this.updateButtonIndicator(document.getElementById('search-btn') as HTMLElement, 'search');
+		const searchBtn = this.getToolbarButton('search-btn');
+		if (searchBtn) {
+			this.updateButtonIndicator(searchBtn, 'search');
+		}
 		
 		// 更新清除按钮状态
 		this.updateClearButtonState();
@@ -4102,7 +5420,10 @@ export class ImageManagerView extends ItemView {
 		};
 		this.removeFromOperationHistory('filter');
 		this.applySortAndFilter();
-		this.updateButtonIndicator(document.getElementById('filter-btn') as HTMLElement, 'filter');
+		const filterBtn = this.getToolbarButton('filter-btn');
+		if (filterBtn) {
+			this.updateButtonIndicator(filterBtn, 'filter');
+		}
 		
 		// 更新清除按钮状态
 		this.updateClearButtonState();
@@ -4112,16 +5433,28 @@ export class ImageManagerView extends ItemView {
 
 	/**
 	 * 清除分组
+	 * 清除所有分组，包括自定义分组和动态分组（锁定分组、位置分组等）
 	 */
 	private async clearGroup() {
-		// 清除所有分组
+		// 清除所有图片的分组标记
 		this.images.forEach(img => { img.group = undefined; });
 		this.filteredImages.forEach(img => { img.group = undefined; });
-		if (this.plugin.data.imageGroups) this.plugin.data.imageGroups = {};
 		
-		// 清除锁定分组标记
-		if (this.plugin.data.groupMeta && this.plugin.data.groupMeta['_lock_group']) {
-			delete this.plugin.data.groupMeta['_lock_group'];
+		// 清除自定义分组数据
+		if (this.plugin.data.imageGroups) {
+			this.plugin.data.imageGroups = {};
+		}
+		
+		// 清除所有动态分组标记（锁定分组、位置分组等）
+		if (this.plugin.data.groupMeta) {
+			// 清除锁定分组标记
+			if (this.plugin.data.groupMeta['_lock_group']) {
+				delete this.plugin.data.groupMeta['_lock_group'];
+			}
+			// 清除位置分组标记
+			if (this.plugin.data.groupMeta['_location_group']) {
+				delete this.plugin.data.groupMeta['_location_group'];
+			}
 		}
 		
 		await this.plugin.saveData(this.plugin.data);

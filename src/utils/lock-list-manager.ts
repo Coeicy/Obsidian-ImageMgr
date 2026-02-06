@@ -146,7 +146,12 @@ export class LockListManager {
 					lockedFile.exists = true;
 				}
 			} catch (error) {
-				console.error(`[LockListManager] 更新文件状态失败: ${lockedFile.filePath}`, error);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, `更新文件状态失败: ${lockedFile.filePath}`, {
+						imagePath: lockedFile.filePath,
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 				// 出错时也保持 exists: true，避免数据丢失
 				lockedFile.exists = true;
 			}
@@ -178,7 +183,12 @@ export class LockListManager {
 					lockedFile.exists = false;
 				}
 			} catch (error) {
-				console.error(`[LockListManager] 验证文件失败: ${lockedFile.filePath}`, error);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, `验证文件失败: ${lockedFile.filePath}`, {
+						imagePath: lockedFile.filePath,
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 				lockedFile.exists = false;
 			}
 		}
@@ -300,13 +310,14 @@ export class LockListManager {
 	 * @param skipCallback - 是否跳过回调（用于设置页内部操作）
 	 */
 	private async saveLockListToSettings(skipCallback: boolean = false) {
-		const ignoredFiles: string[] = [];
-		const ignoredHashes: string[] = [];
-		const hashMetadata: Record<string, any> = {};
+		try {
+			const ignoredFiles: string[] = [];
+			const ignoredHashes: string[] = [];
+			const hashMetadata: Record<string, any> = {};
 
-		for (const lockedFile of this.lockListCache.values()) {
-			// 保存所有锁定文件，不论 exists 状态
-			ignoredFiles.push(lockedFile.fileName);
+			for (const lockedFile of this.lockListCache.values()) {
+				// 保存所有锁定文件，不论 exists 状态
+				ignoredFiles.push(lockedFile.fileName);
 
 			if (lockedFile.md5) {
 				ignoredHashes.push(lockedFile.md5);
@@ -316,19 +327,25 @@ export class LockListManager {
 					addedTime: lockedFile.addedTime
 				};
 			}
-		}
 
-		// 更新设置
-		this.plugin.settings.ignoredFiles = ignoredFiles.join('\n');
-		this.plugin.settings.ignoredHashes = ignoredHashes.join('\n');
-		this.plugin.settings.ignoredHashMetadata = hashMetadata;
+			// 更新设置
+			this.plugin.settings.ignoredFiles = ignoredFiles.join('\n');
+			this.plugin.settings.ignoredHashes = ignoredHashes.join('\n');
+			this.plugin.settings.ignoredHashMetadata = hashMetadata;
 
-		// 保存到存储
-		await this.plugin.saveSettings();
-		
-		// 触发回调，通知设置标签页刷新（除非跳过）
-		if (!skipCallback && this.onLockListChanged) {
-			this.onLockListChanged();
+			// 保存到存储
+			await this.plugin.saveSettings();
+
+			// 触发回调，通知设置标签页刷新（除非跳过）
+			if (!skipCallback && this.onLockListChanged) {
+				this.onLockListChanged();
+			}
+		} catch (error) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.PLUGIN_ERROR, '保存锁定列表失败', {
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
 		}
 	}
 

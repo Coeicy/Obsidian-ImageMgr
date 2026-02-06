@@ -1,5 +1,6 @@
 import { TFile, Notice } from 'obsidian';
 import { ImageInfo } from '../types';
+import { PathValidator } from './path-validator';
 
 /**
  * 图片处理工具类
@@ -70,12 +71,30 @@ export class ImageProcessor {
 
 			// 生成新文件名（保留原始扩展名）
 			const extension = oldFile.extension;
-			const newName = renamePattern
+			let newName = renamePattern
 				.replace('{index}', String(i + 1).padStart(3, '0'))
 				.replace('{name}', oldFile.basename)
 				+ '.' + extension;
-
+			
+			// 验证并清理文件名（防止路径遍历和非法字符）
+			if (!PathValidator.isValidFileName(newName)) {
+				// 如果文件名不合法，尝试清理
+				const sanitized = PathValidator.sanitizeFileName(newName);
+				if (!sanitized || !PathValidator.isValidFileName(sanitized)) {
+					failCount++;
+					failedFiles.push(image.name);
+					continue; // 跳过此文件
+				}
+				newName = sanitized;
+			}
+			
+			// 验证完整路径安全性
 			const newPath = oldFile.parent.path + '/' + newName;
+			if (!PathValidator.isSafePath(newPath)) {
+				failCount++;
+				failedFiles.push(image.name);
+				continue; // 跳过此文件
+			}
 
 			try {
 				// 执行重命名操作

@@ -13,11 +13,11 @@
 
 import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import ImageManagementPlugin from '../main';
-import { ImageManagementSettings } from '../settings';
 import { LogViewerModal } from './log-viewer-modal';
 import { ConfirmModal } from './confirm-modal';
-import { SHORTCUT_DEFINITIONS, formatShortcut, parseShortcut } from '../utils/keyboard-shortcut-manager';
-import { LogLevel } from '../utils/logger';
+import { SHORTCUT_DEFINITIONS, formatShortcut } from '../utils/keyboard-shortcut-manager';
+import { LogLevel, OperationType } from '../utils/logger';
+import { SettingsIOPanel } from './settings-io-panel';
 
 /** 视图类型标识符 */
 export const VIEW_TYPE = 'image-manager-view';
@@ -32,8 +32,24 @@ export const VIEW_TYPE = 'image-manager-view';
  * - 管理锁定文件列表
  * - 自定义快捷键配置
  */
+/** 设置页标签定义 */
+const SETTINGS_TAB_DEFS: { id: string; title: string }[] = [
+	{ id: 'basic', title: '📌 基础设置' },
+	{ id: 'display', title: '🖼️ 显示设置' },
+	{ id: 'image-operations', title: '🛠️ 图片操作' },
+	{ id: 'mobile', title: '📱 移动端适配' },
+	{ id: 'upload', title: '☁️ 网络图片' },
+	{ id: 'extension', title: '🧩 扩展功能' },
+	{ id: 'ignored-files', title: '🔒 锁定文件' },
+	{ id: 'logs', title: '📋 操作日志' },
+	{ id: 'shortcuts', title: '⌨️ 快捷键' },
+	{ id: 'delete', title: '🗑️ 回收站' },
+];
+
 export class ImageManagementSettingTab extends PluginSettingTab {
 	plugin: ImageManagementPlugin;
+	private tabPanels: Map<string, HTMLElement> = new Map();
+	private activeTabId: string = 'basic';
 
 	constructor(app: App, plugin: ImageManagementPlugin) {
 		super(app, plugin);
@@ -57,43 +73,120 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		this.display();
 	}
 
-	display(): void {
-		const {containerEl} = this;
+	/**
+	 * 刷新视图工具栏按钮显示
+	 * 根据设置显示/隐藏重复检测和空链接检测按钮
+	 */
+	private refreshViewToolbar() {
+		const leaf = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+		if (!leaf || !leaf.view) {
+			return;
+		}
 
+		const view = leaf.view as any;
+		const containerEl = view.containerEl;
+		if (!containerEl) {
+			return;
+		}
+
+		// 查找工具栏
+		const toolbarEl = containerEl.querySelector('.image-manager-toolbar') as HTMLElement;
+		if (!toolbarEl) {
+			return;
+		}
+
+		// 查找重复检测按钮
+		const duplicateBtn = toolbarEl.querySelector('#duplicate-btn') as HTMLElement;
+		if (duplicateBtn) {
+			if (this.plugin.settings.enableDuplicateDetection !== false) {
+				duplicateBtn.style.display = '';
+			} else {
+				duplicateBtn.style.display = 'none';
+			}
+		} else if (this.plugin.settings.enableDuplicateDetection !== false) {
+			// 如果按钮不存在但应该显示，需要重新构建工具栏
+			// 这里简化处理：如果按钮不存在，说明视图可能还没完全加载，不处理
+		}
+
+		// 查找空链接检测按钮
+		const brokenLinksBtn = toolbarEl.querySelector('#broken-links-btn') as HTMLElement;
+		if (brokenLinksBtn) {
+			if (this.plugin.settings.enableBrokenLinksDetection !== false) {
+				brokenLinksBtn.style.display = '';
+			} else {
+				brokenLinksBtn.style.display = 'none';
+			}
+		} else if (this.plugin.settings.enableBrokenLinksDetection !== false) {
+			// 如果按钮不存在但应该显示，需要重新构建工具栏
+			// 这里简化处理：如果按钮不存在，说明视图可能还没完全加载，不处理
+		}
+
+		// 查找库统计按钮
+		const statsBtn = toolbarEl.querySelector('#stats-btn') as HTMLElement;
+		if (statsBtn) {
+			if (this.plugin.settings.showStatistics !== false) {
+				statsBtn.style.display = '';
+			} else {
+				statsBtn.style.display = 'none';
+			}
+		} else if (this.plugin.settings.showStatistics !== false) {
+			// 如果按钮不存在但应该显示，需要重新构建工具栏
+			// 这里简化处理：如果按钮不存在，说明视图可能还没完全加载，不处理
+		}
+	}
+
+	display(): void {
+		const containerEl = this.containerEl;
 		containerEl.empty();
 
-		// 清空折叠状态集合，确保所有分组默认折叠
-		this.collapsedSections.clear();
+		// ========== 标签页栏 ==========
+		const tabBar = containerEl.createDiv('settings-tab-bar');
+		const contentWrapper = containerEl.createDiv('settings-tab-content');
+		this.tabPanels.clear();
+		for (const t of SETTINGS_TAB_DEFS) {
+			const tabBtn = tabBar.createEl('button', { cls: 'settings-tab-btn' });
+			tabBtn.textContent = t.title;
+			tabBtn.dataset.tabId = t.id;
+			tabBtn.addEventListener('click', () => this.showTab(t.id));
+			const panel = contentWrapper.createDiv('settings-tab-panel');
+			panel.dataset.tabId = t.id;
+			// 默认所有面板都隐藏，只有当前激活的会显示
+			panel.style.display = 'none';
+			this.tabPanels.set(t.id, panel);
+		}
+		// 显示默认标签页
+		this.showTab(this.activeTabId || 'basic');
 
-		// ========== 所有设置（默认全部折叠） ==========
+		// ========== 各标签页内容 ==========
 
 		// 1. 基础设置
-		const basicSection = this.createCollapsibleSection(containerEl, '📌 基础设置', 'basic', false);
+		const basicSection = { contentEl: this.tabPanels.get('basic')! };
+		
+		// 添加一级标题
+		const basicTitle = basicSection.contentEl.createEl('h2', { text: '📌 基础设置' });
+		basicTitle.style.marginTop = '24px';
+		basicTitle.style.marginBottom = '20px';
+		basicTitle.style.fontSize = '1.6em';
 		
 		new Setting(basicSection.contentEl)
-			.setName('自动扫描')
-			.setDesc('启动时自动扫描整个笔记库中的图片文件')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.autoScan)
-				.onChange(async (value) => {
-					this.plugin.settings.autoScan = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(basicSection.contentEl)
-			.setName('默认图片文件夹')
-			.setDesc('设置扫描图片的默认路径（留空则扫描整个笔记库）')
+			.setName('扫描文件夹')
+			.setDesc('设置扫描图片的文件夹路径，如：images/ 或 attachments/（留空则扫描整个笔记库中的所有图片）')
 			.addText(text => text
 				.setPlaceholder('例如: images/')
 				.setValue(this.plugin.settings.defaultImageFolder)
 				.onChange(async (value) => {
-					this.plugin.settings.defaultImageFolder = value;
+					// 验证路径格式
+					const trimmedValue = value.trim();
+					if (trimmedValue && !/^[^\/].*[^\/]$/.test(trimmedValue) && trimmedValue !== trimmedValue.replace(/\/$/, '')) {
+						// 路径格式可能有问题，但允许用户输入
+					}
+					this.plugin.settings.defaultImageFolder = trimmedValue;
 					await this.plugin.saveSettings();
 				}));
 
 		new Setting(basicSection.contentEl)
 			.setName('包含子文件夹')
-			.setDesc('扫描时自动包含所有子文件夹中的图片')
+			.setDesc('扫描时自动包含所有子文件夹中的图片。关闭后只扫描指定文件夹的直接子文件，不递归进入深层目录')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.includeSubfolders)
 				.onChange(async (value) => {
@@ -101,49 +194,500 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(basicSection.contentEl)
-			.setName('MD5去重检测')
-			.setDesc('通过计算图片的MD5哈希值自动检测重复的图片文件，节省存储空间')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enableDeduplication)
+		// 性能优化设置（整合到基础设置中）
+		const performanceSubTitle = basicSection.contentEl.createEl('h4', { text: '⚡ 性能优化' });
+		performanceSubTitle.style.marginTop = '20px';
+		performanceSubTitle.style.marginBottom = '12px';
+		performanceSubTitle.style.paddingBottom = '8px';
+		performanceSubTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+		performanceSubTitle.style.fontSize = '1.2em';
+
+		// 懒加载说明文本（默认启用，无需开关）
+		const lazyLoadDescEl = basicSection.contentEl.createDiv({ cls: 'setting-item-description' });
+		lazyLoadDescEl.innerHTML = `
+			<p style="margin: 0 0 12px 0;">
+				<strong>📸 懒加载功能</strong>：图片进入可视区域时自动加载，避免一次性加载所有图片导致卡顿。建议图片数量超过 50 张时保持开启
+			</p>
+		`;
+
+		const lazyLoadDelaySetting = new Setting(basicSection.contentEl)
+			.setName('懒加载延迟')
+			.setDesc('图片进入可视区域后延迟加载的时间。值越大加载越平滑但可能有短暂空白，建议 100-300ms');
+		
+		let lazyLoadDelayText: any;
+		let lazyLoadDelaySlider: any;
+		
+		lazyLoadDelaySetting.addSlider(slider => {
+			lazyLoadDelaySlider = slider;
+			slider
+				.setLimits(0, 1000, 50)
+				.setValue(this.plugin.settings.lazyLoadDelay)
+				.setDynamicTooltip()
 				.onChange(async (value) => {
-					this.plugin.settings.enableDeduplication = value;
+					this.plugin.settings.lazyLoadDelay = value;
+					if (lazyLoadDelayText) {
+						lazyLoadDelayText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
+				});
+		});
+		
+		lazyLoadDelaySetting.addText(text => {
+			lazyLoadDelayText = text;
+			text
+				.setValue(this.plugin.settings.lazyLoadDelay.toString())
+				.setPlaceholder('0-1000')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 0 && numValue <= 1000) {
+					this.plugin.settings.lazyLoadDelay = numValue;
+					if (lazyLoadDelaySlider) {
+						lazyLoadDelaySlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
+
+		const maxCacheSizeSetting = new Setting(basicSection.contentEl)
+			.setName('最大缓存数量')
+			.setDesc('内存中最多缓存多少张图片的元数据。缓存可加快重复浏览速度，但占用更多内存。图片较多时可适当增大');
+		
+		let maxCacheSizeText: any;
+		let maxCacheSizeSlider: any;
+		
+		maxCacheSizeSetting.addSlider(slider => {
+			maxCacheSizeSlider = slider;
+			slider
+				.setLimits(50, 500, 10)
+				.setValue(this.plugin.settings.maxCacheSize)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.maxCacheSize = value;
+					if (maxCacheSizeText) {
+						maxCacheSizeText.setValue(value.toString());
+					}
+					await this.plugin.saveSettings();
+				});
+		});
+		
+		maxCacheSizeSetting.addText(text => {
+			maxCacheSizeText = text;
+			text
+				.setValue(this.plugin.settings.maxCacheSize.toString())
+				.setPlaceholder('50-500')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 50 && numValue <= 500) {
+					this.plugin.settings.maxCacheSize = numValue;
+					if (maxCacheSizeSlider) {
+						maxCacheSizeSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
+
+	// 2. 显示设置（合并主页设置和图片卡片设置）
+		const displaySection = { contentEl: this.tabPanels.get('display')! };
+		
+		// 添加一级标题
+		const displayTitle = displaySection.contentEl.createEl('h2', { text: '🖼️ 显示设置' });
+		displayTitle.style.marginTop = '24px';
+		displayTitle.style.marginBottom = '20px';
+		displayTitle.style.fontSize = '1.6em';
+
+		// 鼠标悬停动画设置 - 放在显示设置第一个
+		new Setting(displaySection.contentEl)
+			.setName('鼠标悬停动画')
+			.setDesc('鼠标悬停在图片缩略图上时显示优雅的浮动效果，提升视觉体验。低性能设备可关闭以减少动画消耗')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableHoverEffect)
+				.onChange(async (value) => {
+					this.plugin.settings.enableHoverEffect = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
 				}));
 
-		// 2. 主页设置（图片管理主页的布局和显示）
-		const homeSection = this.createCollapsibleSection(containerEl, '🏠 主页设置', 'home', false);
-
-		// 布局设置（二级标题）
-		const layoutTitle = homeSection.contentEl.createEl('h4', { text: '📐 布局' });
+		// 主页设置（二级标题）
+		const layoutTitle = displaySection.contentEl.createEl('h4', { text: '🏠 主页设置' });
 		layoutTitle.style.marginBottom = '12px';
 		layoutTitle.style.paddingBottom = '8px';
 		layoutTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+		layoutTitle.style.fontSize = '1.2em';
 
-		new Setting(homeSection.contentEl)
+		const imagesPerRowSetting = new Setting(displaySection.contentEl)
 			.setName('每行显示数量')
-			.setDesc('图片画廊中每行显示的图片数量（范围：1-10）')
-			.addSlider(slider => {
-				const currentValue = (typeof this.plugin.settings.imagesPerRow === 'number' && 
-					this.plugin.settings.imagesPerRow >= 1 && 
-					this.plugin.settings.imagesPerRow <= 10) 
-					? this.plugin.settings.imagesPerRow 
-					: 5;
-				
-				slider
-					.setLimits(1, 10, 1)
-					.setValue(currentValue)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						const validValue = Math.max(1, Math.min(10, Math.round(value)));
-						this.plugin.settings.imagesPerRow = validValue;
-						await this.plugin.saveSettings();
-						const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-						if (view) {
-							await (view.view as any).scanImages();
-						}
-					});
+			.setDesc('桌面端图片画廊每行显示的图片数量。屏幕较宽时可增大，较窄时可减小。建议 4-6 张');
+		
+		let imagesPerRowText: any;
+		let imagesPerRowSlider: any;
+		
+		imagesPerRowSetting.addSlider(slider => {
+			imagesPerRowSlider = slider;
+			const currentValue = (typeof this.plugin.settings.imagesPerRow === 'number' && 
+				this.plugin.settings.imagesPerRow >= 1 && 
+				this.plugin.settings.imagesPerRow <= 10) 
+				? this.plugin.settings.imagesPerRow 
+				: 5;
+			
+			slider
+				.setLimits(1, 10, 1)
+				.setValue(currentValue)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					const validValue = Math.max(1, Math.min(10, Math.round(value)));
+					this.plugin.settings.imagesPerRow = validValue;
+					if (imagesPerRowText) {
+						imagesPerRowText.setValue(validValue.toString());
+					}
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				});
+		});
+		
+		imagesPerRowSetting.addText(text => {
+			imagesPerRowText = text;
+			const currentValue = (typeof this.plugin.settings.imagesPerRow === 'number' && 
+				this.plugin.settings.imagesPerRow >= 1 && 
+				this.plugin.settings.imagesPerRow <= 10) 
+				? this.plugin.settings.imagesPerRow 
+				: 5;
+			
+			text
+				.setValue(currentValue.toString())
+				.setPlaceholder('1-10')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 10) {
+					this.plugin.settings.imagesPerRow = numValue;
+					if (imagesPerRowSlider) {
+						imagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
 			});
+		});
+
+
+
+		const cardBorderRadiusSetting = new Setting(displaySection.contentEl)
+			.setName('卡片圆角')
+			.setDesc('图片卡片边角的圆润程度。0 为直角，数值越大越圆润。建议 8-12px 获得现代感外观');
+		
+		let cardBorderRadiusText: any;
+		let cardBorderRadiusSlider: any;
+		
+		cardBorderRadiusSetting.addSlider(slider => {
+			cardBorderRadiusSlider = slider;
+			slider
+				.setLimits(0, 20, 1)
+				.setValue(this.plugin.settings.cardBorderRadius)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.cardBorderRadius = value;
+					if (cardBorderRadiusText) {
+						cardBorderRadiusText.setValue(value.toString());
+					}
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				});
+		});
+		
+		cardBorderRadiusSetting.addText(text => {
+			cardBorderRadiusText = text;
+			text
+				.setValue(this.plugin.settings.cardBorderRadius.toString())
+				.setPlaceholder('0-20')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 0 && numValue <= 20) {
+					this.plugin.settings.cardBorderRadius = numValue;
+					if (cardBorderRadiusSlider) {
+						cardBorderRadiusSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
+
+		const fixedImageHeightSetting = new Setting(displaySection.contentEl)
+			.setName('固定图片高度')
+			.setDesc('关闭"自适应大小"后，所有图片卡片使用固定高度显示。适合希望整齐排列的用户，建议 180-250px');
+		
+		let fixedImageHeightText: any;
+		let fixedImageHeightSlider: any;
+		
+		fixedImageHeightSetting.addSlider(slider => {
+			fixedImageHeightSlider = slider;
+			slider
+				.setLimits(100, 400, 10)
+				.setValue(this.plugin.settings.fixedImageHeight)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.fixedImageHeight = value;
+					if (fixedImageHeightText) {
+						fixedImageHeightText.setValue(value.toString());
+					}
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				});
+		});
+		
+		fixedImageHeightSetting.addText(text => {
+			fixedImageHeightText = text;
+			text
+				.setValue(this.plugin.settings.fixedImageHeight.toString())
+				.setPlaceholder('100-400')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 100 && numValue <= 400) {
+					this.plugin.settings.fixedImageHeight = numValue;
+					if (fixedImageHeightSlider) {
+						fixedImageHeightSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
+
+		new Setting(displaySection.contentEl)
+			.setName('统一卡片高度')
+			.setDesc('同一行的图片卡片保持相同高度，避免高低不齐的视觉错乱。与"自适应大小"搭配使用效果更佳')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.uniformCardHeight)
+				.onChange(async (value) => {
+					this.plugin.settings.uniformCardHeight = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+
+
+	// 图片显示设置（二级标题）
+	const displaySubTitle = displaySection.contentEl.createEl('h4', { text: '🖼️ 图片显示' });
+	displaySubTitle.style.marginTop = '20px';
+	displaySubTitle.style.marginBottom = '12px';
+	displaySubTitle.style.paddingBottom = '8px';
+	displaySubTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+	displaySubTitle.style.fontSize = '1.2em';
+
+		new Setting(displaySection.contentEl)
+			.setName('纯净画廊')
+			.setDesc('开启后只显示图片本身，隐藏文件名、大小、尺寸、锁定图标、选择框等所有附加信息，获得沉浸式浏览体验')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.pureGallery)
+				.onChange(async (value) => {
+					this.plugin.settings.pureGallery = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('自适应图片大小')
+			.setDesc('图片按原始宽高比自适应显示（类似 Notion），横图和竖图按各自比例显示。关闭则所有图片固定高度，更整齐但可能裁剪内容')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.adaptiveImageSize)
+				.onChange(async (value) => {
+					this.plugin.settings.adaptiveImageSize = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示图片名称')
+			.setDesc('在图片卡片底部显示文件名，方便识别图片内容。纯净画廊模式下自动隐藏')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showImageName)
+				.onChange(async (value) => {
+					this.plugin.settings.showImageName = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('图片名称换行')
+			.setDesc('长文件名自动换行显示，避免被截断。关闭后文件名超出部分显示省略号，更整洁但可能看不清完整名称')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.imageNameWrap)
+				.onChange(async (value) => {
+					this.plugin.settings.imageNameWrap = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示锁定图标')
+			.setDesc('被锁定的文件在卡片右上角显示🔒图标，防止误删除。点击图标可快速跳转锁定管理页面')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showLockIcon)
+				.onChange(async (value) => {
+					this.plugin.settings.showLockIcon = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示图片大小')
+			.setDesc('在图片卡片上显示文件大小（如 245 KB），方便了解存储占用情况。排序时可按大小快速识别大文件')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showImageSize)
+				.onChange(async (value) => {
+					this.plugin.settings.showImageSize = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示图片尺寸')
+			.setDesc('在图片卡片上显示图片分辨率（如 1920×1080），方便了解图片清晰度。网络图片可能显示"加载中"或"未知"')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showImageDimensions)
+				.onChange(async (value) => {
+					this.plugin.settings.showImageDimensions = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		new Setting(displaySection.contentEl)
+			.setName('显示图片序号')
+			.setDesc('在图片卡片右上角显示序号（如 1/100），方便了解当前位置和快速定位。批量操作时也可作为参考')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showImageIndex)
+				.onChange(async (value) => {
+					this.plugin.settings.showImageIndex = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
+
+		// 默认值设置（二级标题）
+		const defaultsTitle = displaySection.contentEl.createEl('h4', { text: '⚙️ 默认值' });
+		defaultsTitle.style.marginTop = '20px';
+		defaultsTitle.style.marginBottom = '12px';
+		defaultsTitle.style.paddingBottom = '8px';
+		defaultsTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+		defaultsTitle.style.fontSize = '1.2em';
 
 		new Setting(homeSection.contentEl)
 			.setName('卡片间距')
@@ -230,7 +774,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(homeSection.contentEl)
 			.setName('默认排序方式')
-			.setDesc('图片列表的默认排序依据')
+			.setDesc('打开图片管理器时默认使用的排序依据。可选：名称、大小、修改日期、创建日期、图片尺寸、引用数量。可随时在工具栏切换')
 			.addDropdown(dropdown => dropdown
 				.addOption('name', '文件名')
 				.addOption('size', '文件大小')
@@ -244,7 +788,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(homeSection.contentEl)
 			.setName('默认排序顺序')
-			.setDesc('升序（A-Z，小到大）或降序（Z-A，大到小）')
+			.setDesc('排序的升降序方向。升序：A→Z、小→大、旧→新；降序：Z→A、大→小、新→旧。名称排序建议升序，日期排序建议降序')
 			.addDropdown(dropdown => dropdown
 				.addOption('asc', '升序')
 				.addOption('desc', '降序')
@@ -256,7 +800,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 
 		new Setting(homeSection.contentEl)
 			.setName('默认筛选类型')
-			.setDesc('默认显示哪种格式的图片')
+			.setDesc('打开图片管理器时默认显示的图片格式。可选：全部、PNG、JPG、GIF、WEBP、SVG。选择特定格式可快速专注某一类图片')
 			.addDropdown(dropdown => dropdown
 				.addOption('all', '全部')
 				.addOption('png', 'PNG')
@@ -271,344 +815,61 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		// 统计信息设置（二级标题）
-		const statsTitle = homeSection.contentEl.createEl('h4', { text: '📊 统计信息' });
-		statsTitle.style.marginTop = '20px';
-		statsTitle.style.marginBottom = '12px';
-		statsTitle.style.paddingBottom = '8px';
-		statsTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+			// 图片详情页设置（二级标题）
+			const detailTitle = displaySection.contentEl.createEl('h4', { text: '🔍 图片详情页' });
+			detailTitle.style.marginTop = '20px';
+			detailTitle.style.marginBottom = '12px';
+			detailTitle.style.paddingBottom = '8px';
+			detailTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+			detailTitle.style.fontSize = '1.2em';
 
-		new Setting(homeSection.contentEl)
-			.setName('显示统计信息')
-			.setDesc('显示图片总数量、总大小等统计数据')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showStatistics)
-				.onChange(async (value) => {
-					this.plugin.settings.showStatistics = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(homeSection.contentEl)
-			.setName('统计信息位置')
-			.setDesc('统计面板显示在页面顶部还是底部')
-			.addDropdown(dropdown => dropdown
-				.addOption('top', '顶部')
-				.addOption('bottom', '底部')
-				.setValue(this.plugin.settings.statisticsPosition)
-				.onChange(async (value) => {
-					this.plugin.settings.statisticsPosition = value as 'top' | 'bottom';
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		// 3. 图片卡片设置
-		const cardSection = this.createCollapsibleSection(containerEl, '🖼️ 图片卡片', 'card', false);
-
-		new Setting(cardSection.contentEl)
-			.setName('纯净画廊')
-			.setDesc('开启后只显示图片，隐藏所有信息（文件名、大小、尺寸、锁定图标、选择框等）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.pureGallery)
-				.onChange(async (value) => {
-					this.plugin.settings.pureGallery = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('自适应图片大小')
-			.setDesc('图片按原始宽高比自适应显示（类似 Notion 效果），关闭则固定高度显示')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.adaptiveImageSize)
-				.onChange(async (value) => {
-					this.plugin.settings.adaptiveImageSize = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示图片名称')
-			.setDesc('在图片卡片上显示文件名')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showImageName)
-				.onChange(async (value) => {
-					this.plugin.settings.showImageName = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('图片名称换行')
-			.setDesc('当图片名称过长时允许换行显示')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.imageNameWrap)
-				.onChange(async (value) => {
-					this.plugin.settings.imageNameWrap = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示锁定图标')
-			.setDesc('显示被锁定文件右上角的🔒图标')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showLockIcon)
-				.onChange(async (value) => {
-					this.plugin.settings.showLockIcon = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示图片大小')
-			.setDesc('在图片卡片上显示文件大小')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showImageSize)
-				.onChange(async (value) => {
-					this.plugin.settings.showImageSize = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示图片尺寸')
-			.setDesc('在图片卡片上显示宽度×高度')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showImageDimensions)
-				.onChange(async (value) => {
-					this.plugin.settings.showImageDimensions = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(cardSection.contentEl)
-			.setName('显示图片序号')
-			.setDesc('在图片卡片右上角显示序号（例如：1/100, 2/100...），方便快速定位')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showImageIndex)
-				.onChange(async (value) => {
-					this.plugin.settings.showImageIndex = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		// 3. 删除设置
-		const deleteSection = this.createCollapsibleSection(containerEl, '🗑️ 删除与回收站', 'delete', false);
-
-		// 删除设置说明
-		const deleteIntro = deleteSection.contentEl.createDiv();
-		deleteIntro.style.color = 'var(--text-muted)';
-		deleteIntro.style.marginBottom = '16px';
-		deleteIntro.style.padding = '12px';
-		deleteIntro.style.backgroundColor = 'var(--background-secondary)';
-		deleteIntro.style.borderRadius = '6px';
-		deleteIntro.style.fontSize = '0.9em';
-		deleteIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		deleteIntro.innerHTML = `
-			<p style="margin: 0 0 8px 0; font-weight: 600;">🛡️ 删除保护机制：</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
-				<li><strong>删除前确认</strong>：显示确认对话框，防止误删（推荐开启）</li>
-				<li><strong>系统回收站</strong>：文件移到操作系统回收站，可通过系统恢复</li>
-				<li><strong>插件回收站</strong>：文件移到 .trash 文件夹，保留完整路径信息，可在插件内恢复</li>
-			</ul>
-			<p style="margin: 8px 0 0 0; font-size: 0.85em;">💡 提示：建议同时启用"插件回收站"和"删除前确认"，双重保护你的文件安全。</p>
-		`;
-
-		// 基础设置
-		new Setting(deleteSection.contentEl)
-			.setName('删除前确认')
-			.setDesc('删除文件前显示确认对话框（推荐开启）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.confirmBeforeDelete)
-				.onChange(async (value) => {
-					this.plugin.settings.confirmBeforeDelete = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(deleteSection.contentEl)
-			.setName('移到系统回收站')
-			.setDesc('删除文件时移到操作系统回收站（Windows/Mac/Linux 回收站），可通过系统恢复')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.moveToSystemTrash)
-				.onChange(async (value) => {
-					this.plugin.settings.moveToSystemTrash = value;
-					await this.plugin.saveSettings();
-				}));
-
-		// 插件回收站设置
-		const trashDivider = deleteSection.contentEl.createEl('div');
-		trashDivider.style.cssText = 'margin: 20px 0 12px 0; padding-top: 12px; border-top: 1px solid var(--background-modifier-border);';
-		const trashTitle = trashDivider.createEl('h4', { text: '📦 插件回收站' });
-		trashTitle.style.cssText = 'margin: 0 0 8px 0; font-size: 0.95em; font-weight: 600; color: var(--text-normal);';
-
-		new Setting(deleteSection.contentEl)
-			.setName('启用插件回收站')
-			.setDesc('删除文件时移动到 .trash 文件夹，保留完整路径信息。支持查看、恢复、永久删除。')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enablePluginTrash)
-				.onChange(async (value) => {
-					this.plugin.settings.enablePluginTrash = value;
-					await this.plugin.saveSettings();
-					// 如果启用，确保回收站文件夹存在
-					if (value) {
-						await this.plugin.trashManager.ensureTrashFolder();
-						new Notice('插件回收站已启用');
-					}
-				}));
-
-		new Setting(deleteSection.contentEl)
-			.setName('恢复文件夹')
-			.setDesc('从回收站恢复文件时的目标文件夹。留空或输入"恢复的图片"将恢复到默认文件夹；输入"original"恢复到原始路径。')
-			.addText(text => text
-				.setPlaceholder('恢复的图片')
-				.setValue(this.plugin.settings.trashRestorePath || '恢复的图片')
-				.onChange(async (value) => {
-					const trimmed = value.trim();
-					this.plugin.settings.trashRestorePath = trimmed || '恢复的图片';
-					await this.plugin.saveSettings();
-				}));
-
-		// 回收站管理
-		const manageDivider = deleteSection.contentEl.createEl('div');
-		manageDivider.style.cssText = 'margin: 20px 0 12px 0; padding-top: 12px; border-top: 1px solid var(--background-modifier-border);';
-		const manageTitle = manageDivider.createEl('h4', { text: '🔧 回收站管理' });
-		manageTitle.style.cssText = 'margin: 0 0 8px 0; font-size: 0.95em; font-weight: 600; color: var(--text-normal);';
-
-		new Setting(deleteSection.contentEl)
-			.setName('打开回收站')
-			.setDesc('查看、搜索、恢复或永久删除回收站中的文件')
-			.addButton(button => button
-				.setButtonText('🗑️ 打开回收站')
-				.setCta()
-				.onClick(() => {
-					const { TrashModal } = require('./trash-modal');
-					new TrashModal(this.app, this.plugin).open();
-				}));
-
-		// 功能说明
-		const trashFeatures = deleteSection.contentEl.createDiv();
-		trashFeatures.style.cssText = 'margin-top: 16px; padding: 10px 12px; background: var(--background-secondary); border-radius: 6px; font-size: 0.85em; color: var(--text-muted);';
-		trashFeatures.innerHTML = `
-			<p style="margin: 0 0 6px 0; font-weight: 600;">📋 回收站功能：</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.5;">
-				<li>查看已删除文件的预览、路径、大小、删除时间</li>
-				<li>搜索和排序回收站中的文件</li>
-				<li>恢复文件到指定文件夹或原始路径</li>
-				<li>永久删除选中文件或清空回收站</li>
-				<li>支持批量操作（全选、批量恢复、批量删除）</li>
-			</ul>
-			<p style="margin: 6px 0 0 0; font-size: 0.9em;">⚠️ 注意：只有通过插件删除的文件才会进入回收站。在 Obsidian 文件管理器或文件系统中直接删除的文件无法拦截。</p>
-		`;
-
-		// 4. 引用与预览（合并引用设置和预览设置）
-		const referenceSection = this.createCollapsibleSection(containerEl, '🔗 引用与预览', 'reference', false);
-
-		// 图片引用格式说明
-		const referenceFormatIntro = referenceSection.contentEl.createDiv();
-		referenceFormatIntro.style.color = 'var(--text-muted)';
-		referenceFormatIntro.style.marginBottom = '12px';
-		referenceFormatIntro.style.padding = '10px 12px';
-		referenceFormatIntro.style.backgroundColor = 'var(--background-secondary)';
-		referenceFormatIntro.style.borderRadius = '6px';
-		referenceFormatIntro.style.fontSize = '0.9em';
-		referenceFormatIntro.style.borderLeft = '3px solid var(--interactive-accent)';
-		referenceFormatIntro.innerHTML = `
-			<p style="margin: 0 0 8px 0; font-weight: 600;">📝 图片引用格式支持说明：</p>
-			<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
-				<li><strong>Wiki 格式</strong>：<code>![[image.png|显示文本|100x200]]</code> ✅ 支持显示文本和尺寸设置</li>
-				<li><strong>HTML 格式</strong>：<code>&lt;img src="image.png" alt="文本" width="100" height="200"&gt;</code> ✅ 支持显示文本和尺寸设置</li>
-				<li><strong>Markdown 格式</strong>：<code>![alt](image.png)</code> ⚠️ 仅支持显示文本（alt），<strong>不支持尺寸设置</strong></li>
-			</ul>
-			<p style="margin: 8px 0 0 0; font-size: 0.85em;">💡 提示：如需设置图片尺寸，建议使用 Wiki 或 HTML 格式。插件会自动检测并更新所有格式的引用链接。</p>
-		`;
-
-		new Setting(referenceSection.contentEl)
-			.setName('保持详情页打开')
-			.setDesc('点击"前往笔记"时，保持图片详情页打开（在右侧面板查看笔记），而非关闭详情页')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.keepModalOpen)
-				.onChange(async (value) => {
-					this.plugin.settings.keepModalOpen = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(referenceSection.contentEl)
-			.setName('显示引用时间')
-			.setDesc('在引用信息区域显示笔记文件的最后修改时间（显示在文件名的右侧）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showReferenceTime)
-				.onChange(async (value) => {
-					this.plugin.settings.showReferenceTime = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(referenceSection.contentEl)
-			.setName('鼠标滚轮模式')
-			.setDesc('在图片详情页中，当鼠标位于图片上时，滚轮的默认行为')
-			.addDropdown(dropdown => dropdown
-				.addOption('zoom', '缩放图片（默认）')
-				.addOption('scroll', '切换图片')
-				.setValue(this.plugin.settings.defaultWheelMode)
-				.onChange(async (value) => {
-					this.plugin.settings.defaultWheelMode = value as 'scroll' | 'zoom';
-					await this.plugin.saveSettings();
-					
-					// 更新所有打开的图片详情页
-					const leaves = this.app.workspace.getLeavesOfType('modal');
-					for (const leaf of leaves) {
-						const view = leaf.view as any;
-						if (view && view.isImageDetailModal) {
-							if (view.isScrollMode !== undefined) {
-								if (value === 'scroll') {
-									view.isScrollMode = true;
-								} else {
-									view.isScrollMode = false;
-								}
-								if (view.updateScrollModeIndicator) {
-									view.updateScrollModeIndicator();
+			new Setting(displaySection.contentEl)
+				.setName('滚轮行为')
+				.setDesc('图片详情页中鼠标滚轮的行为。缩放模式：滚轮放大/缩小图片；切换模式：滚轮切换上一张/下一张。按 W 键可临时切换模式')
+				.addDropdown(dropdown => dropdown
+					.addOption('zoom', '缩放图片')
+					.addOption('scroll', '切换图片')
+					.setValue(this.plugin.settings.defaultWheelMode)
+					.onChange(async (value) => {
+						this.plugin.settings.defaultWheelMode = value as 'scroll' | 'zoom';
+						await this.plugin.saveSettings();
+						
+						// 更新所有打开的图片详情页
+						const leaves = this.app.workspace.getLeavesOfType('modal');
+						for (const leaf of leaves) {
+							const view = leaf.view as any;
+							if (view && view.isImageDetailModal) {
+								if (view.isScrollMode !== undefined) {
+									if (value === 'scroll') {
+										view.isScrollMode = true;
+									} else {
+										view.isScrollMode = false;
+									}
 								}
 							}
 						}
-					}
-				}));
+					}));
 
-		// 5. 重命名设置
-		const pathNamingSection = this.createCollapsibleSection(containerEl, '🔄 重命名设置', 'path-naming', false);
+		// 3. 图片操作
+		const imageOperationsSection = { contentEl: this.tabPanels.get('image-operations')! };
+		
+		// 添加一级标题
+		const imageOperationsTitle = imageOperationsSection.contentEl.createEl('h2', { text: '🛠️ 图片操作' });
+		imageOperationsTitle.style.marginTop = '24px';
+		imageOperationsTitle.style.marginBottom = '20px';
+		imageOperationsTitle.style.fontSize = '1.6em';
 
-		new Setting(pathNamingSection.contentEl)
+	// 重命名设置部分
+	const renameSectionTitle = imageOperationsSection.contentEl.createEl('h3', { text: '🔄 重命名设置' });
+	renameSectionTitle.style.marginTop = '32px';
+	renameSectionTitle.style.marginBottom = '16px';
+	renameSectionTitle.style.fontSize = '1.4em';
+	renameSectionTitle.style.borderBottom = '2px solid var(--interactive-accent)';
+	renameSectionTitle.style.paddingBottom = '8px';
+
+		new Setting(imageOperationsSection.contentEl)
 			.setName('自动生成文件名')
-			.setDesc('根据笔记标题自动生成序列文件名（例如：笔记标题-1.png、笔记标题-2.png）')
+			.setDesc('启用智能重命名功能后，根据引用笔记的标题自动生成有序列号的文件名。例如引用"项目总结"笔记的图片命名为"项目总结-1.png"、"项目总结-2.png"')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.autoGenerateNames)
 				.onChange(async (value) => {
@@ -616,21 +877,62 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(pathNamingSection.contentEl)
+		const pathNamingDepthSetting = new Setting(imageOperationsSection.contentEl)
 			.setName('笔记路径深度')
-			.setDesc('重命名时使用笔记路径的层级数（1-5级，例如：父目录_子目录_笔记_1.png）')
-			.addSlider(slider => slider
+			.setDesc('智能重命名时，使用笔记路径的前几级目录作为文件名前缀。深度越大文件名越长但越具描述性。例如深度2："工作/项目A/笔记.md" → "工作_项目A_笔记-1.png"');
+		
+		let pathNamingDepthText: any;
+		let pathNamingDepthSlider: any;
+		
+		pathNamingDepthSetting.addSlider(slider => {
+			pathNamingDepthSlider = slider;
+			slider
 				.setLimits(1, 5, 1)
 				.setValue(this.plugin.settings.pathNamingDepth)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.pathNamingDepth = value;
+					if (pathNamingDepthText) {
+						pathNamingDepthText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		pathNamingDepthSetting.addText(text => {
+			pathNamingDepthText = text;
+			text
+				.setValue(this.plugin.settings.pathNamingDepth.toString())
+				.setPlaceholder('1-5')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 5) {
+					this.plugin.settings.pathNamingDepth = numValue;
+					if (pathNamingDepthSlider) {
+						pathNamingDepthSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(pathNamingSection.contentEl)
+		new Setting(imageOperationsSection.contentEl)
 			.setName('重名处理方式')
-			.setDesc('当多个图片生成相同的文件名时，如何处理（默认：提示并跳过）')
+			.setDesc('智能重命名时，如果生成的文件名已存在如何处理。建议：自动添加序号（如 图片-1.png、图片-2.png），或提示后手动决定')
 			.addDropdown(dropdown => dropdown
 				.addOption('prompt', '提示并跳过')
 				.addOption('skip-silent', '安静跳过（不提示）')
@@ -642,9 +944,9 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(pathNamingSection.contentEl)
+		new Setting(imageOperationsSection.contentEl)
 			.setName('多笔记引用处理')
-			.setDesc('当图片被多个笔记引用时的处理方式')
+			.setDesc('智能重命名时，如果图片被多个笔记引用，使用哪个笔记的标题来命名。建议：使用第一个引用的笔记，或创建包含多个笔记名的复合名称')
 			.addDropdown(dropdown => dropdown
 				.addOption('first', '使用第一个引用的笔记')
 				.addOption('latest', '使用最新修改的笔记')
@@ -656,118 +958,123 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(pathNamingSection.contentEl)
-			.setName('保存批量重命名日志')
-			.setDesc('批量重命名后在根目录生成详细的操作记录文件（包含原路径、新路径、引用更新等信息）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.saveBatchRenameLog)
-				.onChange(async (value) => {
-					this.plugin.settings.saveBatchRenameLog = value;
-					await this.plugin.saveSettings();
-				}));
+		// 批量操作设置部分
+	const batchSectionTitle = imageOperationsSection.contentEl.createEl('h3', { text: '📦 批量操作设置' });
+	batchSectionTitle.style.marginTop = '32px';
+	batchSectionTitle.style.marginBottom = '16px';
+	batchSectionTitle.style.fontSize = '1.4em';
+	batchSectionTitle.style.borderBottom = '2px solid var(--interactive-accent)';
+	batchSectionTitle.style.paddingBottom = '8px';
 
-		// 6. 性能优化
-		const performanceSection = this.createCollapsibleSection(containerEl, '⚡ 性能优化', 'performance', false);
-
-		new Setting(performanceSection.contentEl)
-			.setName('启用懒加载')
-			.setDesc('图片进入可视区域时才开始加载，提升大量图片时的性能')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enableLazyLoading)
-				.onChange(async (value) => {
-					this.plugin.settings.enableLazyLoading = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(performanceSection.contentEl)
-			.setName('懒加载延迟')
-			.setDesc('图片懒加载的延迟时间（毫秒，范围：0-1000）')
-			.addSlider(slider => slider
-				.setLimits(0, 1000, 50)
-				.setValue(this.plugin.settings.lazyLoadDelay)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.lazyLoadDelay = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(performanceSection.contentEl)
-			.setName('最大缓存数量')
-			.setDesc('最多缓存多少张图片的数据（范围：50-500）')
-			.addSlider(slider => slider
-				.setLimits(50, 500, 10)
-				.setValue(this.plugin.settings.maxCacheSize)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.maxCacheSize = value;
-					await this.plugin.saveSettings();
-				}));
-
-		// 9. 搜索设置
-		const searchSection = this.createCollapsibleSection(containerEl, '🔍 搜索设置', 'search', false);
-
-		new Setting(searchSection.contentEl)
-			.setName('大小写敏感')
-			.setDesc('搜索时区分大小写（例如："Image"和"image"视为不同）')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.searchCaseSensitive)
-				.onChange(async (value) => {
-					this.plugin.settings.searchCaseSensitive = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(searchSection.contentEl)
-			.setName('实时搜索延迟')
-			.setDesc('输入搜索关键词后延迟多久开始搜索（毫秒，范围：0-1000）')
-			.addSlider(slider => slider
-				.setLimits(0, 1000, 50)
-				.setValue(this.plugin.settings.liveSearchDelay)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.liveSearchDelay = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(searchSection.contentEl)
-			.setName('搜索包含路径')
-			.setDesc('搜索时不仅匹配文件名，也匹配文件路径')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.searchInPath)
-				.onChange(async (value) => {
-					this.plugin.settings.searchInPath = value;
-					await this.plugin.saveSettings();
-				}));
-
-		// 10. 批量操作设置
-		const batchSection = this.createCollapsibleSection(containerEl, '📦 批量操作设置', 'batch', false);
-
-		new Setting(batchSection.contentEl)
+		const maxBatchOperationsSetting = new Setting(imageOperationsSection.contentEl)
 			.setName('批量操作最大数量')
-			.setDesc('一次批量操作最多处理多少个文件（范围：100-5000）')
-			.addSlider(slider => slider
+			.setDesc('为防止误操作导致大量文件被修改，设置单次批量操作（重命名、删除等）的最大文件数。超出此数量需要分多次操作');
+		
+		let maxBatchOperationsText: any;
+		let maxBatchOperationsSlider: any;
+		
+		maxBatchOperationsSetting.addSlider(slider => {
+			maxBatchOperationsSlider = slider;
+			slider
 				.setLimits(100, 5000, 100)
 				.setValue(this.plugin.settings.maxBatchOperations)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.maxBatchOperations = value;
+					if (maxBatchOperationsText) {
+						maxBatchOperationsText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		maxBatchOperationsSetting.addText(text => {
+			maxBatchOperationsText = text;
+			text
+				.setValue(this.plugin.settings.maxBatchOperations.toString())
+				.setPlaceholder('100-5000')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 100 && numValue <= 5000) {
+					this.plugin.settings.maxBatchOperations = numValue;
+					if (maxBatchOperationsSlider) {
+						maxBatchOperationsSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(batchSection.contentEl)
+		const batchConfirmThresholdSetting = new Setting(imageOperationsSection.contentEl)
 			.setName('批量确认阈值')
-			.setDesc('批量操作超过此数量时需要二次确认（范围：5-100）')
-			.addSlider(slider => slider
+			.setDesc('当批量操作的文件数超过此值时，会弹出确认对话框要求二次确认。建议设置为 10-20，避免误操作影响过多文件');
+		
+		let batchConfirmThresholdText: any;
+		let batchConfirmThresholdSlider: any;
+		
+		batchConfirmThresholdSetting.addSlider(slider => {
+			batchConfirmThresholdSlider = slider;
+			slider
 				.setLimits(5, 100, 5)
 				.setValue(this.plugin.settings.batchConfirmThreshold)
 				.setDynamicTooltip()
 				.onChange(async (value) => {
 					this.plugin.settings.batchConfirmThreshold = value;
+					if (batchConfirmThresholdText) {
+						batchConfirmThresholdText.setValue(value.toString());
+					}
 					await this.plugin.saveSettings();
-				}));
+				});
+		});
+		
+		batchConfirmThresholdSetting.addText(text => {
+			batchConfirmThresholdText = text;
+			text
+				.setValue(this.plugin.settings.batchConfirmThreshold.toString())
+				.setPlaceholder('5-100')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 5 && numValue <= 100) {
+					this.plugin.settings.batchConfirmThreshold = numValue;
+					if (batchConfirmThresholdSlider) {
+						batchConfirmThresholdSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
 
-		new Setting(batchSection.contentEl)
+		new Setting(imageOperationsSection.contentEl)
 			.setName('显示批量操作进度')
-			.setDesc('批量操作时显示进度条和当前处理的文件')
+			.setDesc('批量重命名或删除时显示进度条，实时显示当前处理的文件名和剩余数量。文件较多时建议开启，了解操作进度')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.showBatchProgress)
 				.onChange(async (value) => {
@@ -775,8 +1082,390 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
+		// 11. 移动端适配
+		const mobileSection = { contentEl: this.tabPanels.get('mobile')! };
+		
+		// 添加一级标题
+		const mobileTitle = mobileSection.contentEl.createEl('h2', { text: '📱 移动端适配' });
+		mobileTitle.style.marginTop = '24px';
+		mobileTitle.style.marginBottom = '20px';
+		mobileTitle.style.fontSize = '1.6em';
+
+		// 移动端适配说明
+		const mobileIntro = mobileSection.contentEl.createDiv();
+		mobileIntro.style.color = 'var(--text-muted)';
+		mobileIntro.style.marginBottom = '16px';
+		mobileIntro.style.padding = '12px';
+		mobileIntro.style.backgroundColor = 'var(--background-secondary)';
+		mobileIntro.style.borderRadius = '6px';
+		mobileIntro.style.fontSize = '0.9em';
+		mobileIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+		mobileIntro.innerHTML = `
+			<p style="margin: 0 0 8px 0; font-weight: 600;">📱 移动端适配说明</p>
+			<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+				<li><strong>响应式布局</strong>：根据屏幕尺寸自动调整每行显示的图片数量</li>
+				<li><strong>分设备优化</strong>：为平板、手机横屏、手机竖屏分别设置显示参数</li>
+				<li><strong>界面优化</strong>：支持紧凑工具栏、隐藏非必要信息等移动端专属选项</li>
+			</ul>
+		`;
+
+		const mobileImagesPerRowSetting = new Setting(mobileSection.contentEl)
+			.setName('移动端每行图片数量')
+			.setDesc('统一设置移动设备（手机/平板）每行显示的图片数量。如需为不同设备分别设置，请展开下方的详细选项。留空则自动根据屏幕宽度调整');
+		
+		let mobileImagesPerRowText: any;
+		let mobileImagesPerRowSlider: any;
+		
+		mobileImagesPerRowSetting.addSlider(slider => {
+			mobileImagesPerRowSlider = slider;
+			slider
+				.setLimits(1, 5, 1)
+				.setValue(this.plugin.settings.mobileImagesPerRow || 3)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.mobileImagesPerRow = value;
+					if (mobileImagesPerRowText) {
+						mobileImagesPerRowText.setValue(value.toString());
+					}
+					await this.plugin.saveSettings();
+				});
+		});
+		
+		mobileImagesPerRowSetting.addText(text => {
+			mobileImagesPerRowText = text;
+			text
+				.setValue((this.plugin.settings.mobileImagesPerRow || 3).toString())
+				.setPlaceholder('1-5')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 5) {
+					this.plugin.settings.mobileImagesPerRow = numValue;
+					if (mobileImagesPerRowSlider) {
+						mobileImagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
+
+		new Setting(mobileSection.contentEl)
+			.setName('启用紧凑工具栏')
+			.setDesc('手机等小屏设备上使用更紧凑的工具栏，按钮变小、间距缩小，腾出更多空间显示图片内容')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableCompactToolbar || false)
+				.onChange(async (value) => {
+					this.plugin.settings.enableCompactToolbar = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(mobileSection.contentEl)
+			.setName('隐藏非必要信息')
+			.setDesc('手机等小屏设备上隐藏图片尺寸、锁定图标等次要信息，只保留文件名和大小，让小屏幕能更专注地浏览图片本身')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.hideNonEssentialInfo !== false)
+				.onChange(async (value) => {
+					this.plugin.settings.hideNonEssentialInfo = value;
+					await this.plugin.saveSettings();
+				}));
+
+		const tabletImagesPerRowSetting = new Setting(mobileSection.contentEl)
+			.setName('平板端每行图片数量')
+			.setDesc('iPad 等平板设备上每行显示的图片数量。平板屏幕较宽，可适当增加，建议 3-4 张');
+		
+		let tabletImagesPerRowText: any;
+		let tabletImagesPerRowSlider: any;
+		
+		tabletImagesPerRowSetting.addSlider(slider => {
+			tabletImagesPerRowSlider = slider;
+			slider
+				.setLimits(1, 5, 1)
+				.setValue(this.plugin.settings.tabletImagesPerRow || 3)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.tabletImagesPerRow = value;
+					if (tabletImagesPerRowText) {
+						tabletImagesPerRowText.setValue(value.toString());
+					}
+					await this.plugin.saveSettings();
+				});
+		});
+		
+		tabletImagesPerRowSetting.addText(text => {
+			tabletImagesPerRowText = text;
+			text
+				.setValue((this.plugin.settings.tabletImagesPerRow || 3).toString())
+				.setPlaceholder('1-5')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 5) {
+					this.plugin.settings.tabletImagesPerRow = numValue;
+					if (tabletImagesPerRowSlider) {
+						tabletImagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
+
+		const phoneLandscapeImagesPerRowSetting = new Setting(mobileSection.contentEl)
+			.setName('手机横屏每行图片数量')
+			.setDesc('手机横屏（横向持握）时屏幕宽度增加，每行可显示更多图片，建议 2-3 张');
+		
+		let phoneLandscapeImagesPerRowText: any;
+		let phoneLandscapeImagesPerRowSlider: any;
+		
+		phoneLandscapeImagesPerRowSetting.addSlider(slider => {
+			phoneLandscapeImagesPerRowSlider = slider;
+			slider
+				.setLimits(1, 5, 1)
+				.setValue(this.plugin.settings.phoneLandscapeImagesPerRow || 2)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.phoneLandscapeImagesPerRow = value;
+					if (phoneLandscapeImagesPerRowText) {
+						phoneLandscapeImagesPerRowText.setValue(value.toString());
+					}
+					await this.plugin.saveSettings();
+				});
+		});
+		
+		phoneLandscapeImagesPerRowSetting.addText(text => {
+			phoneLandscapeImagesPerRowText = text;
+			text
+				.setValue((this.plugin.settings.phoneLandscapeImagesPerRow || 2).toString())
+				.setPlaceholder('1-5')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 5) {
+					this.plugin.settings.phoneLandscapeImagesPerRow = numValue;
+					if (phoneLandscapeImagesPerRowSlider) {
+						phoneLandscapeImagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
+
+		const phonePortraitImagesPerRowSetting = new Setting(mobileSection.contentEl)
+			.setName('手机竖屏每行图片数量')
+			.setDesc('手机竖屏（正常持握）时屏幕较窄，建议只显示 1 张，保证图片有足够展示空间')
+		
+		let phonePortraitImagesPerRowText: any;
+		let phonePortraitImagesPerRowSlider: any;
+		
+		phonePortraitImagesPerRowSetting.addSlider(slider => {
+			phonePortraitImagesPerRowSlider = slider;
+			slider
+				.setLimits(1, 2, 1)
+				.setValue(this.plugin.settings.phonePortraitImagesPerRow || 1)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.phonePortraitImagesPerRow = value;
+					if (phonePortraitImagesPerRowText) {
+						phonePortraitImagesPerRowText.setValue(value.toString());
+					}
+					await this.plugin.saveSettings();
+				});
+		});
+		
+		phonePortraitImagesPerRowSetting.addText(text => {
+			phonePortraitImagesPerRowText = text;
+			text
+				.setValue((this.plugin.settings.phonePortraitImagesPerRow || 1).toString())
+				.setPlaceholder('1-2')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 1 && numValue <= 2) {
+					this.plugin.settings.phonePortraitImagesPerRow = numValue;
+					if (phonePortraitImagesPerRowSlider) {
+						phonePortraitImagesPerRowSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
+
+		// 12. 扩展
+		const extensionSection = { contentEl: this.tabPanels.get('extension')! };
+		
+		// 添加一级标题
+		const extensionTitle = extensionSection.contentEl.createEl('h2', { text: '🧩 扩展功能' });
+		extensionTitle.style.marginTop = '24px';
+		extensionTitle.style.marginBottom = '20px';
+		extensionTitle.style.fontSize = '1.6em';
+
+		// 12.1 库统计
+		new Setting(extensionSection.contentEl)
+			.setName('📊 库统计')
+			.setDesc('在图片管理主页显示统计按钮，点击可查看图片库的整体情况：总数量、总大小、各格式占比、本地/云端分布等数据')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showStatistics)
+				.onChange(async (value) => {
+					this.plugin.settings.showStatistics = value;
+					await this.plugin.saveSettings();
+					// 刷新视图以更新按钮显示
+					this.refreshViewToolbar();
+				}));
+
+		// 12.2 重复图片检测
+		new Setting(extensionSection.contentEl)
+			.setName('🔍 重复图片检测')
+			.setDesc('在图片管理主页显示重复检测按钮，可一键查找仓库中的重复图片。支持按文件名、MD5 哈希等多种方式检测。建议配合下方 MD5 去重使用，精确识别内容相同的图片')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableDuplicateDetection !== false) // 默认 true
+				.onChange(async (value) => {
+					this.plugin.settings.enableDuplicateDetection = value;
+					await this.plugin.saveSettings();
+					// 刷新视图以更新按钮显示
+					this.refreshViewToolbar();
+				}));
+
+		// 添加云端图片扫描状态提示
+		if (!this.plugin.settings.scanRemoteImages) {
+			const duplicateDescEl = extensionSection.contentEl.createDiv({ cls: 'setting-item-description' });
+			duplicateDescEl.innerHTML = `
+				<p style="margin: 8px 0 0 0; font-size: 0.9em; color: var(--text-muted);">
+					💡 当前已关闭云端图片扫描，重复检测将仅针对本地图片
+				</p>
+			`;
+		}
+
+		// 12.3 MD5去重检测（作为重复检测的子功能）
+		const md5Setting = new Setting(extensionSection.contentEl)
+			.setName('MD5 去重检测')
+			.setDesc('扫描时自动计算图片的 MD5 哈希值，精确检测内容完全相同的重复图片（即使文件名不同也能识别）。开启后首次扫描稍慢，后续可节省存储空间。扫描结果中可一键删除重复文件')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableDeduplication)
+				.onChange(async (value) => {
+					this.plugin.settings.enableDeduplication = value;
+					await this.plugin.saveSettings();
+				}));
+		// 添加缩进，表示这是重复检测的子功能
+		md5Setting.settingEl.style.marginLeft = '24px';
+
+		// 12.4 空链接检测
+		new Setting(extensionSection.contentEl)
+			.setName('🈳 空链接检测')
+			.setDesc('在图片管理主页显示空链接检测按钮，可检测笔记中引用不存在的图片链接。分为本地链接（文件被删除/移动）和网络链接（404/DNS错误），支持一键跳转修复和重新缓存')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableBrokenLinksDetection !== false) // 默认 true
+				.onChange(async (value) => {
+					this.plugin.settings.enableBrokenLinksDetection = value;
+					await this.plugin.saveSettings();
+					// 刷新视图以更新按钮显示
+					this.refreshViewToolbar();
+				}));
+
+		// 空链接：新增链接位置（顶部/底部）
+		const brokenLinksPositionSetting = new Setting(extensionSection.contentEl)
+			.setName('空链接新增链接位置')
+			.setDesc('控制空链接页面中“新检测到的条目”插入到列表顶部还是底部')
+			.addDropdown(dropdown => dropdown
+				.addOption('bottom', '底部')
+				.addOption('top', '顶部')
+				.setValue(this.plugin.settings.brokenLinksNewItemPosition || 'bottom')
+				.onChange(async (value) => {
+					this.plugin.settings.brokenLinksNewItemPosition = (value === 'top' ? 'top' : 'bottom');
+					await this.plugin.saveSettings();
+				}));
+		// 作为“空链接检测”的子选项做一点缩进
+		brokenLinksPositionSetting.settingEl.style.marginLeft = '24px';
+
+		// 添加云端图片扫描状态提示
+		if (!this.plugin.settings.scanRemoteImages) {
+			const brokenLinksDescEl = extensionSection.contentEl.createDiv({ cls: 'setting-item-description' });
+			brokenLinksDescEl.innerHTML = `
+				<p style="margin: 8px 0 0 0; font-size: 0.9em; color: var(--text-muted);">
+					💡 当前已关闭云端图片扫描，空链接检测将仅针对本地图片
+				</p>
+			`;
+		}
+
+		// 12.5 在Android相册中隐藏Obsidian图片
+		new Setting(extensionSection.contentEl)
+			.setName('🛡️ 在 Android 相册中隐藏图片')
+			.setDesc('在笔记库根目录创建 .nomedia 文件，Android 系统的相册应用将不再扫描此目录，避免笔记图片混入个人照片。仅对 Android 设备有效，iOS 无需此设置')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.createNomediaFile || false)
+				.onChange(async (value) => {
+					this.plugin.settings.createNomediaFile = value;
+					await this.plugin.saveSettings();
+					
+					if (value) {
+						// 创建 .nomedia 文件
+						const result = await this.plugin.createNomediaFile();
+						new Notice(result.message);
+					} else {
+						// 删除 .nomedia 文件
+						const result = await this.plugin.deleteNomediaFile();
+						new Notice(result.message);
+					}
+				}));
+
 		// 10. 锁定文件
-		const ignoredFilesSection = this.createCollapsibleSection(containerEl, '🔒 锁定文件', 'ignored-files', false);
+		const ignoredFilesSection = { contentEl: this.tabPanels.get('ignored-files')! };
+		
+		// 添加一级标题
+		const ignoredFilesTitle = ignoredFilesSection.contentEl.createEl('h2', { text: '🔒 锁定文件' });
+		ignoredFilesTitle.style.marginTop = '24px';
+		ignoredFilesTitle.style.marginBottom = '20px';
+		ignoredFilesTitle.style.fontSize = '1.6em';
 
 		// 锁定文件说明
 		const ignoredFilesIntro = ignoredFilesSection.contentEl.createDiv();
@@ -796,7 +1485,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				<li><strong>元数据追踪</strong>：系统自动记录锁定时的文件名、位置和时间，即使文件被移动或重命名也能准确识别</li>
 				<li><strong>智能清理</strong>：解锁文件时，只有当所有重复文件都解锁后，才会从去重列表中移除哈希值</li>
 			</ul>
-			<p style="margin: 8px 0 0 0; font-size: 0.85em; line-height: 1.6;">
+			<p style="margin: 8px 0 0 0; font-size: 0.9em; line-height: 1.6;">
 				<strong>💡 快速操作：</strong><br>
 				• 在图片卡片上右键 → 选择"锁定"快速锁定<br>
 				• 在图片详情页面点击"🔒 锁定"按钮<br>
@@ -926,8 +1615,12 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 保存更新
 	if (needsSave) {
 		this.plugin.settings.ignoredHashMetadata = hashMetadata;
-		this.plugin.saveSettings().catch(err => {
-			console.error('保存设置失败:', err);
+		this.plugin.saveSettings().catch(async (err) => {
+			if (this.plugin?.logger) {
+				this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '保存设置失败', {
+					error: err instanceof Error ? err : new Error(String(err))
+				});
+			}
 		});
 	}
 
@@ -1289,8 +1982,310 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		}
 	});
 
+	// 12. 图床上传设置
+	const uploadSection = { contentEl: this.tabPanels.get('upload')! };
+	
+	// 添加一级标题
+	const uploadTitle = uploadSection.contentEl.createEl('h2', { text: '☁️ 网络图片' });
+	uploadTitle.style.marginTop = '24px';
+	uploadTitle.style.marginBottom = '20px';
+	uploadTitle.style.fontSize = '1.6em';
+
+	// 网图设置说明
+	const remoteImageIntro = uploadSection.contentEl.createDiv();
+	remoteImageIntro.style.color = 'var(--text-muted)';
+	remoteImageIntro.style.marginBottom = '16px';
+	remoteImageIntro.style.padding = '12px';
+	remoteImageIntro.style.backgroundColor = 'var(--background-secondary)';
+	remoteImageIntro.style.borderRadius = '6px';
+	remoteImageIntro.style.fontSize = '0.9em';
+	remoteImageIntro.style.borderLeft = '3px solid var(--interactive-accent)';
+	remoteImageIntro.innerHTML = `
+		<p style="margin: 0 0 8px 0; font-weight: 600;">🌩️ 云端图片功能说明</p>
+		<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+			<li><strong>网络图片扫描</strong>：自动扫描 Markdown 文件中的网络图片链接（http://、https://）</li>
+			<li><strong>代理加载</strong>：当直接加载失败时，自动尝试通过代理服务加载图片</li>
+			<li><strong>云端标识</strong>：在图片列表中显示云端图片标识，便于区分本地和云端图片</li>
+		</ul>
+		<p style="margin: 8px 0 0 0; font-size: 0.9em;">💡 提示：云端图片无法进行重命名、移动、删除等文件操作，但可以查看和复制链接。</p>
+	`;
+
+	// 扫描网络图片开关 - 移动到第一个位置
+	new Setting(uploadSection.contentEl)
+		.setName('扫描网络图片')
+		.setDesc('自动扫描笔记中的网络图片链接（http://、https://），缓存到本地并显示在图片列表中。关闭后停止扫描，但已缓存的图片仍可正常显示')
+		.addToggle(toggle => toggle
+			.setValue(this.plugin.settings.scanRemoteImages ?? false)
+			.onChange(async (value) => {
+				this.plugin.settings.scanRemoteImages = value;
+				await this.plugin.saveSettings();
+				
+				// 根据开关状态初始化或清理网络图片缓存系统
+				if (value) {
+					// 启用：初始化网络图片缓存系统
+					if (!this.plugin.networkImageAPI) {
+						await this.plugin.initializeNetworkImageCache();
+					}
+					new Notice('✅ 已启用网络图片扫描，请重新扫描以查看网络图片');
+				} else {
+					// 禁用：清理网络图片缓存系统（可选，保留数据以便将来重新启用）
+					new Notice('❌ 已禁用网络图片扫描，将停止所有自动扫描');
+				}
+			}));
+
+	// 先创建所有网络图片相关设置（但不显示，稍后统一控制）
+	// 网络图片代理服务
+	new Setting(uploadSection.contentEl)
+		.setName('网络图片代理服务')
+		.setDesc('某些网站（如微信、知乎）有防盗链机制，直接加载会失败。通过代理服务可绕过限制。建议：优先 Obsidian 代理，失败后再尝试公共代理')
+		.addDropdown(dropdown => dropdown
+			.addOption('none', '不使用代理')
+			.addOption('obsidian', '仅 Obsidian 代理')
+			.addOption('weserv', '仅公共代理（weserv.nl）')
+			.addOption('both', '两者都尝试（推荐）')
+			.setValue(this.plugin.settings.remoteImageProxy ?? 'both')
+			.onChange(async (value) => {
+				this.plugin.settings.remoteImageProxy = value as 'none' | 'obsidian' | 'weserv' | 'both';
+				await this.plugin.saveSettings();
+			}));
+
+	// 云端图片加载超时
+		const timeoutSetting = new Setting(uploadSection.contentEl)
+			.setName('云端图片加载超时')
+			.setDesc('网络图片加载的最大等待时间。网络较慢或图片较大时可适当增加。超时后视为加载失败并记录到黑名单，下次扫描时跳过');
+		
+		let remoteImageTimeoutText: any;
+		let remoteImageTimeoutSlider: any;
+		
+		timeoutSetting.addSlider(slider => {
+			remoteImageTimeoutSlider = slider;
+			slider
+				.setLimits(3000, 30000, 1000)
+				.setValue(this.plugin.settings.remoteImageTimeout ?? 10000)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.remoteImageTimeout = value;
+					if (remoteImageTimeoutText) {
+						remoteImageTimeoutText.setValue(value.toString());
+					}
+					await this.plugin.saveSettings();
+				});
+		});
+		
+		timeoutSetting.addText(text => {
+			remoteImageTimeoutText = text;
+			text
+				.setValue((this.plugin.settings.remoteImageTimeout ?? 10000).toString())
+				.setPlaceholder('3000-30000')
+				.setDisabled(false);
+			
+			if (text.inputEl) {
+				text.inputEl.style.width = '45px';
+				text.inputEl.style.textAlign = 'center';
+			}
+			
+			text.onChange(async (value) => {
+				const numValue = parseInt(value);
+				if (!isNaN(numValue) && numValue >= 3000 && numValue <= 30000) {
+					this.plugin.settings.remoteImageTimeout = numValue;
+					if (remoteImageTimeoutSlider) {
+						remoteImageTimeoutSlider.setValue(numValue);
+					}
+					await this.plugin.saveSettings();
+					if (text.inputEl) {
+						text.inputEl.classList.remove('error');
+					}
+				} else {
+					if (text.inputEl) {
+						text.inputEl.classList.add('error');
+					}
+				}
+			});
+		});
+
+	// 自动重试代理加载
+	new Setting(uploadSection.contentEl)
+		.setName('自动重试代理加载')
+		.setDesc('直接加载网络图片失败后，自动尝试通过上方设置的代理服务重新加载。开启可提高加载成功率，但会增加加载时间')
+		.addToggle(toggle => toggle
+			.setValue(this.plugin.settings.autoRetryRemoteImage ?? true)
+			.onChange(async (value) => {
+				this.plugin.settings.autoRetryRemoteImage = value;
+				await this.plugin.saveSettings();
+			}));
+
+	// 扫描网络图片开关
+	new Setting(uploadSection.contentEl)
+		.setName('扫描网络图片')
+		.setDesc('扫描 Markdown 文件中的网络图片链接（http://、https://），并在列表中显示。关闭后将停止所有自动扫描。')
+		.addToggle(toggle => toggle
+			.setValue(this.plugin.settings.scanRemoteImages ?? false)
+			.onChange(async (value) => {
+				this.plugin.settings.scanRemoteImages = value;
+				await this.plugin.saveSettings();
+				
+				// 根据开关状态初始化或清理网络图片缓存系统
+				if (value) {
+					// 启用：初始化网络图片缓存系统
+					if (!this.plugin.networkImageAPI) {
+						await this.plugin.initializeNetworkImageCache();
+					}
+					new Notice('✅ 已启用网络图片扫描，请重新扫描以查看网络图片');
+				} else {
+					// 禁用：清理网络图片缓存系统（可选，保留数据以便将来重新启用）
+					new Notice('❌ 已禁用网络图片扫描，将停止所有自动扫描');
+				}
+			}));
+
+
+	// 图床设置分割线
+	const uploadDivider = uploadSection.contentEl.createEl('div');
+	uploadDivider.style.cssText = 'margin: 24px 0 12px 0; padding-top: 12px; border-top: 1px solid var(--background-modifier-border);';
+	const uploadSubTitle = uploadDivider.createEl('h4', { text: '☁️ 图床上传配置' });
+	uploadSubTitle.style.cssText = 'margin: 0 0 8px 0; font-size: 0.95em; font-weight: 600; color: var(--text-normal);';
+
+	new Setting(uploadSection.contentEl)
+			.setName('图床类型')
+			.setDesc('选择要使用的图床服务')
+			.addDropdown(dropdown => dropdown
+				.addOption('qiniu', '七牛云')
+				.addOption('aliyun', '阿里云 OSS')
+				.setValue(this.plugin.settings.uploadConfig?.type || 'qiniu')
+				.onChange(async (value) => {
+					if (!this.plugin.settings.uploadConfig) {
+						this.plugin.settings.uploadConfig = { type: 'qiniu' };
+					}
+					this.plugin.settings.uploadConfig.type = value as any;
+					await this.plugin.saveSettings();
+					this.display(); // 刷新以显示对应配置
+				}));
+
+		if (this.plugin.settings.uploadConfig?.type === 'qiniu') {
+			const qiniu = this.plugin.settings.uploadConfig.qiniu || { accessKey: '', secretKey: '', bucket: '', domain: '', region: 'z0' };
+			this.plugin.settings.uploadConfig.qiniu = qiniu;
+
+			new Setting(uploadSection.contentEl)
+				.setName('Access Key')
+				.setDesc('七牛云 Access Key')
+				.addText(text => text
+					.setValue(qiniu.accessKey)
+					.onChange(async (value) => {
+						qiniu.accessKey = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('Secret Key')
+				.setDesc('七牛云 Secret Key')
+				.addText(text => text
+					.setValue(qiniu.secretKey)
+					.setPlaceholder('不会明文显示')
+					.onChange(async (value) => {
+						qiniu.secretKey = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('存储空间 (Bucket)')
+				.setDesc('七牛云存储空间名称')
+				.addText(text => text
+					.setValue(qiniu.bucket)
+					.onChange(async (value) => {
+						qiniu.bucket = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('访问域名')
+				.setDesc('七牛云存储空间绑定的域名 (包含 http/https)')
+				.addText(text => text
+					.setValue(qiniu.domain)
+					.setPlaceholder('http://your-domain.com')
+					.onChange(async (value) => {
+						qiniu.domain = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('区域')
+				.setDesc('存储区域 (z0: 华东, z1: 华北, z2: 华南, na0: 北美, as0: 东南亚)')
+				.addDropdown(dropdown => dropdown
+					.addOption('z0', '华东')
+					.addOption('z1', '华北')
+					.addOption('z2', '华南')
+					.addOption('na0', '北美')
+					.addOption('as0', '东南亚')
+					.setValue(qiniu.region)
+					.onChange(async (value) => {
+						qiniu.region = value;
+						await this.plugin.saveSettings();
+					}));
+		} else if (this.plugin.settings.uploadConfig?.type === 'aliyun') {
+			const aliyun = this.plugin.settings.uploadConfig.aliyun || { accessKeyId: '', accessKeySecret: '', bucket: '', region: 'oss-cn-hangzhou' };
+			this.plugin.settings.uploadConfig.aliyun = aliyun;
+
+			new Setting(uploadSection.contentEl)
+				.setName('Access Key ID')
+				.setDesc('阿里云 Access Key ID')
+				.addText(text => text
+					.setValue(aliyun.accessKeyId)
+					.onChange(async (value) => {
+						aliyun.accessKeyId = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('Access Key Secret')
+				.setDesc('阿里云 Access Key Secret')
+				.addText(text => text
+					.setValue(aliyun.accessKeySecret)
+					.setPlaceholder('不会明文显示')
+					.onChange(async (value) => {
+						aliyun.accessKeySecret = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('存储空间 (Bucket)')
+				.setDesc('阿里云 OSS Bucket 名称')
+				.addText(text => text
+					.setValue(aliyun.bucket)
+					.onChange(async (value) => {
+						aliyun.bucket = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('区域 (Region)')
+				.setDesc('OSS 区域 (例如 oss-cn-hangzhou)')
+				.addText(text => text
+					.setValue(aliyun.region)
+					.setPlaceholder('oss-cn-hangzhou')
+					.onChange(async (value) => {
+						aliyun.region = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(uploadSection.contentEl)
+				.setName('自定义域名 (可选)')
+				.setDesc('如果绑定了自定义域名')
+				.addText(text => text
+					.setValue(aliyun.customDomain || '')
+					.setPlaceholder('http://oss.example.com')
+					.onChange(async (value) => {
+						aliyun.customDomain = value;
+						await this.plugin.saveSettings();
+					}));
+		}
+
 		// 13. 操作日志
-		const logsSection = this.createCollapsibleSection(containerEl, '📋 操作日志', 'logs', false);
+		const logsSection = { contentEl: this.tabPanels.get('logs')! };
+		
+		// 添加一级标题
+		const logsTitle = logsSection.contentEl.createEl('h2', { text: '📋 操作日志' });
+		logsTitle.style.marginTop = '24px';
+		logsTitle.style.marginBottom = '20px';
+		logsTitle.style.fontSize = '1.6em';
 
 		// 说明文字
 		const logIntro = logsSection.contentEl.createDiv();
@@ -1311,7 +2306,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 日志级别设置
 		new Setting(logsSection.contentEl)
 			.setName('日志级别')
-			.setDesc('设置记录的最小日志级别，低于此级别的日志不会被记录（DEBUG < INFO < WARNING < ERROR）')
+			.setDesc('设置记录的最小日志级别。DEBUG（最详细，调试用）、INFO（一般信息）、WARNING（警告）、ERROR（仅错误）。日常使用建议 INFO，排查问题时可选 DEBUG')
 			.addDropdown(dropdown => dropdown
 			.addOption('DEBUG', 'DEBUG（所有日志）')
 			.addOption('INFO', 'INFO（信息及以上）')
@@ -1332,7 +2327,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// 控制台输出设置
 		new Setting(logsSection.contentEl)
 			.setName('输出到控制台')
-			.setDesc('是否将日志输出到浏览器控制台（生产环境建议关闭，避免控制台日志过多）')
+			.setDesc('同时将日志输出到 Obsidian 开发者工具的控制台（Ctrl+Shift+I 打开）。便于开发调试，日常使用建议关闭以减少干扰')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableConsoleLog || false)
 				.onChange(async (value) => {
@@ -1346,7 +2341,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		// DEBUG日志设置
 		new Setting(logsSection.contentEl)
 			.setName('启用DEBUG日志')
-			.setDesc('是否记录DEBUG级别的日志（调试时启用，生产环境建议关闭）')
+			.setDesc('记录最详细的 DEBUG 级别日志，包括内部状态、变量值、执行流程等。仅在排查复杂问题时临时开启，日常使用和性能敏感场景建议关闭')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.enableDebugLog || false)
 				.onChange(async (value) => {
@@ -1384,7 +2379,13 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		// 12. 键盘快捷键（放在最后，高级设置）
-		const shortcutsSection = this.createCollapsibleSection(containerEl, '⌨️ 键盘快捷键', 'shortcuts', false);
+		const shortcutsSection = { contentEl: this.tabPanels.get('shortcuts')! };
+		
+		// 添加一级标题
+		const shortcutsMainTitle = shortcutsSection.contentEl.createEl('h2', { text: '⌨️ 键盘快捷键' });
+		shortcutsMainTitle.style.marginTop = '24px';
+		shortcutsMainTitle.style.marginBottom = '20px';
+		shortcutsMainTitle.style.fontSize = '1.6em';
 
 		// 说明文字
 		const shortcutsIntro = shortcutsSection.contentEl.createDiv();
@@ -1410,7 +2411,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			{ name: 'batch', label: '批量操作', shortcuts: ['manager-batch-rename', 'manager-smart-rename', 'manager-toggle-lock'] }
 		];
 
-		const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+		const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
 		const shortcuts = this.plugin.settings.keyboardShortcuts || {};
 
 		categories.forEach(category => {
@@ -1551,93 +2552,132 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
+		// 在基础设置部分添加导入导出功能
+		const importExportSubTitle = basicSection.contentEl.createEl('h4', { text: '⚙️备份设置' });
+		importExportSubTitle.style.marginTop = '20px';
+		importExportSubTitle.style.marginBottom = '12px';
+		importExportSubTitle.style.paddingBottom = '8px';
+		importExportSubTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+		importExportSubTitle.style.fontSize = '1.2em';
+
+		// 创建导入导出设置容器
+		const importExportContainer = basicSection.contentEl.createDiv();
+		importExportContainer.style.marginBottom = '16px';
+		
+		// 使用SettingsIOPanel渲染导入导出界面
+		const settingsIoPanel = new SettingsIOPanel(this.app, this.plugin, importExportContainer);
+		settingsIoPanel.render();
+
 	}
 
-	private collapsedSections: Set<string> = new Set();
+	/**
+	 * 切换到指定标签页
+	 */
+	private showTab(id: string): void {
+		this.activeTabId = id;
+		this.containerEl.querySelectorAll('.settings-tab-btn').forEach((btn) => {
+			btn.classList.toggle('is-active', (btn as HTMLElement).dataset.tabId === id);
+		});
+		// 正确切换标签页显示状态
+		for (const [pid, panel] of this.tabPanels) {
+			panel.style.display = pid === id ? 'block' : 'none';
+		}
+	}
 
 	/**
-	 * 创建可折叠的设置区域
+	 * 导出设置到 JSON 文件
 	 */
-	createCollapsibleSection(container: HTMLElement, title: string, id: string, defaultExpanded: boolean = false): { headerEl: HTMLElement, contentEl: HTMLElement } {
-		const sectionContainer = container.createDiv('collapsible-section-container');
-		sectionContainer.id = id;
-		sectionContainer.style.marginTop = '20px';
-		sectionContainer.style.marginBottom = '10px';
-		
-		// 标题区域（可点击）
-		const headerEl = sectionContainer.createDiv('collapsible-section-header');
-		headerEl.style.display = 'flex';
-		headerEl.style.alignItems = 'center';
-		headerEl.style.gap = '8px';
-		headerEl.style.padding = '10px 12px';
-		headerEl.style.backgroundColor = 'var(--background-secondary)';
-		headerEl.style.borderRadius = '6px';
-		headerEl.style.cursor = 'pointer';
-		headerEl.style.transition = 'all 0.2s ease';
-		headerEl.style.border = '1px solid var(--background-modifier-border)';
-		
-		// 标题文字（包含emoji标签和括号内的折叠图标）
-		const titleEl = headerEl.createEl('h3');
-		titleEl.style.margin = '0';
-		titleEl.style.fontSize = '1.1em';
-		titleEl.style.flex = '1';
-		titleEl.style.display = 'flex';
-		titleEl.style.alignItems = 'center';
-		titleEl.style.gap = '8px';
-		
-		// 标题文本
-		const titleText = titleEl.createSpan();
-		titleText.textContent = title;
-		titleText.style.flex = '1';
-		
-		// 展开/折叠图标
-		const iconEl = titleEl.createSpan('collapse-icon');
-		iconEl.textContent = defaultExpanded ? '▼' : '▶';
-		iconEl.style.fontSize = '0.85em';
-		iconEl.style.color = 'var(--text-muted)';
-		iconEl.style.transition = 'all 0.2s ease';
-		iconEl.style.flexShrink = '0';
-		
-		// 内容区域
-		const contentEl = sectionContainer.createDiv('collapsible-section-content');
-		contentEl.style.marginTop = '10px';
-		contentEl.style.paddingLeft = '10px';
-		contentEl.style.display = defaultExpanded ? 'block' : 'none';
-		contentEl.style.transition = 'all 0.3s ease';
-		
-		// 如果默认折叠，添加到折叠集合
-		if (!defaultExpanded) {
-			this.collapsedSections.add(id);
+	private async exportSettings() {
+		try {
+			const settingsJson = JSON.stringify(this.plugin.settings, null, 2);
+			const blob = new Blob([settingsJson], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `imagemgr-settings-${new Date().toISOString().split('T')[0]}.json`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+			new Notice('✅ 设置已导出');
+		} catch (error) {
+			new Notice('❌ 导出设置失败');
+				if (this.plugin?.logger) {
+					this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '导出设置失败', {
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
 		}
-		
-		// 悬停效果
-		headerEl.addEventListener('mouseenter', () => {
-			headerEl.style.backgroundColor = 'var(--background-modifier-hover)';
-			headerEl.style.borderColor = 'var(--interactive-accent)';
-		});
-		
-		headerEl.addEventListener('mouseleave', () => {
-			headerEl.style.backgroundColor = 'var(--background-secondary)';
-			headerEl.style.borderColor = 'var(--background-modifier-border)';
-		});
-		
-		// 点击展开/折叠
-		headerEl.addEventListener('click', () => {
-			const isCollapsed = this.collapsedSections.has(id);
-			
-			if (isCollapsed) {
-				// 展开
-				contentEl.style.display = 'block';
-				iconEl.textContent = '▼';
-				this.collapsedSections.delete(id);
-			} else {
-				// 折叠
-				contentEl.style.display = 'none';
-				iconEl.textContent = '▶';
-				this.collapsedSections.add(id);
-			}
-		});
-		
-		return { headerEl, contentEl };
+	}
+
+	/**
+	 * 从 JSON 文件导入设置
+	 */
+	private async importSettings() {
+		try {
+			// 创建文件输入元素
+			const input = document.createElement('input');
+			input.type = 'file';
+			input.accept = '.json';
+			input.style.display = 'none';
+
+			input.onchange = async (e) => {
+				const file = (e.target as HTMLInputElement).files?.[0];
+				if (!file) return;
+
+				try {
+					const text = await file.text();
+					const importedSettings = JSON.parse(text);
+
+					// 验证设置格式
+					if (typeof importedSettings !== 'object' || importedSettings === null) {
+						new Notice('❌ 无效的设置文件格式');
+						return;
+					}
+
+					// 确认导入
+					const confirmed = await ConfirmModal.show(
+						this.app,
+						'导入设置',
+						'导入设置将覆盖当前所有设置，是否继续？',
+						['导入', '取消']
+					);
+
+					if (confirmed === 'save') {
+						// 合并导入的设置（保留一些关键数据）
+						const currentSettings = { ...this.plugin.settings };
+						this.plugin.settings = { ...currentSettings, ...importedSettings };
+						
+						// 确保关键字段存在
+						if (!this.plugin.settings.uploadConfig) {
+							this.plugin.settings.uploadConfig = currentSettings.uploadConfig || { type: 'qiniu' };
+						}
+						
+						await this.plugin.saveSettings();
+						new Notice('✅ 设置已导入，请刷新页面');
+						this.display(); // 刷新设置页面
+					}
+				} catch (error) {
+					new Notice('❌ 导入设置失败：文件格式错误');
+				if (this.plugin?.logger) {
+					this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '导入设置失败', {
+						error: error instanceof Error ? error : new Error(String(error))
+					});
+				}
+				}
+
+				document.body.removeChild(input);
+			};
+
+			document.body.appendChild(input);
+			input.click();
+		} catch (error) {
+			new Notice('❌ 导入设置失败');
+		if (this.plugin?.logger) {
+			this.plugin.logger.error(OperationType.SETTINGS_CHANGE, '导入设置失败', {
+				error: error instanceof Error ? error : new Error(String(error))
+			});
+		}
+		}
 	}
 }

@@ -7,13 +7,14 @@
 import { App, Modal, Setting, TextComponent } from 'obsidian';
 import { Notice } from 'obsidian';
 import { makeModalResizable } from '../utils/resizable-modal';
+import { PathValidator } from '../utils/path-validator';
 
 /**
  * 分组选项接口
  */
 export interface GroupOptions {
     /** 分组方式 */
-    mode: 'folder' | 'type' | 'reference' | 'lock' | 'custom';
+    mode: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom';
     /** 自定义分组名称（当 mode = custom 时必填） */
     name?: string;
     /** 作用范围 */
@@ -38,9 +39,9 @@ export class GroupModal extends Modal {
 	selectedCount: number;
 	filteredCount: number;
 	totalCount: number;
-	currentGroupMode: 'folder' | 'type' | 'reference' | 'lock' | 'custom' | null;
+	currentGroupMode: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom' | null;
 
-    constructor(app: App, counts: { selected: number, filtered: number, total: number }, onSubmit: (options: GroupOptions) => void, currentGroupMode?: 'folder' | 'type' | 'reference' | 'lock' | 'custom') {
+    constructor(app: App, counts: { selected: number, filtered: number, total: number }, onSubmit: (options: GroupOptions) => void, currentGroupMode?: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom') {
 		super(app);
 		this.selectedCount = counts.selected;
 		this.filteredCount = counts.filtered;
@@ -62,7 +63,7 @@ export class GroupModal extends Modal {
         contentEl.createEl('h2', { text: '创建图片分组' });
 
         // 默认为 'folder'，如果有当前分组模式则使用当前模式
-        let groupMode: 'folder' | 'type' | 'reference' | 'lock' | 'custom' = this.currentGroupMode ? this.currentGroupMode : 'folder';
+        let groupMode: 'folder' | 'type' | 'reference' | 'lock' | 'location' | 'custom' = this.currentGroupMode ? this.currentGroupMode : 'folder';
         let groupName = '';
         let scope: 'all' | 'filtered' | 'selected' = 'filtered';
 
@@ -76,10 +77,11 @@ export class GroupModal extends Modal {
                     .addOption('type', '按类型（PNG/JPG/…）')
                     .addOption('reference', '按引用状态（被引用/未引用）')
                     .addOption('lock', '按锁定状态（锁定/未锁定）')
+                    .addOption('location', '按位置类型（云端/本地）')
                     .addOption('custom', '自定义名称')
                     .setValue(groupMode)
                     .onChange(value => {
-                        groupMode = value as any;
+                        groupMode = value;
                         nameInput.settingEl.style.display = groupMode === 'custom' ? '' : 'none';
                     });
             });
@@ -179,8 +181,12 @@ export class GroupModal extends Modal {
                     if (idx >= 0) {
                         arr.splice(idx, 1);
                         if (plugin) {
-                            plugin.data.customGroupNames = arr;
-                            await plugin.saveData(plugin.data);
+                            try {
+                                plugin.data.customGroupNames = arr;
+                                await plugin.saveData(plugin.data);
+                            } catch (error) {
+                                new Notice('❌ 删除分组记录失败');
+                            }
                         }
                         renderRecent();
                     }
@@ -219,7 +225,31 @@ export class GroupModal extends Modal {
                         new Notice('请输入分组名称');
                         return;
                     }
-                    
+
+                    // 验证自定义分组名称（防止非法字符和路径遍历）
+                    if (groupMode === 'custom' && groupName.trim()) {
+                        const trimmedName = groupName.trim();
+
+                        // 检查是否包含路径分隔符或非法字符
+                        if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName.includes('..')) {
+                            new Notice('❌ 分组名称不能包含路径分隔符或 ".."');
+                            return;
+                        }
+
+                        // 检查名称长度
+                        if (trimmedName.length > 50) {
+                            new Notice('❌ 分组名称不能超过50个字符');
+                            return;
+                        }
+
+                        // 检查是否包含文件名非法字符
+                        const invalidChars = /[<>:"|?*]/g;
+                        if (invalidChars.test(trimmedName)) {
+                            new Notice('❌ 分组名称包含非法字符');
+                            return;
+                        }
+                    }
+
                     // 若为自定义模式，记录到最近使用列表
                     if (groupMode === 'custom' && groupName.trim() && plugin) {
                         const arr: string[] = (plugin.data.customGroupNames || []) as string[];
@@ -227,8 +257,12 @@ export class GroupModal extends Modal {
                             arr.unshift(groupName.trim());
                             // 限制长度，避免无限增长
                             if (arr.length > 20) arr.length = 20;
-                            plugin.data.customGroupNames = arr;
-                            await plugin.saveData(plugin.data);
+                            try {
+                                plugin.data.customGroupNames = arr;
+                                await plugin.saveData(plugin.data);
+                            } catch (error) {
+                                new Notice('❌ 保存分组记录失败');
+                            }
                         }
                     }
 

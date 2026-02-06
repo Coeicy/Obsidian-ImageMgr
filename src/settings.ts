@@ -34,12 +34,16 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	// ==================== 功能开关 ====================
 	/** 是否启用去重功能 - 检测并标记重复的图片（基于 MD5 哈希） */
 	enableDeduplication: true,
+	/** 是否启用重复图片检测 - 在首页显示重复检测按钮 */
+	enableDuplicateDetection: true,
+	/** 是否启用空链接检测 - 在首页显示空链接检测按钮 */
+	enableBrokenLinksDetection: true,
+	/** 空链接页面新增条目的插入位置 - bottom(默认) | top */
+	brokenLinksNewItemPosition: 'bottom',
 	/** 是否自动生成图片名称 - 根据路径和时间戳自动生成有意义的名称 */
 	autoGenerateNames: true,
 	/** 前往笔记时是否保持详情页打开 - 点击引用时的行为 */
 	keepModalOpen: false,
-	/** 是否显示引用时间 - 显示引用该图片的笔记的最后修改时间 */
-	showReferenceTime: true,
 
 	// ==================== 重命名设置 ====================
 	/** 路径命名深度 - 自动命名时包含的路径级数（1-5） */
@@ -84,8 +88,6 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	pureGallery: false,
 
 	// ==================== 性能设置 ====================
-	/** 是否启用懒加载 - 只加载可见区域的图片，提高性能 */
-	enableLazyLoading: true,
 	/** 懒加载延迟（毫秒） - 延迟多久后加载图片 */
 	lazyLoadDelay: 200,
 	/** 最大缓存图片数 - 内存中保留的最大缓存图片数量 */
@@ -105,6 +107,26 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	/** 是否统一卡片高度 - 所有卡片保持相同高度 */
 	uniformCardHeight: false,
 
+	// ==================== 移动端适配设置 ====================
+	/** 移动端每行图片数量（1-5，默认根据屏幕宽度自动调整） */
+	mobileImagesPerRow: undefined,
+	/** 是否启用紧凑工具栏（移动端优化） */
+	enableCompactToolbar: false,
+	/** 移动端是否隐藏非必要信息（尺寸、锁定图标等） */
+	hideNonEssentialInfo: true,
+	/** 平板端每行图片数量（1-5，默认3） */
+	tabletImagesPerRow: 3,
+	/** 手机横屏每行图片数量（1-5，默认2） */
+	phoneLandscapeImagesPerRow: 2,
+	/** 手机竖屏每行图片数量（1-2，默认1） */
+	phonePortraitImagesPerRow: 1,
+
+	// ==================== 移动端隐私设置 ====================
+	/** 是否创建 .nomedia 文件（防止手机相册扫描图片） */
+	createNomediaFile: false,
+	/** .nomedia 文件的目标路径（相对路径，空表示根目录） */
+	nomediaPath: '',
+
 	// ==================== 删除设置 ====================
 	/** 删除前确认 - 删除图片时是否弹出确认对话框 */
 	confirmBeforeDelete: true,
@@ -117,7 +139,7 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 
 	// ==================== 搜索设置 ====================
 	/** 搜索是否区分大小写 - 搜索时的大小写敏感性 */
-	searchCaseSensitive: false,
+	searchCaseSensitive: true,
 	/** 实时搜索延迟（毫秒） - 输入时的防抖延迟 */
 	liveSearchDelay: 300,
 	/** 搜索是否包含路径 - 是否在文件路径中搜索 */
@@ -150,5 +172,34 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	 * 格式：{ 快捷键ID: 快捷键字符串 }
 	 * 例如：{ 'open-image-manager': 'Ctrl+Shift+I' }
 	 */
-	keyboardShortcuts: {}
+	keyboardShortcuts: {},
+
+	// ==================== 云端图片设置 ====================
+	/** 是否扫描网络图片 - 扫描 Markdown 文件中的网络图片链接 */
+	scanRemoteImages: false,
+	/** 网络图片代理服务 - 当直接加载失败时使用的代理服务 */
+	remoteImageProxy: 'both', // 'none' | 'obsidian' | 'weserv' | 'both'
+	/** 是否在列表中显示云端图片标识 */
+	showRemoteImageBadge: true,
+	/** 云端图片加载超时时间（毫秒） */
+	remoteImageTimeout: 10000,
+	/** 是否自动尝试代理加载失败的云端图片 */
+	autoRetryRemoteImage: true,
+	// ==================== 图床上传设置 ====================
+	uploadConfig: {
+		type: 'qiniu',
+		qiniu: {
+			accessKey: '',
+			secretKey: '',
+			bucket: '',
+			domain: '',
+			region: 'z0'
+		},
+		aliyun: {
+			accessKeyId: '',
+			accessKeySecret: '',
+			bucket: '',
+			region: 'oss-cn-hangzhou'
+		}
+	}
 }

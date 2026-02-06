@@ -194,7 +194,7 @@ class TrashItemCollector {
 			return items;
 		}
 
-		await this.collectTrashItems(folder, items);
+		await this.collectTrashItems(folder, items, 0);
 		
 		// 按删除时间降序排序
 		items.sort((a, b) => b.deletedAt - a.deletedAt);
@@ -232,7 +232,20 @@ class TrashItemCollector {
 	/**
 	 * 递归收集回收站文件
 	 */
-	private async collectTrashItems(folder: TFolder, items: TrashItem[]): Promise<void> {
+	private async collectTrashItems(folder: TFolder, items: TrashItem[], depth: number = 0): Promise<void> {
+		// 防止无限递归，设置最大深度限制（默认100层）
+		const MAX_DEPTH = 100;
+		if (depth > MAX_DEPTH) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.warn(
+					OperationType.PLUGIN_ERROR,
+					`回收站目录深度超过限制 (${MAX_DEPTH}): ${folder.path}`,
+					{ details: { folderPath: folder.path, depth: depth } }
+				);
+			}
+			return;
+		}
+		
 		if (!folder || !folder.children) {
 			return;
 		}
@@ -245,7 +258,7 @@ class TrashItemCollector {
 						items.push(item);
 					}
 				} else if (child instanceof TFolder) {
-					await this.collectTrashItems(child, items);
+					await this.collectTrashItems(child, items, depth + 1);
 				}
 			} catch (childError) {
 				const itemPath = child?.path || '未知路径';
@@ -474,7 +487,11 @@ export class TrashManager {
 
 			if (!trashFolder) {
 				// 无法通过 API 访问回收站文件夹，使用 adapter 直接操作
-				console.log('[TrashManager] 使用 adapter 直接操作回收站');
+				if (this.plugin?.logger) {
+					await this.plugin.logger.debug(OperationType.TRASH, '使用 adapter 直接操作回收站', {
+						imagePath: file.path
+					});
+				}
 				
 				// 确保回收站文件夹存在（使用 adapter）
 				const trashFolderPath = this.getTrashFolderPath();
@@ -482,9 +499,18 @@ export class TrashManager {
 				if (!folderExists) {
 					try {
 						await this.vault.adapter.mkdir(trashFolderPath);
-						console.log('[TrashManager] 通过 adapter 创建回收站文件夹');
+						if (this.plugin?.logger) {
+							await this.plugin.logger.debug(OperationType.TRASH, '通过 adapter 创建回收站文件夹', {
+								imagePath: file.path
+							});
+						}
 					} catch (mkdirError) {
-						console.error('[TrashManager] 创建回收站文件夹失败:', mkdirError);
+						if (this.plugin?.logger) {
+							await this.plugin.logger.error(OperationType.TRASH, '创建回收站文件夹失败', {
+								imagePath: file.path,
+								error: mkdirError instanceof Error ? mkdirError : new Error(String(mkdirError))
+							});
+						}
 						if (this.plugin?.logger) {
 							await this.plugin.logger.warn(
 								OperationType.TRASH,
@@ -504,7 +530,11 @@ export class TrashManager {
 				
 				// 使用 adapter 创建文件
 				await this.vault.adapter.writeBinary(trashPath, fileContent);
-				console.log('[TrashManager] 通过 adapter 创建回收站文件:', trashPath);
+				if (this.plugin?.logger) {
+					await this.plugin.logger.debug(OperationType.TRASH, `通过 adapter 创建回收站文件: ${trashPath}`, {
+						imagePath: file.path
+					});
+				}
 			} else {
 				// 使用正常 API 创建文件
 				await this.vault.createBinary(trashPath, fileContent);
@@ -673,11 +703,15 @@ export class TrashManager {
 				);
 			}
 			
-			console.error('[ImageMgr] 获取回收站文件列表失败:', {
-				error: errorMessage,
-				stack: errorStack,
-				trashFolderPath: this.getTrashFolderPath()
-			});
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, '获取回收站文件列表失败', {
+					error: new Error(errorMessage),
+					details: {
+						stack: errorStack,
+						trashFolderPath: this.getTrashFolderPath()
+					}
+				});
+			}
 			
 			return [];
 		}
@@ -713,7 +747,11 @@ export class TrashManager {
 				const exists = await this.vault.adapter.exists(item.path);
 				
 				if (!exists) {
-					console.error('[TrashManager] 找不到回收站文件:', item.path);
+					if (this.plugin?.logger) {
+						await this.plugin.logger.error(OperationType.RESTORE, `找不到回收站文件: ${item.path}`, {
+							imagePath: item.path
+						});
+					}
 					return false;
 				}
 				

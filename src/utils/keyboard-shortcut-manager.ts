@@ -226,6 +226,29 @@ export const SHORTCUT_DEFINITIONS: Record<string, ShortcutDefinition> = {
 		description: '锁定或解锁选中的图片',
 		defaultKey: 'Ctrl+Shift+L',
 		category: 'batch'
+	},
+	
+	// 新增快捷键：快速操作
+	'manager-toggle-sidebar': {
+		id: 'manager-toggle-sidebar',
+		name: '切换侧边栏',
+		description: '显示或隐藏侧边栏',
+		defaultKey: 'Ctrl+\\',
+		category: 'view'
+	},
+	'manager-refresh': {
+		id: 'manager-refresh',
+		name: '刷新列表',
+		description: '刷新图片列表',
+		defaultKey: 'F5',
+		category: 'view'
+	},
+	'manager-toggle-selection': {
+		id: 'manager-toggle-selection',
+		name: '切换选择模式',
+		description: '在单选和多选模式间切换',
+		defaultKey: 'Ctrl+Space',
+		category: 'view'
 	}
 };
 
@@ -337,6 +360,7 @@ export function formatShortcut(shortcut: string, isMac: boolean = false): string
  * 3. 如果快捷键有修饰键，则不允许额外的修饰键
  * 4. 如果快捷键是纯按键（无修饰键），则允许任意修饰键组合
  * 5. 支持特殊键别名（如 Delete/Del, Escape/Esc）
+ * 6. 检查与系统快捷键的冲突
  * 
  * @param e - 键盘事件对象
  * @param shortcut - 快捷键字符串
@@ -394,7 +418,10 @@ export function matchesShortcut(
 		'arrowup': ['arrowup', 'up'],
 		'arrowdown': ['arrowdown', 'down'],
 		'+': ['+', '='],
-		'=': ['=', '+']
+		'=': ['=', '+'],
+		'backspace': ['backspace', 'back'],
+		'enter': ['enter', 'return'],
+		'tab': ['tab', '\t']
 	};
 	
 	for (const [alias, keys] of Object.entries(keyAliases)) {
@@ -404,6 +431,79 @@ export function matchesShortcut(
 	}
 	
 	return false;
+}
+
+/**
+ * 检查快捷键是否与系统快捷键冲突
+ * 
+ * 检测常见的系统快捷键冲突，避免干扰用户正常操作
+ * 
+ * @param shortcut - 要检查的快捷键
+ * @returns 如果与系统快捷键冲突返回 true
+ */
+export function isSystemShortcut(shortcut: string): boolean {
+	const systemShortcuts = [
+		// 浏览器系统快捷键
+		'Ctrl+W', 'Ctrl+Shift+W', 'Ctrl+T', 'Ctrl+Shift+T', 'Ctrl+N',
+		'Ctrl+Shift+N', 'Ctrl+Tab', 'Ctrl+Shift+Tab', 'Ctrl+1', 'Ctrl+2',
+		'Ctrl+3', 'Ctrl+4', 'Ctrl+5', 'Ctrl+6', 'Ctrl+7', 'Ctrl+8', 'Ctrl+9',
+		'Ctrl+0', 'Ctrl+L', 'Ctrl+J', 'Ctrl+H', 'Ctrl+Shift+Delete',
+		'Ctrl+Shift+O', 'Ctrl+Shift+I', 'Ctrl+Shift+C', 'Ctrl+Shift+J',
+		'F11', 'F12',
+		
+		// Obsidian 系统快捷键
+		'Ctrl+O', 'Ctrl+Shift+O', 'Ctrl+E', 'Ctrl+Shift+E', 'Ctrl+P',
+		'Ctrl+Shift+P', 'Ctrl+Shift+F', 'Ctrl+Shift+G', 'Ctrl+Shift+S',
+		'Ctrl+Shift+L', 'Ctrl+Shift+M', 'Ctrl+Shift+N', 'Ctrl+Shift+H',
+		'Ctrl+Shift+U', 'Ctrl+Shift+V', 'Ctrl+Shift+B', 'Ctrl+Shift+I',
+		'Ctrl+Shift+K', 'Ctrl+Shift+D', 'Ctrl+Shift+A', 'Ctrl+Shift+Z',
+		'Ctrl+Shift+X', 'Ctrl+Shift+Y', 'Ctrl+Shift+R', 'Ctrl+Shift+T',
+		'Ctrl+Shift+Q', 'Ctrl+Shift+W', 'Ctrl+Shift+1', 'Ctrl+Shift+2',
+		'Ctrl+Shift+3', 'Ctrl+Shift+4', 'Ctrl+Shift+5', 'Ctrl+Shift+6',
+		'Ctrl+Shift+7', 'Ctrl+Shift+8', 'Ctrl+Shift+9', 'Ctrl+Shift+0'
+	];
+	
+	return systemShortcuts.includes(shortcut);
+}
+
+/**
+ * 检查快捷键是否有效
+ * 
+ * 验证快捷键格式是否正确，是否与系统快捷键冲突
+ * 
+ * @param shortcut - 要检查的快捷键
+ * @returns 验证结果对象
+ */
+export function validateShortcut(shortcut: string): { isValid: boolean; error?: string } {
+	if (!shortcut || shortcut.trim() === '') {
+		return { isValid: false, error: '快捷键不能为空' };
+	}
+	
+	// 检查快捷键格式
+	const parts = shortcut.split('+').map(s => s.trim());
+	if (parts.length === 0) {
+		return { isValid: false, error: '快捷键格式错误' };
+	}
+	
+	// 检查主键是否为空
+	const mainKey = parts[parts.length - 1];
+	if (!mainKey) {
+		return { isValid: false, error: '快捷键缺少主键' };
+	}
+	
+	// 检查是否有重复的修饰键
+	const modifiers = parts.slice(0, -1);
+	const uniqueModifiers = new Set(modifiers);
+	if (uniqueModifiers.size !== modifiers.length) {
+		return { isValid: false, error: '快捷键包含重复的修饰键' };
+	}
+	
+	// 检查是否与系统快捷键冲突
+	if (isSystemShortcut(shortcut)) {
+		return { isValid: false, error: '此快捷键与系统快捷键冲突' };
+	}
+	
+	return { isValid: true };
 }
 
 /**
