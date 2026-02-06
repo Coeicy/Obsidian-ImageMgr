@@ -766,11 +766,11 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				}));
 
 		// 默认值设置（二级标题）
-		const defaultsTitle = homeSection.contentEl.createEl('h4', { text: '⚙️ 默认值' });
-		defaultsTitle.style.marginTop = '20px';
-		defaultsTitle.style.marginBottom = '12px';
-		defaultsTitle.style.paddingBottom = '8px';
-		defaultsTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
+		const defaultsTitle2 = homeSection.contentEl.createEl('h4', { text: '⚙️ 默认值' });
+		defaultsTitle2.style.marginTop = '20px';
+		defaultsTitle2.style.marginBottom = '12px';
+		defaultsTitle2.style.paddingBottom = '8px';
+		defaultsTitle2.style.borderBottom = '1px solid var(--background-modifier-border)';
 
 		new Setting(homeSection.contentEl)
 			.setName('默认排序方式')

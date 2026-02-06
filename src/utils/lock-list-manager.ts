@@ -315,9 +315,9 @@ export class LockListManager {
 			const ignoredHashes: string[] = [];
 			const hashMetadata: Record<string, any> = {};
 
-			for (const lockedFile of this.lockListCache.values()) {
-				// 保存所有锁定文件，不论 exists 状态
-				ignoredFiles.push(lockedFile.fileName);
+		for (const lockedFile of this.lockListCache.values()) {
+			// 保存所有锁定文件，不论 exists 状态
+			ignoredFiles.push(lockedFile.fileName);
 
 			if (lockedFile.md5) {
 				ignoredHashes.push(lockedFile.md5);
@@ -327,19 +327,20 @@ export class LockListManager {
 					addedTime: lockedFile.addedTime
 				};
 			}
+		}
 
-			// 更新设置
-			this.plugin.settings.ignoredFiles = ignoredFiles.join('\n');
-			this.plugin.settings.ignoredHashes = ignoredHashes.join('\n');
-			this.plugin.settings.ignoredHashMetadata = hashMetadata;
+		// 更新设置
+		this.plugin.settings.ignoredFiles = ignoredFiles.join('\n');
+		this.plugin.settings.ignoredHashes = ignoredHashes.join('\n');
+		this.plugin.settings.ignoredHashMetadata = hashMetadata;
 
-			// 保存到存储
-			await this.plugin.saveSettings();
+		// 保存到存储
+		await this.plugin.saveSettings();
 
-			// 触发回调，通知设置标签页刷新（除非跳过）
-			if (!skipCallback && this.onLockListChanged) {
-				this.onLockListChanged();
-			}
+		// 触发回调，通知设置标签页刷新（除非跳过）
+		if (!skipCallback && this.onLockListChanged) {
+			this.onLockListChanged();
+		}
 		} catch (error) {
 			if (this.plugin?.logger) {
 				await this.plugin.logger.error(OperationType.PLUGIN_ERROR, '保存锁定列表失败', {
