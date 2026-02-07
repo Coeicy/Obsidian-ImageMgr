@@ -1077,6 +1077,11 @@ export class ImageScanner {
 			}
 		}
 		
+		// 为云端图片计算并填充稳定 ID：文件名+URL 组合哈希（用于缓存、操作记录、详情展示）
+		const { hashNetworkImageId } = await import('../network-image/utils');
+		for (const info of remoteImageMap.values()) {
+			info.urlHash = await hashNetworkImageId(info.name, info.path);
+		}
 		// 将 Map 转换为数组
 		linkFormatStats.remoteLinks = Array.from(remoteImageMap.keys());
 		const remoteImages = Array.from(remoteImageMap.values());

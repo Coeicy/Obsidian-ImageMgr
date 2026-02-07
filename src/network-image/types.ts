@@ -20,11 +20,20 @@ export enum ObjectStore {
  * 网络图片记录接口
  */
 export interface NetworkImageRecord {
-    /** 主键：URL 的 SHA-256 哈希 */
+    /** 主键：稳定 ID = SHA-256(displayName + "|" + url)，仅改链接或仅改文件名时不变 */
     id: string;
+    
+    /** 展示名（用于组合哈希与承接查找），与 ImageInfo.name 一致 */
+    name?: string;
     
     /** 原始 URL */
     url: string;
+    
+    /** URL 的 SHA-256，用于按 URL 承接查找与索引（旧记录可能缺失，迁移时补全） */
+    urlHash?: string;
+    
+    /** 展示名的 SHA-256，用于按文件名承接查找与索引（可选） */
+    nameHash?: string;
     
     /** 来源文件路径 */
     sourceFilePath: string;

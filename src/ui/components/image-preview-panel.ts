@@ -107,7 +107,7 @@ export class ImagePreviewPanel {
 			(async () => {
 				try {
 					const imgEl = this.container.createEl('img', {
-						attr: { src: this.image.path }
+						attr: { src: this.image.path, draggable: 'false' }
 					});
 					imgEl.referrerPolicy = 'no-referrer'; // 添加防盗链策略
 					imgEl.classList.add('detail-image');
@@ -176,7 +176,7 @@ export class ImagePreviewPanel {
 				this.objectUrl = imageUrl; // 保存引用以便清理
 				
 				const imgEl = this.container.createEl('img', {
-					attr: { src: imageUrl }
+					attr: { src: imageUrl, draggable: 'false' }
 				});
 				imgEl.classList.add('detail-image');
 				this.imageElement = imgEl;
@@ -214,7 +214,7 @@ export class ImagePreviewPanel {
 				const imageUrl = this.vault.getResourcePath(imgFile);
 				if (imageUrl) {
 					const imgEl = this.container.createEl('img', {
-						attr: { src: imageUrl }
+						attr: { src: imageUrl, draggable: 'false' }
 					});
 					imgEl.classList.add('detail-image');
 					this.imageElement = imgEl;
@@ -357,7 +357,7 @@ export class ImagePreviewPanel {
 					this.onImageLoaded(this.imageElement);
 				}
 			} else {
-				const imgEl = this.container.createEl('img', { attr: { src: this.image.path } });
+				const imgEl = this.container.createEl('img', { attr: { src: this.image.path, draggable: 'false' } });
 				imgEl.referrerPolicy = 'no-referrer';
 				imgEl.classList.add('detail-image');
 				this.imageElement = imgEl;
@@ -396,7 +396,7 @@ export class ImagePreviewPanel {
 					} else {
 						const preloader = new Image();
 						preloader.onload = () => {
-							const imgEl = this.container.createEl('img', { attr: { src: imageUrl } });
+							const imgEl = this.container.createEl('img', { attr: { src: imageUrl, draggable: 'false' } });
 							imgEl.classList.add('detail-image');
 							this.imageElement = imgEl;
 							this.wheelHandler = (e: WheelEvent) => { e.preventDefault(); this.onWheel(e); };
@@ -435,7 +435,7 @@ export class ImagePreviewPanel {
 						// 首次无元素时，按初始渲染逻辑创建，但等加载后再显示
 						const preloader = new Image();
 						preloader.onload = () => {
-							const imgEl = this.container.createEl('img', { attr: { src: imageUrl } });
+							const imgEl = this.container.createEl('img', { attr: { src: imageUrl, draggable: 'false' } });
 							imgEl.classList.add('detail-image');
 							this.imageElement = imgEl;
 							// 绑定事件处理

@@ -44,6 +44,31 @@ export async function hashUrl(url: string): Promise<string> {
 }
 
 /**
+ * 从 URL 推导展示用文件名（与 ImageInfo.name 推导方式一致）
+ * @param url - 图片 URL
+ * @returns 用于组合哈希的 displayName
+ */
+export function extractNameFromUrl(url: string): string {
+    let name = url.split('/').pop() || 'unknown';
+    if (name.includes('?')) name = name.split('?')[0];
+    if (name.includes('#')) name = name.split('#')[0];
+    return name.trim() || 'unknown';
+}
+
+/**
+ * 云端图片稳定 ID：SHA-256(displayName + "|" + url)
+ * 仅改链接或仅改文件名时可承接旧记录；同时改两者则为新图片。
+ * @param displayName - 展示名（与 ImageInfo.name 一致）
+ * @param url - 图片 URL
+ * @returns 用于缓存主键与操作记录的稳定哈希
+ */
+export async function hashNetworkImageId(displayName: string, url: string): Promise<string> {
+    const name = (displayName || '').trim() || extractNameFromUrl(url);
+    const combined = `${name}|${url}`;
+    return hashString(combined);
+}
+
+/**
  * 计算文件内容的 SHA-256 哈希值
  * @param content - 文件内容字符串
  * @returns 文件内容的 SHA-256 哈希值

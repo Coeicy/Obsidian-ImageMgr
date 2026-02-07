@@ -52,7 +52,7 @@ import {
     NetworkImageReference,
     SystemMetadata
 } from './types';
-import { hashString, hashContent } from './utils';
+import { hashString, hashContent, hashNetworkImageId, extractNameFromUrl } from './utils';
 import { ScanErrorHandler } from './error-handler';
 
 /**
@@ -339,25 +339,20 @@ export class IncrementalNetworkImageScanner {
             const imageIds: string[] = [];
             
             for (const image of images) {
-                const imageId = await hashString(image.url);
-                
                 // 检查是否在黑名单中，如果是则跳过
                 if (await this.isUrlBlacklisted(image.url)) {
                     continue;
                 }
                 
-                imageIds.push(imageId);
+                const resolved = await this.resolveImageRecord(image, file);
+                if (!resolved) continue;
                 
-                // 检查图片是否已缓存
-                const cachedImage = await this.getCachedImage(imageId);
+                imageIds.push(resolved.record.id);
                 
-                if (!cachedImage) {
-                    // 新图片
-                    await this.cacheNewImage(image, file, contentHash);
+                if (resolved.isNew) {
                     newImages++;
-                } else if (await this.needsUpdate(cachedImage, file, image)) {
-                    // 需要更新的图片
-                    await this.updateCachedImage(cachedImage, image, file, contentHash);
+                } else if (await this.needsUpdate(resolved.record, file, image)) {
+                    await this.updateCachedImage(resolved.record, image, file, contentHash);
                     updatedImages++;
                 }
             }
@@ -479,22 +474,66 @@ export class IncrementalNetworkImageScanner {
     }
     
     /**
-     * 缓存新图片
-     * @param image - 图片引用
-     * @param file - 文件对象
-     * @param contentHash - 文件内容哈希
+     * 按主键 id 或 urlHash/nameHash 解析出要使用的记录（含承接与迁移）
+     * @returns { record, isNew } 若 isNew 则已写入新记录，否则为已有记录（可能已更新 name/url）
      */
-    private async cacheNewImage(
+    private async resolveImageRecord(
         image: NetworkImageReference,
-        file: any,
-        contentHash: string
-    ): Promise<void> {
+        file: any
+    ): Promise<{ record: NetworkImageRecord; isNew: boolean } | null> {
+        const name = extractNameFromUrl(image.url);
+        const id = await hashNetworkImageId(name, image.url);
+        const urlHash = await hashString(image.url);
+        const nameHash = await hashString(name);
         const now = Date.now();
-        const imageId = await hashString(image.url);
         
-        const record: NetworkImageRecord = {
-            id: imageId,
+        const tx = this.db.transaction([ObjectStore.IMAGES], 'readwrite');
+        const store = tx.objectStore(ObjectStore.IMAGES);
+        
+        // 1) 按主键
+        let record = await this.getFromStore(store, id);
+        if (record) {
+            return { record: record as NetworkImageRecord, isNew: false };
+        }
+        
+        // 2) 按 URL 承接（仅改名的情形）
+        record = await this.getCachedImageByUrlHash(store, urlHash);
+        if (record) {
+            const r = record as NetworkImageRecord;
+            r.name = name;
+            r.nameHash = nameHash;
+            if (r.urlHash === undefined) r.urlHash = urlHash;
+            r.updatedAt = now;
+            await new Promise<void>((resolve, reject) => {
+                const req = store.put(r);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+            return { record: r, isNew: false };
+        }
+        
+        // 3) 按文件名承接（仅改链接的情形，仅当唯一时）
+        record = await this.getCachedImageByNameHash(store, nameHash);
+        if (record) {
+            const r = record as NetworkImageRecord;
+            r.url = image.url;
+            r.urlHash = urlHash;
+            r.updatedAt = now;
+            await new Promise<void>((resolve, reject) => {
+                const req = store.put(r);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+            return { record: r, isNew: false };
+        }
+        
+        // 4) 新建
+        const newRecord: NetworkImageRecord = {
+            id,
+            name,
             url: image.url,
+            urlHash,
+            nameHash,
             sourceFilePath: file.path,
             sourceFileMtime: file.stat.mtime,
             line: image.line,
@@ -507,12 +546,63 @@ export class IncrementalNetworkImageScanner {
             accessCount: 0,
             lastAccessed: now
         };
-        
-        const tx = this.db.transaction([ObjectStore.IMAGES], 'readwrite');
-        const store = tx.objectStore(ObjectStore.IMAGES);
-        await store.put(record);
-        
-
+        await new Promise<void>((resolve, reject) => {
+            const req = store.put(newRecord);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+        return { record: newRecord, isNew: true };
+    }
+    
+    /** 按 urlHash 查记录，兼容旧记录（无 urlHash 时用 hash(url) 匹配） */
+    private async getCachedImageByUrlHash(store: IDBObjectStore, urlHash: string): Promise<NetworkImageRecord | null> {
+        try {
+            if (store.indexNames.contains('by-url-hash')) {
+                const viaIndex = await this.getAllFromIndex(store.index('by-url-hash'), urlHash);
+                if (viaIndex.length > 0) return viaIndex[0] as NetworkImageRecord;
+            }
+        } catch (_) { /* 索引可能尚未存在 */ }
+        const all = await this.getAllFromStore(store);
+        for (const r of all) {
+            const rec = r as NetworkImageRecord;
+            if (rec.urlHash === urlHash) return rec;
+            if (rec.urlHash == null && (await hashString(rec.url)) === urlHash) return rec;
+        }
+        return null;
+    }
+    
+    /** 按 nameHash 查记录，仅当恰好一条时返回（兼容旧记录） */
+    private async getCachedImageByNameHash(store: IDBObjectStore, nameHash: string): Promise<NetworkImageRecord | null> {
+        try {
+            if (store.indexNames.contains('by-name-hash')) {
+                const viaIndex = await this.getAllFromIndex(store.index('by-name-hash'), nameHash);
+                if (viaIndex.length === 1) return viaIndex[0] as NetworkImageRecord;
+                if (viaIndex.length > 1) return null; // 多条不承接
+            }
+        } catch (_) { /* 索引可能尚未存在 */ }
+        const all = await this.getAllFromStore(store);
+        const matches: NetworkImageRecord[] = [];
+        for (const r of all) {
+            const rec = r as NetworkImageRecord;
+            const nHash = rec.nameHash != null ? rec.nameHash : await hashString(extractNameFromUrl(rec.url));
+            if (nHash === nameHash) matches.push(rec);
+        }
+        return matches.length === 1 ? matches[0] : null;
+    }
+    
+    /**
+     * 缓存新图片（由 resolveImageRecord 内联创建，此方法保留供兼容）
+     * @param image - 图片引用
+     * @param file - 文件对象
+     * @param contentHash - 文件内容哈希
+     */
+    private async cacheNewImage(
+        image: NetworkImageReference,
+        file: any,
+        contentHash: string
+    ): Promise<void> {
+        const resolved = await this.resolveImageRecord(image, file);
+        if (resolved?.isNew) { /* 已写入 */ }
     }
     
     /**

@@ -172,7 +172,8 @@ export class ImageDetailModal extends Modal {
 	private dimensionValue?: HTMLElement; // 尺寸值
 	private dimensionLi?: HTMLElement; // 尺寸列表项（用于显示/隐藏）
 	private importValue?: HTMLElement; // 导入时间值
-	private hashValue?: HTMLElement; // MD5哈希值
+	private hashValue?: HTMLElement; // 哈希值（URL哈希或MD5）
+	private hashLabel?: HTMLElement; // 哈希标签（用于切换图片时更新）
 	private mdInput?: HTMLInputElement; // Markdown链接输入框
 	private htmlInput?: HTMLInputElement; // HTML链接输入框
 	private linkTitle?: HTMLElement; // 链接标题
@@ -382,8 +383,9 @@ export class ImageDetailModal extends Modal {
 				},
 				this.isTrashFile, // 传递 isTrashFile 参数
 				(imgEl: HTMLImageElement) => {
-					// 图片加载完成后的回调（用于回收站文件）
+					// 图片加载完成后的回调（用于云端/回收站等异步创建的图片）
 					this.imgElement = imgEl;
+					this.updateTransform(); // 确保缩放/平移状态应用到该元素
 				},
 				async (message: string, error?: any) => {
 					// Logger 回调
@@ -880,6 +882,22 @@ export class ImageDetailModal extends Modal {
 			pathValue.style.flex = '1';
 			// 保存引用（用于切换图片时更新）
 			this.pathInput = null;
+			// 云端图片：显示元数据缓存位置
+			if (this.isRemoteImage && this.plugin?.networkImageCacheAdapter) {
+				pathLi.style.flexDirection = 'column';
+				pathLi.style.alignItems = 'stretch';
+				const cacheLocationWrap = pathLi.createDiv();
+				cacheLocationWrap.style.marginTop = '6px';
+				cacheLocationWrap.style.paddingTop = '6px';
+				cacheLocationWrap.style.borderTop = '1px solid var(--background-modifier-border)';
+				cacheLocationWrap.style.fontSize = '0.8em';
+				cacheLocationWrap.style.color = 'var(--text-muted)';
+				const cacheLabel = cacheLocationWrap.createSpan({ text: '缓存位置：' });
+				cacheLabel.style.fontWeight = 'bold';
+				const cachePath = this.plugin.networkImageCacheAdapter.getCacheDir();
+				const cachePathEl = cacheLocationWrap.createSpan({ text: cachePath });
+				cachePathEl.style.wordBreak = 'break-all';
+			}
 		} else {
 			// 普通文件：使用输入框
 			// 输入框和按钮的容器（按钮始终在输入框右侧）
@@ -1575,7 +1593,7 @@ export class ImageDetailModal extends Modal {
 			}
 		}
 		
-		// MD5哈希值（单独一行）
+		// 哈希值（单独一行）：云端图片显示 URL 哈希，本地/回收站显示 MD5 哈希
 		const hashLi = basicList.createEl('li');
 		hashLi.style.cssText = `
 			display: flex;
@@ -1588,15 +1606,34 @@ export class ImageDetailModal extends Modal {
 			border: 1px solid var(--background-modifier-border);
 		`;
 		const hashLabel = hashLi.createSpan('info-label');
-		hashLabel.textContent = 'MD5哈希：';
+		this.hashLabel = hashLabel;
+		hashLabel.textContent = this.isRemoteImage ? 'URL哈希：' : 'MD5哈希：';
 		hashLabel.style.fontWeight = 'bold';
 		hashLabel.style.fontSize = '0.9em'; /* 统一字体大小 */
 		/* 宽度自适应，不设置固定宽度 */
 		const hashValue = hashLi.createSpan('info-value');
 		// 设置初始显示
-		hashValue.textContent = this.image.md5 || '计算中...';
-		if (!this.image.md5 && this.isTrashFile) {
-			hashValue.style.color = 'var(--text-muted)';
+		if (this.isRemoteImage) {
+			hashValue.textContent = this.image.urlHash || '计算中...';
+			if (!this.image.urlHash) {
+				hashValue.style.color = 'var(--text-muted)';
+				(async () => {
+					try {
+						const { hashNetworkImageId } = await import('../network-image/utils');
+						const id = await hashNetworkImageId(this.image.name, this.image.path);
+						this.image.urlHash = id;
+						hashValue.textContent = id;
+						hashValue.style.color = '';
+					} catch {
+						hashValue.textContent = '获取失败';
+					}
+				})();
+			}
+		} else {
+			hashValue.textContent = this.image.md5 || '计算中...';
+			if (!this.image.md5 && this.isTrashFile) {
+				hashValue.style.color = 'var(--text-muted)';
+			}
 		}
 		hashValue.style.fontSize = '0.9em';
 		hashValue.style.wordBreak = 'break-all'; /* 允许换行 */
@@ -1604,8 +1641,8 @@ export class ImageDetailModal extends Modal {
 		// 其他样式由 .info-value CSS 类统一管理
 		this.hashValue = hashValue; // 保存引用
 		
-		// 异步计算MD5哈希值
-		if (!this.image.md5 && this.isTrashFile) {
+		// 异步计算MD5哈希值（仅本地/回收站）
+		if (!this.isRemoteImage && !this.image.md5 && this.isTrashFile) {
 			// 回收站文件：使用 adapter 读取并计算
 			(async () => {
 				try {
@@ -1644,8 +1681,8 @@ export class ImageDetailModal extends Modal {
 					}
 				}
 			})();
-		} else if (!this.image.md5 && !this.isTrashFile) {
-			// 普通文件：使用 vault API 计算
+		} else if (!this.isRemoteImage && !this.image.md5 && !this.isTrashFile) {
+			// 普通本地文件：使用 vault API 计算 MD5
 			(async () => {
 				try {
 					const { calculateFileHash } = await import('../utils/image-hash');
@@ -1669,7 +1706,7 @@ export class ImageDetailModal extends Modal {
 					hashValue.textContent = '计算失败';
 				}
 			})();
-		} else if (!this.image.md5 && this.isTrashFile) {
+		} else if (!this.isRemoteImage && !this.image.md5 && this.isTrashFile) {
 			// 回收站文件如果没有 MD5，显示"无哈希信息"
 			hashValue.textContent = '无哈希信息';
 		}
@@ -2303,80 +2340,77 @@ export class ImageDetailModal extends Modal {
 			}
 		}
 		
-		// 更新MD5哈希
+		// 更新哈希（云端为 URL 哈希，本地/回收站为 MD5）
+		if (this.hashLabel) {
+			this.hashLabel.textContent = this.isRemoteImage ? 'URL哈希：' : 'MD5哈希：';
+		}
 		if (this.hashValue) {
-			// 回收站文件如果没有 MD5，显示"计算中..."并异步计算
-			if (this.isTrashFile && !this.image.md5) {
-				this.hashValue.textContent = '计算中...';
-				this.hashValue.style.color = 'var(--text-muted)';
-				
-				// 异步计算回收站文件的 MD5
-				(async () => {
-					try {
-						const { calculateBufferHash } = await import('../utils/image-hash');
-						const arrayBuffer = await this.vault.adapter.readBinary(this.image.path);
-						const hash = calculateBufferHash(arrayBuffer);
-						
-						if (this.hashValue) {
-							this.hashValue.textContent = hash;
-							this.hashValue.style.color = ''; // 重置颜色
-							this.image.md5 = hash;
-							
-							// 保存到插件缓存
-							if (this.plugin?.data && hash) {
-								if (!this.plugin.data.hashCache) {
-									this.plugin.data.hashCache = {};
-								}
-								this.plugin.data.hashCache[this.image.name] = {
-										hash: hash,
-										mtime: this.image.mtime || Date.now(),
-										size: this.image.size
-									};
-								await this.plugin.saveData(this.plugin.data);
+			if (this.isRemoteImage) {
+				this.hashValue.textContent = this.image.urlHash || '计算中...';
+				this.hashValue.style.color = this.image.urlHash ? '' : 'var(--text-muted)';
+				if (!this.image.urlHash) {
+					(async () => {
+						try {
+							const { hashNetworkImageId } = await import('../network-image/utils');
+							const id = await hashNetworkImageId(this.image.name, this.image.path);
+							this.image.urlHash = id;
+							if (this.hashValue) {
+								this.hashValue.textContent = id;
+								this.hashValue.style.color = '';
 							}
+						} catch {
+							if (this.hashValue) this.hashValue.textContent = '获取失败';
 						}
-					} catch (error) {
-						if (this.plugin?.logger) {
-							await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to calculate MD5 for trash file', {
-								imagePath: this.image.path,
-								error: error instanceof Error ? error : new Error(String(error))
-							});
-						}
-						if (this.hashValue) {
-							this.hashValue.textContent = '计算失败';
-							this.hashValue.style.color = 'var(--text-error)';
-						}
-					}
-				})();
+					})();
+				}
 			} else {
-				this.hashValue.textContent = this.image.md5 || '计算中...';
-				this.hashValue.style.color = ''; // 重置颜色
-			}
-			// 如果还没有MD5，异步计算（普通文件）
-			if (!this.image.md5 && !this.isTrashFile) {
-				(async () => {
-					try {
-						const { calculateFileHash } = await import('../utils/image-hash');
-						const fileForHash = this.vault.getAbstractFileByPath(this.image.path) as TFile;
-						if (fileForHash && this.hashValue) {
-							const hash = await calculateFileHash(fileForHash, this.vault);
-							this.hashValue.textContent = hash;
-							this.image.md5 = hash;
-							this.hashValue.style.wordBreak = 'break-all';
-							this.hashValue.style.maxWidth = '100%';
+				// 回收站文件如果没有 MD5，显示"计算中..."并异步计算
+				if (this.isTrashFile && !this.image.md5) {
+					this.hashValue.textContent = '计算中...';
+					this.hashValue.style.color = 'var(--text-muted)';
+					(async () => {
+						try {
+							const { calculateBufferHash } = await import('../utils/image-hash');
+							const arrayBuffer = await this.vault.adapter.readBinary(this.image.path);
+							const hash = calculateBufferHash(arrayBuffer);
+							if (this.hashValue) {
+								this.hashValue.textContent = hash;
+								this.hashValue.style.color = '';
+								this.image.md5 = hash;
+								if (this.plugin?.data && hash) {
+									if (!this.plugin.data.hashCache) this.plugin.data.hashCache = {};
+									this.plugin.data.hashCache[this.image.name] = { hash, mtime: this.image.mtime || Date.now(), size: this.image.size };
+									await this.plugin.saveData(this.plugin.data);
+								}
+							}
+						} catch (error) {
+							if (this.plugin?.logger) await this.plugin.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to calculate MD5 for trash file', { imagePath: this.image.path, error: error instanceof Error ? error : new Error(String(error)) });
+							if (this.hashValue) { this.hashValue.textContent = '计算失败'; this.hashValue.style.color = 'var(--text-error)'; }
 						}
-					} catch (error) {
-						if (this.plugin?.logger) {
-							await this.plugin.logger.error(OperationType.SCAN, '计算MD5失败', {
-								error: error as Error,
-								imagePath: this.image.path
-							});
+					})();
+				} else {
+					this.hashValue.textContent = this.image.md5 || '计算中...';
+					this.hashValue.style.color = '';
+				}
+				// 如果还没有MD5，异步计算（普通本地文件）
+				if (!this.image.md5 && !this.isTrashFile) {
+					(async () => {
+						try {
+							const { calculateFileHash } = await import('../utils/image-hash');
+							const fileForHash = this.vault.getAbstractFileByPath(this.image.path) as TFile;
+							if (fileForHash && this.hashValue) {
+								const hash = await calculateFileHash(fileForHash, this.vault);
+								this.hashValue.textContent = hash;
+								this.image.md5 = hash;
+								this.hashValue.style.wordBreak = 'break-all';
+								this.hashValue.style.maxWidth = '100%';
+							}
+						} catch (error) {
+							if (this.plugin?.logger) await this.plugin.logger.error(OperationType.SCAN, '计算MD5失败', { error: error as Error, imagePath: this.image.path });
+							if (this.hashValue) this.hashValue.textContent = '计算失败';
 						}
-						if (this.hashValue) {
-							this.hashValue.textContent = '计算失败';
-						}
-					}
-				})();
+					})();
+				}
 			}
 		}
 		
@@ -3326,7 +3360,9 @@ export class ImageDetailModal extends Modal {
 			return;
 		}
 		
-		const logs = this.plugin.logger.getImageLogs(this.image.md5);
+		// 云端图片用 urlHash（组合 id）查操作记录，本地/回收站用 md5
+		const hashForLogs = this.isRemoteImage ? (this.image.urlHash ?? '') : (this.image.md5 ?? '');
+		const logs = this.plugin.logger.getImageLogs(hashForLogs);
 		
 		if (logs.length === 0) {
 			const emptyLi = historyList.createEl('li', { cls: 'history-item empty' });

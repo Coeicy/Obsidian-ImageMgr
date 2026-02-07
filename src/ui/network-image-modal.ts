@@ -111,8 +111,19 @@ export class NetworkImageModal extends Modal {
         this.listContainer.empty();
         this.listContainer.createDiv({ text: '正在自动扫描全库网络图片...' });
         
-        // 强制扫描全库
-        this.images = await this.scanner.scanAll();
+        try {
+            // 优先使用缓存系统（会执行完整扫描并写入 images.json），否则回退到旧版扫描
+            if (this.plugin.networkImageAPI) {
+                const cached = await this.plugin.scanNetworkImages(undefined, { quiet: true });
+                this.images = cached
+                    .filter((img): img is LegacyNetworkImageReference => img.sourceFile instanceof TFile)
+                    .map(img => ({ ...img, length: img.originalText?.length ?? 0 }));
+            } else {
+                this.images = await this.scanner.scanAll();
+            }
+        } catch (e) {
+            this.images = await this.scanner.scanAll();
+        }
         this.selectedImages.clear();
         
         if (this.images.length === 0) {

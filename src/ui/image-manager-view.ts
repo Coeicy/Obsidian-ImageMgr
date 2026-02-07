@@ -3131,48 +3131,50 @@ export class ImageManagerView extends ItemView {
 				
 				// 同时从黑名单获取失败的链接（作为补充）
 				const blacklist = await this.plugin.networkImageAPI.getBlacklist();
-				const db = this.plugin.networkImageDBManager.getDB();
-				const tx = db.transaction(['network_images'], 'readonly');
-				const imageStore = tx.objectStore('network_images');
-				const imageIndex = imageStore.index('by-url');
-				
-				// 记录已添加的链接，避免重复
-				const addedUrls = new Set(brokenLinks.map(link => link.extractedPath));
-				
-				for (const blacklistItem of blacklist) {
-					// 如果已经在 broken 列表中，跳过
-					if (addedUrls.has(blacklistItem.url)) {
-						continue;
-					}
+				if (this.plugin.networkImageCacheAdapter) {
+					const db = this.plugin.networkImageCacheAdapter.getDB();
+					const tx = db.transaction(['network_images'], 'readonly');
+					const imageStore = tx.objectStore('network_images');
+					const imageIndex = imageStore.index('by-url');
 					
-					// 查找使用该 URL 的所有图片记录
-					const images = await new Promise<any[]>((resolve, reject) => {
-						const request = imageIndex.getAll(blacklistItem.url);
-						request.onsuccess = () => resolve(request.result || []);
-						request.onerror = () => reject(request.error);
-					});
+					// 记录已添加的链接，避免重复
+					const addedUrls = new Set(brokenLinks.map(link => link.extractedPath));
 					
-					// 为每个图片记录创建失败链接信息
-					for (const image of images) {
-						if (image.status === 'deleted') {
-							continue; // 跳过已删除的
+					for (const blacklistItem of blacklist) {
+						// 如果已经在 broken 列表中，跳过
+						if (addedUrls.has(blacklistItem.url)) {
+							continue;
 						}
 						
-						// 检查文件是否仍然存在
-						const file = this.app.vault.getAbstractFileByPath(image.sourceFilePath);
-						if (!file || !(file instanceof TFile)) {
-							continue; // 文件已删除，跳过
-						}
-						
-						brokenLinks.push({
-							filePath: image.sourceFilePath,
-							lineNumber: image.line + 1, // line 是 0-based，需要 +1
-							linkText: image.originalText || image.url,
-							extractedPath: image.url,
-							isRemoteError: true,
-							remoteError: blacklistItem.errorMessage || 'Network error'
+						// 查找使用该 URL 的所有图片记录
+						const images = await new Promise<any[]>((resolve, reject) => {
+							const request = imageIndex.getAll(blacklistItem.url);
+							request.onsuccess = () => resolve(request.result || []);
+							request.onerror = () => reject(request.error);
 						});
-						addedUrls.add(image.url);
+						
+						// 为每个图片记录创建失败链接信息
+						for (const image of images) {
+							if (image.status === 'deleted') {
+								continue; // 跳过已删除的
+							}
+							
+							// 检查文件是否仍然存在
+							const file = this.app.vault.getAbstractFileByPath(image.sourceFilePath);
+							if (!file || !(file instanceof TFile)) {
+								continue; // 文件已删除，跳过
+							}
+							
+							brokenLinks.push({
+								filePath: image.sourceFilePath,
+								lineNumber: image.line + 1, // line 是 0-based，需要 +1
+								linkText: image.originalText || image.url,
+								extractedPath: image.url,
+								isRemoteError: true,
+								remoteError: blacklistItem.errorMessage || 'Network error'
+							});
+							addedUrls.add(image.url);
+						}
 					}
 				}
 			} catch (error) {
@@ -3208,9 +3210,9 @@ export class ImageManagerView extends ItemView {
 		
 		// 获取已扫描的文件列表（用于增量扫描）
 		const scannedFiles = new Set<string>();
-		if (this.plugin.networkImageAPI && !scanRemoteImagesDisabled) {
+		if (this.plugin.networkImageAPI && this.plugin.networkImageCacheAdapter && !scanRemoteImagesDisabled) {
 			try {
-				const db = this.plugin.networkImageDBManager.getDB();
+				const db = this.plugin.networkImageCacheAdapter.getDB();
 				const tx = db.transaction([ObjectStore.FILES], 'readonly');
 				const fileStore = tx.objectStore(ObjectStore.FILES);
 				const allScannedFiles = await new Promise<any[]>((resolve, reject) => {
@@ -3324,7 +3326,7 @@ export class ImageManagerView extends ItemView {
 			if (scannedFiles.has(file.path)) {
 				// 检查文件是否修改（通过 mtime 和 size）
 				try {
-					const db = this.plugin.networkImageDBManager?.getDB();
+					const db = this.plugin.networkImageCacheAdapter?.getDB();
 					if (db) {
 						const tx = db.transaction([ObjectStore.FILES], 'readonly');
 						const fileStore = tx.objectStore(ObjectStore.FILES);

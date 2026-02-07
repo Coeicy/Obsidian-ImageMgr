@@ -9,7 +9,7 @@ import { ObjectStore } from './types';
 
 // 数据库配置常量
 export const DB_NAME = 'ImageMgrNetworkImages';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 /**
  * IndexedDB 管理器类
@@ -94,7 +94,22 @@ export class IndexedDBManager {
             imageStore.createIndex('by-last-validated', 'lastValidated', { unique: false });
             imageStore.createIndex('by-created-at', 'createdAt', { unique: false });
             imageStore.createIndex('by-last-accessed', 'lastAccessed', { unique: false });
+            imageStore.createIndex('by-url-hash', 'urlHash', { unique: false });
+            imageStore.createIndex('by-name-hash', 'nameHash', { unique: false });
             console.log('Created indexes for', ObjectStore.IMAGES);
+        }
+        
+        // 从 v1 升级到 v2：为 IMAGES 增加 urlHash/nameHash 索引（旧库已有 IMAGES 时）
+        if (oldVersion > 0 && oldVersion < 2 && db.objectStoreNames.contains(ObjectStore.IMAGES)) {
+            const tx = db.transaction([ObjectStore.IMAGES], 'readwrite');
+            const imageStore = tx.objectStore(ObjectStore.IMAGES);
+            if (!imageStore.indexNames.contains('by-url-hash')) {
+                imageStore.createIndex('by-url-hash', 'urlHash', { unique: false });
+            }
+            if (!imageStore.indexNames.contains('by-name-hash')) {
+                imageStore.createIndex('by-name-hash', 'nameHash', { unique: false });
+            }
+            console.log('Added by-url-hash and by-name-hash indexes for', ObjectStore.IMAGES);
         }
         
         // 扫描文件表

@@ -63,6 +63,11 @@ export class NetworkImageCacheManager {
         this.db = db;
         this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
     }
+
+    /** 获取数据库实例（供 API 层使用） */
+    getDb(): IDBDatabase {
+        return this.db;
+    }
     
     /**
      * LRU 清理策略

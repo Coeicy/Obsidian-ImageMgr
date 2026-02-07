@@ -12,6 +12,7 @@ export * from './types';
 
 // 核心模块
 export { IndexedDBManager, createIndexedDBManager, DB_NAME, DB_VERSION } from './indexeddb-manager';
+export { FileCacheAdapter } from './file-cache-adapter';
 export { NetworkImageCacheManager, DEFAULT_CACHE_CONFIG } from './cache-manager';
 export { IncrementalNetworkImageScanner } from './incremental-scanner';
 export { ScanErrorHandler } from './error-handler';

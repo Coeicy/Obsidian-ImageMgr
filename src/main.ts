@@ -13,7 +13,7 @@ import { HistoryManager } from './utils/history-manager';
 
 // ==================== 网络图片缓存系统导入 ====================
 import {
-    IndexedDBManager,
+    FileCacheAdapter,
     NetworkImageScannerAPI,
     NetworkImageCacheManager,
     ScanErrorHandler
@@ -40,7 +40,7 @@ import { NetworkImageScanner } from './utils/network-image-scanner';
  *    - HistoryManager: 历史记录
  *    - LockListManager: 锁定列表
  * 3. 初始化网络图片系统：
- *    - IndexedDBManager: 数据库管理
+ *    - FileCacheAdapter: 插件文件夹缓存
  *    - NetworkImageScannerAPI: 扫描API（含黑名单管理）
  *    - NetworkImageCacheManager: 缓存管理
  *    - NetworkImageScanner: 扫描器
@@ -235,31 +235,31 @@ export default class ImageManagementPlugin extends Plugin {
 	/** 插件设置对象 */
 	settings!: ImageManagementSettings;
 	/** 日志管理器 - 负责记录所有操作日志 */
-	logger: Logger;
+	logger!: Logger;
 	/** 错误处理器 - 统一处理和记录错误 */
-	errorHandler: ErrorHandler;
+	errorHandler!: ErrorHandler;
 	/** 插件数据存储 - 包含扫描的图片列表、缓存等 */
 	data: PluginData = {};
 	/** 引用管理器 - 查找和管理图片的引用关系 */
-	referenceManager: ReferenceManager;
+	referenceManager!: ReferenceManager;
 	/** 回收站管理器 - 管理已删除的文件 */
-	trashManager: TrashManager;
+	trashManager!: TrashManager;
 	/** 历史记录管理器 - 管理图片修改历史 */
-	historyManager: HistoryManager;
+	historyManager!: HistoryManager;
 	/** 锁定列表管理器 - 管理和监控锁定文件列表 */
-	lockListManager: LockListManager;
+	lockListManager!: LockListManager;
 
 // ==================== 网络图片缓存系统 ====================
-/** IndexedDB 管理器 */
-networkImageDBManager: IndexedDBManager;
+/** 网络图片缓存适配器（插件文件夹存储） */
+networkImageCacheAdapter: FileCacheAdapter | null = null;
 /** 网络图片缓存 API */
-networkImageAPI: NetworkImageScannerAPI;
+networkImageAPI!: NetworkImageScannerAPI;
 /** 网络图片缓存管理器 */
-networkImageCacheManager: NetworkImageCacheManager;
+networkImageCacheManager!: NetworkImageCacheManager;
 /** 网络图片错误处理器 */
-networkImageErrorHandler: ScanErrorHandler;
+networkImageErrorHandler!: ScanErrorHandler;
 /** 网络图片扫描器 */
-networkImageScanner: NetworkImageScanner;
+networkImageScanner!: NetworkImageScanner;
 
 	// ==================== 缓存机制 ====================
 	/** 显示文本缓存：filePath -> lineNumber -> displayText
@@ -668,11 +668,14 @@ networkImageScanner: NetworkImageScanner;
 				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Initializing network image cache system...');
 			}
 			
-			// 1. 创建 IndexedDB 管理器
-			this.networkImageDBManager = new IndexedDBManager();
+			// 1. 创建基于插件文件夹的缓存适配器
+			this.networkImageCacheAdapter = new FileCacheAdapter(
+				this.app.vault.adapter,
+				this.app.vault.configDir
+			);
 			
-			// 2. 初始化数据库
-			const db = await this.networkImageDBManager.init();
+			// 2. 初始化缓存（从插件目录加载/创建）
+			const db = await this.networkImageCacheAdapter.init();
 			if (this.logger) {
 				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image database initialized successfully');
 			}
@@ -718,7 +721,7 @@ networkImageScanner: NetworkImageScanner;
 			
 			// 初始化失败时，回退到不使用缓存的模式
 			this.networkImageAPI = null as any;
-			this.networkImageDBManager = null as any;
+			this.networkImageCacheAdapter = null;
 		}
 	}
 
@@ -889,6 +892,28 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 	}
 
 	/**
+	 * 清空网络图片缓存（完全删除所有缓存数据，需重新扫描）
+	 */
+	async clearNetworkImageCache(): Promise<void> {
+		if (!this.networkImageCacheAdapter) {
+			new Notice('缓存未初始化，无需清空', 3000);
+			return;
+		}
+		try {
+			await this.networkImageCacheAdapter.clearAll();
+			if (this.logger) {
+				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image cache cleared');
+			}
+			new Notice('✅ 网络图片缓存已清空，下次扫描将重新建立', 3000);
+		} catch (error) {
+			if (this.logger) {
+				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to clear network image cache', { error });
+			}
+			new Notice('清空缓存失败', 3000);
+		}
+	}
+
+	/**
 	 * 获取网络图片缓存统计
 	 */
 	async getNetworkImageCacheStats(): Promise<any> {
@@ -920,12 +945,12 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 	 * @param newPath - 新文件路径
 	 */
 	private async updateNetworkImageCachePath(oldPath: string, newPath: string): Promise<void> {
-		if (!this.networkImageAPI || !this.networkImageDBManager) {
+		if (!this.networkImageAPI || !this.networkImageCacheAdapter) {
 			return;
 		}
 
 		try {
-			const db = this.networkImageDBManager.getDB();
+			const db = this.networkImageCacheAdapter.getDB();
 			const tx = db.transaction(['network_images', 'scanned_files'], 'readwrite');
 			const imageStore = tx.objectStore('network_images');
 			const fileStore = tx.objectStore('scanned_files');
@@ -966,7 +991,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 
 				// 创建新记录
 				fileRecord.id = newPath;
-				fileRecord.updatedAt = Date.now();
+				fileRecord.lastScanned = Date.now();
 				await new Promise<void>((resolve, reject) => {
 					const request = fileStore.put(fileRecord);
 					request.onsuccess = () => resolve();
@@ -989,12 +1014,12 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 	 * @param filePath - 已删除的文件路径
 	 */
 	private async markNetworkImagesAsDeleted(filePath: string): Promise<void> {
-		if (!this.networkImageAPI || !this.networkImageDBManager) {
+		if (!this.networkImageAPI || !this.networkImageCacheAdapter) {
 			return;
 		}
 
 		try {
-			const db = this.networkImageDBManager.getDB();
+			const db = this.networkImageCacheAdapter.getDB();
 			const tx = db.transaction(['network_images', 'scanned_files'], 'readwrite');
 			const imageStore = tx.objectStore('network_images');
 			const fileStore = tx.objectStore('scanned_files');
@@ -1027,7 +1052,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 
 			if (fileRecord) {
 				fileRecord.status = 'deleted';
-				fileRecord.updatedAt = Date.now();
+				fileRecord.lastScanned = Date.now();
 				await new Promise<void>((resolve, reject) => {
 					const request = fileStore.put(fileRecord);
 					request.onsuccess = () => resolve();
@@ -1051,11 +1076,11 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 		// 清理视图
 		this.app.workspace.detachLeavesOfType(IMAGE_MANAGER_VIEW_TYPE);
 		
-		// 关闭网络图片数据库连接
-		if (this.networkImageDBManager) {
-			this.networkImageDBManager.close();
+		// 关闭网络图片缓存并刷盘
+		if (this.networkImageCacheAdapter) {
+			this.networkImageCacheAdapter.close().catch(() => {});
 			if (this.logger) {
-				this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image database connection closed');
+				this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image cache closed');
 			}
 		}
 		

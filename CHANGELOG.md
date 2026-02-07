@@ -4,6 +4,30 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)，并且本项目遵守 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
+## [Unreleased]
+
+### 变更
+
+#### 重复检测与去重
+- **重复检测仅针对本地图片**：云端图片为外链不占本地空间，不再参与去重检测；不再对云端图片下载并计算内容哈希，检测更快
+- 重复组内仅包含本地图片，统计与删除逻辑简化
+
+#### 图片详情与哈希
+- **详情页哈希展示**：云端图片显示 **URL 哈希**（SHA-256），本地/回收站显示 **MD5 哈希**
+- 扫描时自动为云端图片填充 `urlHash`，详情页可直接显示
+
+#### 网络图片缓存
+- **设置页「清除缓存」**：在 设置 → 网络图片 中新增「清除缓存」按钮，可一键清空 images/files/metadata/blacklist，下次扫描重新建立
+- **NetworkImageModal 写入缓存**：从文件菜单打开「扫描网络图片」时改为调用插件缓存系统，会执行完整扫描并写入 `network-image-cache/`，不再仅用旧版内存扫描
+
+#### 网络图片缓存实现
+- `FileCacheAdapter` 新增 `clearAll()`，用于完全清空缓存
+- 插件主模块新增 `clearNetworkImageCache()`，供设置页与命令调用
+- CacheManager 新增 `getDb()`，API 层不再直接访问私有 db
+
+#### 设置页
+- 修复 `homeSection is not defined`：统一使用 `displaySection` 显示设置
+
 ## [1.0.4] - 2026-02-05
 
 ### 🚀 新增功能

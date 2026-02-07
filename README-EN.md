@@ -34,7 +34,7 @@ ImageMgr is a feature-rich image management plugin for Obsidian that helps you e
 | 📁 **Smart Grouping** | Group by folder, type, reference status, lock status, location type, custom group management |
 | 🏷️ **Batch Rename** | Support `{index}`, `{name}` placeholders, smart rename based on note references |
 | 🔗 **Reference Tracking** | Auto-find image references in notes (Markdown/Wiki/HTML), supports reference updates |
-| 🔄 **MD5 Dedup** | Detect duplicate images via hash to avoid redundant storage |
+| 🔄 **MD5 Dedup** | Detect duplicate **local** images via hash (cloud images excluded, no local storage) |
 | 🗑️ **Recycle Bin** | Safe deletion with restore, permanent delete, batch operations, plugin-level trash |
 | 📜 **Operation Log** | Track all operation history based on MD5 hash, supports filtering, search and export |
 | 🈳 **Broken Link Detection** | Detect image links pointing to non-existent files |
@@ -224,10 +224,22 @@ Batch convert image link formats, synced with Obsidian settings:
 
 ### 🔄 MD5 Deduplication
 
-- Detect duplicate images via MD5 hash
-- Avoid redundant storage, save space
+- Detect duplicate **local** images via MD5 hash; avoid redundant storage, save space
+- **Local only**: Cloud images are external links and do not use local storage; they are not included in duplicate detection
 - Hash cache management, auto-cache calculation results
-- Display duplicate image list, support batch processing
+- Display duplicate image list, support batch delete (local only)
+
+### 🔑 Role of Hash Values
+
+The plugin uses two kinds of hashes for different purposes:
+
+| Type | Algorithm | Input | Purpose |
+|------|-----------|--------|---------|
+| **URL hash** | SHA-256 | Image URL string | **Cloud images**: Primary key (ID) for cache and blacklist; unique identifier in incremental scan and broken-link detection; shown as "URL hash" in detail view |
+| **MD5 hash** | MD5 | Image file content | **Local/trash images**: Duplicate detection and dedup; one of the three factors in lock list; operation log tracking by image; shown as "MD5 hash" in detail view |
+
+- **Cloud images**: No local storage; URL hash identifies "which link" for cache and blacklist.
+- **Local images**: MD5 identifies "which file content" for dedup, locking, and history tracking.
 
 ### 🗑️ Recycle Bin Management
 
@@ -349,8 +361,8 @@ Below is the complete feature list and implementation status of the plugin.
 - ✅ **MD5 Cache** - Auto-calculate and cache MD5 values
 
 #### Deduplication
-- ✅ **MD5 Deduplication** - Detect duplicate images via MD5 hash
-- ✅ **Duplicate Detection** - Display duplicate image list
+- ✅ **MD5 Deduplication** - Detect duplicate local images via MD5 hash (cloud images excluded)
+- ✅ **Duplicate Detection** - Display local duplicate list, support batch delete
 - ✅ **Hash Cache** - Auto-cache calculation results
 
 #### Grouping
@@ -518,8 +530,12 @@ Below is the complete feature list and implementation status of the plugin.
 - **Reset to Defaults**: Support reset to default values
 
 ### 🔄 MD5 Deduplication
-- **Enable Deduplication**: Calculate and detect duplicate images during scan when enabled
+- **Enable Deduplication**: Calculate and detect **local** duplicate images during scan (cloud images excluded)
 - **Hash Cache Management**: Manage MD5 hash cache
+
+### ☁️ Network Images
+- **Scan Network Images**: Auto-scan network image links and write to cache
+- **Clear Cache**: In settings → Network Images, one-click clear of all cache (images, files, blacklist); next scan will rebuild
 
 ### 📱 Mobile Adaptation
 - **Mobile Images Per Row**: Number of images per row on mobile (1-5)

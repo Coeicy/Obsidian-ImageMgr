@@ -206,6 +206,10 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
             const results = await batchValidateImages(
                 validImages.map(img => img.url)
             );
+            // 验证结果中的 imageId 需为存储主键（组合 id），便于更新到正确记录
+            results.forEach((r, i) => {
+                if (validImages[i]) r.imageId = validImages[i].id;
+            });
             
             // 更新数据库中的验证结果
             await this.updateValidationResults(results);
@@ -227,7 +231,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
     private async validateNewImages(path?: string): Promise<void> {
         try {
             // 获取需要验证的新图片
-            const tx = this.cacheManager['db'].transaction([ObjectStore.IMAGES], 'readonly');
+            const tx = this.cacheManager.getDb().transaction([ObjectStore.IMAGES], 'readonly');
             const store = tx.objectStore(ObjectStore.IMAGES);
             const images = await this.getAllFromStore(store);
             
@@ -253,7 +257,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      */
     async getImage(imageId: string): Promise<NetworkImageRecord | null> {
         try {
-            const db = this.cacheManager['db'];
+            const db = this.cacheManager.getDb();
             const tx = db.transaction([ObjectStore.IMAGES], 'readonly');
             const store = tx.objectStore(ObjectStore.IMAGES);
             
@@ -272,7 +276,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      */
     async searchImages(query: SearchQuery): Promise<SearchResult> {
         try {
-            const db = this.cacheManager['db'];
+            const db = this.cacheManager.getDb();
             const tx = db.transaction([ObjectStore.IMAGES], 'readonly');
             const store = tx.objectStore(ObjectStore.IMAGES);
             
@@ -441,7 +445,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      */
     private async updateValidationResults(results: ValidationResult[]): Promise<void> {
         try {
-            const db = this.cacheManager['db'];
+            const db = this.cacheManager.getDb();
             const imageTx = db.transaction([ObjectStore.IMAGES], 'readwrite');
             const imageStore = imageTx.objectStore(ObjectStore.IMAGES);
             
@@ -503,6 +507,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
                         }
                         
                         // 使用URL重新计算hash，确保与检查时的ID一致
+                        const { hashUrl } = await import('./utils');
                         const urlId = await hashUrl(image.url);
                         blacklistRecords.push({
                             id: urlId,
@@ -512,7 +517,10 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
                             // 记录这次检测到的来源信息，供错误列表和空链接页面使用
                             sourceFilePath: image.sourceFilePath,
                             line: image.line,
-                            column: image.column
+                            column: image.column,
+                            detectedAt: Date.now(),
+                            retryCount: 0,
+                            autoRemove: true
                         });
                     }
                 }
@@ -537,7 +545,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      */
     private async addToBlacklist(records: BlacklistRecord[]): Promise<void> {
         // 检查数据库连接是否可用
-        if (!this.cacheManager || !this.cacheManager['db'] || this.cacheManager['db'].readyState !== 'open') {
+        if (!this.cacheManager || !this.cacheManager.getDb()) {
             // 避免重复显示相同的数据库连接错误
             if (!this.databaseConnectionWarned) {
                 this.errorHandler.handleError(
@@ -550,14 +558,14 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
         }
         
         try {
-            const db = this.cacheManager['db'];
+            const db = this.cacheManager.getDb();
             const tx = db.transaction([ObjectStore.BLACKLIST], 'readwrite');
             
             // 添加事务错误处理
             tx.onerror = (event) => {
                 this.errorHandler.handleError(
                     new Error('Transaction error in addToBlacklist'),
-                    { error: event }
+                    {}
                 );
             };
             
@@ -629,7 +637,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
         try {
             const { hashUrl } = await import('./utils');
             const urlId = await hashUrl(url);
-            const db = this.cacheManager['db'];
+            const db = this.cacheManager.getDb();
             const tx = db.transaction([ObjectStore.BLACKLIST], 'readonly');
             const store = tx.objectStore(ObjectStore.BLACKLIST);
             const record = await this.getFromStore(store, urlId);
@@ -648,7 +656,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      */
     async getBlacklist(): Promise<any[]> {
         try {
-            const db = this.cacheManager['db'];
+            const db = this.cacheManager.getDb();
             const tx = db.transaction([ObjectStore.BLACKLIST], 'readonly');
             const store = tx.objectStore(ObjectStore.BLACKLIST);
             return await this.getAllFromStore(store);

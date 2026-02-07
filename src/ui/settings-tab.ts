@@ -421,7 +421,21 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			});
 		});
 
-
+		new Setting(displaySection.contentEl)
+			.setName('卡片间距')
+			.setDesc('图片卡片之间的间距（像素，范围：4-24）')
+			.addSlider(slider => slider
+				.setLimits(4, 24, 2)
+				.setValue(this.plugin.settings.cardSpacing)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.cardSpacing = value;
+					await this.plugin.saveSettings();
+					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
+					if (view) {
+						await (view.view as any).scanImages();
+					}
+				}));
 
 		const cardBorderRadiusSetting = new Setting(displaySection.contentEl)
 			.setName('卡片圆角')
@@ -681,98 +695,14 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		// 默认值设置（二级标题）
-		const defaultsTitle = displaySection.contentEl.createEl('h4', { text: '⚙️ 默认值' });
-		defaultsTitle.style.marginTop = '20px';
-		defaultsTitle.style.marginBottom = '12px';
-		defaultsTitle.style.paddingBottom = '8px';
-		defaultsTitle.style.borderBottom = '1px solid var(--background-modifier-border)';
-		defaultsTitle.style.fontSize = '1.2em';
-
-		new Setting(homeSection.contentEl)
-			.setName('卡片间距')
-			.setDesc('图片卡片之间的间距（像素，范围：4-24）')
-			.addSlider(slider => slider
-				.setLimits(4, 24, 2)
-				.setValue(this.plugin.settings.cardSpacing)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.cardSpacing = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(homeSection.contentEl)
-			.setName('卡片圆角')
-			.setDesc('图片卡片的圆角大小（像素，范围：0-20）')
-			.addSlider(slider => slider
-				.setLimits(0, 20, 1)
-				.setValue(this.plugin.settings.cardBorderRadius)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.cardBorderRadius = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(homeSection.contentEl)
-			.setName('固定图片高度')
-			.setDesc('关闭"自适应大小"时的图片高度（像素，范围：100-400）')
-			.addSlider(slider => slider
-				.setLimits(100, 400, 10)
-				.setValue(this.plugin.settings.fixedImageHeight)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.fixedImageHeight = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(homeSection.contentEl)
-			.setName('统一卡片高度')
-			.setDesc('同一行的图片卡片保持相同高度')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.uniformCardHeight)
-				.onChange(async (value) => {
-					this.plugin.settings.uniformCardHeight = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		new Setting(homeSection.contentEl)
-			.setName('启用悬停效果')
-			.setDesc('鼠标悬停时显示阴影和缩放动画')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.enableHoverEffect)
-				.onChange(async (value) => {
-					this.plugin.settings.enableHoverEffect = value;
-					await this.plugin.saveSettings();
-					const view = this.app.workspace.getLeavesOfType('image-manager-view')[0];
-					if (view) {
-						await (view.view as any).scanImages();
-					}
-				}));
-
-		// 默认值设置（二级标题）
-		const defaultsTitle2 = homeSection.contentEl.createEl('h4', { text: '⚙️ 默认值' });
+		// 排序与筛选默认值（二级标题）
+		const defaultsTitle2 = displaySection.contentEl.createEl('h4', { text: '📋 排序与筛选默认值' });
 		defaultsTitle2.style.marginTop = '20px';
 		defaultsTitle2.style.marginBottom = '12px';
 		defaultsTitle2.style.paddingBottom = '8px';
 		defaultsTitle2.style.borderBottom = '1px solid var(--background-modifier-border)';
 
-		new Setting(homeSection.contentEl)
+		new Setting(displaySection.contentEl)
 			.setName('默认排序方式')
 			.setDesc('打开图片管理器时默认使用的排序依据。可选：名称、大小、修改日期、创建日期、图片尺寸、引用数量。可随时在工具栏切换')
 			.addDropdown(dropdown => dropdown
@@ -786,7 +716,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(homeSection.contentEl)
+		new Setting(displaySection.contentEl)
 			.setName('默认排序顺序')
 			.setDesc('排序的升降序方向。升序：A→Z、小→大、旧→新；降序：Z→A、大→小、新→旧。名称排序建议升序，日期排序建议降序')
 			.addDropdown(dropdown => dropdown
@@ -798,7 +728,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		new Setting(homeSection.contentEl)
+		new Setting(displaySection.contentEl)
 			.setName('默认筛选类型')
 			.setDesc('打开图片管理器时默认显示的图片格式。可选：全部、PNG、JPG、GIF、WEBP、SVG。选择特定格式可快速专注某一类图片')
 			.addDropdown(dropdown => dropdown
@@ -2007,6 +1937,8 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			<li><strong>代理加载</strong>：当直接加载失败时，自动尝试通过代理服务加载图片</li>
 			<li><strong>云端标识</strong>：在图片列表中显示云端图片标识，便于区分本地和云端图片</li>
 		</ul>
+		<p style="margin: 8px 0 0 0; font-weight: 600;">📁 缓存说明</p>
+		<p style="margin: 4px 0 0 0;">缓存保存在插件目录 <code>.obsidian/plugins/imagemgr/network-image-cache/</code>，包含：图片 URL 与来源位置、已扫描文件索引、失效链接黑名单、扫描统计等元数据（不保存图片文件本身）。便于增量扫描和空链接检测，可随仓库一起备份。</p>
 		<p style="margin: 8px 0 0 0; font-size: 0.9em;">💡 提示：云端图片无法进行重命名、移动、删除等文件操作，但可以查看和复制链接。</p>
 	`;
 
@@ -2114,29 +2046,28 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 			}));
 
-	// 扫描网络图片开关
+	// 清除网络图片缓存
 	new Setting(uploadSection.contentEl)
-		.setName('扫描网络图片')
-		.setDesc('扫描 Markdown 文件中的网络图片链接（http://、https://），并在列表中显示。关闭后将停止所有自动扫描。')
-		.addToggle(toggle => toggle
-			.setValue(this.plugin.settings.scanRemoteImages ?? false)
-			.onChange(async (value) => {
-				this.plugin.settings.scanRemoteImages = value;
-				await this.plugin.saveSettings();
-				
-				// 根据开关状态初始化或清理网络图片缓存系统
-				if (value) {
-					// 启用：初始化网络图片缓存系统
-					if (!this.plugin.networkImageAPI) {
-						await this.plugin.initializeNetworkImageCache();
-					}
-					new Notice('✅ 已启用网络图片扫描，请重新扫描以查看网络图片');
-				} else {
-					// 禁用：清理网络图片缓存系统（可选，保留数据以便将来重新启用）
-					new Notice('❌ 已禁用网络图片扫描，将停止所有自动扫描');
+		.setName('清除缓存')
+		.setDesc('清空所有网络图片缓存数据（图片记录、文件索引、黑名单等），下次扫描将重新建立。适用于缓存异常或需要重新开始的情况')
+		.addButton(btn => btn
+			.setButtonText('清除缓存')
+			.setWarning()
+			.onClick(async () => {
+				if (!this.plugin.networkImageCacheAdapter) {
+					new Notice('缓存未初始化，无需清空', 3000);
+					return;
+				}
+				const confirmed = await ConfirmModal.show(
+					this.app,
+					'确认清除缓存',
+					'确定要清空所有网络图片缓存吗？图片记录、文件索引、黑名单等将全部删除，下次扫描会重新建立。',
+					['清除', '取消']
+				);
+				if (confirmed === 'save') {
+					await this.plugin.clearNetworkImageCache();
 				}
 			}));
-
 
 	// 图床设置分割线
 	const uploadDivider = uploadSection.contentEl.createEl('div');

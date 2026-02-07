@@ -103,6 +103,8 @@ export interface ImageInfo {
 	referencesUpdatedAt?: number;
 	/** 是否为网络图片 */
 	isRemote?: boolean;
+	/** 云端图片的稳定 ID：SHA-256(文件名+"|"+URL)，用于缓存主键与操作记录；仅改链接或仅改文件名时可承接旧记录（扫描时自动填充） */
+	urlHash?: string;
 }
 
 /**
