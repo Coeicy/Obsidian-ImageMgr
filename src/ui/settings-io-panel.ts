@@ -104,7 +104,7 @@ export class SettingsIOPanel {
     const descriptionEl = container.createEl('div', { cls: 'setting-item-description' });
     descriptionEl.innerHTML = `
       <p style="margin: 0;">
-        <strong>导出JSON配置文件，备份插件配置。</strong>
+        <strong>导出JSON配置文件，备份插件所有配置（包括图床配置）。</strong>
       </p>
     `;
   }
@@ -194,7 +194,7 @@ export class SettingsIOPanel {
   private renderSensitiveInfoSetting(): void {
     new Setting(this.containerEl)
       .setName('包含敏感信息')
-      .setDesc('控制导出/导入时是否处理API密钥等敏感信息')
+      .setDesc('导出时包含图床API密钥等敏感信息（关闭时会过滤：SM.MS Token、Imgur Client ID、GitHub Token、七牛/阿里/腾讯/又拍云密钥）')
       .addToggle(toggle => toggle
         .setValue(false)
         .onChange(value => {

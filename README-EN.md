@@ -29,7 +29,8 @@ ImageMgr is a feature-rich image management plugin for Obsidian that helps you e
 | Feature | Description |
 |---------|-------------|
 | 📸 **Smart Scan** | Auto-scan all images in vault (PNG, JPG, GIF, WEBP, SVG, BMP), supports incremental scan and cache optimization |
-| 🌩️ **Cloud Images** | Scan and manage network image links, supports proxy loading and cloud image badges |
+| 🌩️ **Network Images** | Scan and manage network image links (HTTP/HTTPS), supports proxy loading, cloud image badges, and IndexedDB caching (metadata only, no binary storage) |
+| ☁️ **Image Hosting Upload** | Support 7 image hosting services (SM.MS, Imgur, GitHub, Qiniu, Aliyun, Tencent, Upyun), easily upload local images to cloud |
 | 🔍 **Search & Filter** | Real-time search, multiple sort options, filter by type/location/lock/reference, reverse-order clear |
 | 📁 **Smart Grouping** | Group by folder, type, reference status, lock status, location type, custom group management |
 | 🏷️ **Batch Rename** | Support `{index}`, `{name}` placeholders, smart rename based on note references |
@@ -40,37 +41,11 @@ ImageMgr is a feature-rich image management plugin for Obsidian that helps you e
 | 🈳 **Broken Link Detection** | Detect image links pointing to non-existent files |
 | 🔗 **Link Format Conversion** | Batch convert image link formats (shortest/relative/absolute), supports single conversion or Ctrl+click |
 | 🔒 **File Protection** | Lock important files to prevent accidental operations |
+| 📐 **In-Note Drag Resize** | Drag bottom-right handle to resize images in reading/editing view, writes back to note |
 | 🖱️ **Drag Select** | Drag mouse to batch select images like in file explorer |
 | ⚙️ **Settings Management** | Rich settings options, supports settings search, import, export and reset |
 | 📱 **Mobile Adaptation** | Responsive layout, supports phones and tablets, optimized touch interactions |
 | ⚡ **Performance** | Lazy loading, incremental scan cache, link info pre-calculation for smooth handling of large image sets |
-
-## 🔄 Changelog
-
-### v1.0.1 (2025-01-25)
-
-#### 🐛 Bug Fixes
-- ✅ **Fixed EventListener Memory Leak** - Properly clean up event listeners when closing image detail modal
-- ✅ **Fixed Image Resource Leak** - Correctly release ObjectURL when previewing trash images
-- ✅ **Fixed Recursive Stack Overflow Risk** - Added depth limit (max 100 levels) for trash file collection
-- ✅ **Fixed Null Pointer Exception** - Added defensive checks in settings page
-
-#### 📊 Issue Fix Statistics
-- **Critical Issues:** 11 → 0 (100% fixed)
-- **Actually Fixed:** 4
-- **No Fix Needed:** 7 (already properly handled)
-- **Stability:** Significantly improved
-
-#### 📄 Related Documents
-- [Issues Summary](./ISSUES_SUMMARY.md) - Detailed issue analysis and fix records
-- [Technical Guide](./TECHNICAL_GUIDE.md) - In-depth plugin architecture
-- [API Documentation](./API_DOCUMENTATION.md) - Development interface documentation
-
-### v1.0.0 (2025-01-24)
-
-- 🎉 Initial version release
-- ✨ All core features included (smart scan, cloud images, search filter, batch operations, etc.)
-- 📚 Complete documentation system (User Guide, API Docs, Technical Guide)
 
 ## 📦 Installation
 
@@ -166,6 +141,38 @@ Flexible image grouping management:
 - **By Location Type**: Distinguish 🌩️ remote images and 💾 local images
 - **Custom Groups**: Manually create and manage groups
 
+#### Network Image Support
+- **Smart Scan Control**: Support enable/disable network image scanning. When disabled, already cached images still display normally, but new images won't be scanned
+- **Auto Scan**: Auto-discover network image references (http/https) in notes
+- **Mixed Preview**: Display mixed with local images in main view, with 🌩️ badge
+- **Smart Loading**: Three-level fault-tolerant loading (Direct → Local Proxy → Public Proxy), solves anti-hotlink and CORS issues
+- **Silent Scan Mode**: Auto-triggered scans (file create/modify events) use silent mode to avoid console logs
+- **Concise Log Output**: User-initiated scans only show start and end messages, detailed results recorded in plugin logs
+- **Scan Methods**:
+  - Command Palette: Press `Ctrl/Cmd + P`, type "Scan Network Images"
+  - Folder Right-click: Right-click folder in file explorer, select "Scan Network Images"
+  - File Right-click: Right-click Markdown file in file explorer, select "Scan Network Images"
+- **Preview & Select**: Preview images in scan results, view source files and URLs, support batch selection
+- **Image Hosting Upload** (requires configuration):
+  - Support 7 image hosting services: SM.MS, Imgur, GitHub, Qiniu Kodo, Alibaba Cloud OSS, Tencent Cloud COS, Upyun
+  - Batch upload network images to image hosting
+  - Automatically replace links in notes after successful upload
+  - Configuration path: Plugin Settings → Network Images → Image Hosting Configuration
+  - **Note**: API keys are only stored locally, never uploaded to any server
+  - **Ease of use ranking**: SM.MS (simplest, only Token needed) → Imgur → GitHub → Qiniu → Aliyun → Tencent → Upyun
+- **Network Image Caching System** (IndexedDB storage, metadata only, no binary storage):
+  - **Storage Location**: Browser IndexedDB, in plugin folder `network-image-cache/` (easy to backup and migrate)
+  - **Four Types of Cached Data**:
+    - **Network Image Records (images)**: URL, source file, line number, validation status, URL hash for each network image. Primary key is SHA-256 hash of "filename+URL" combination (stable ID), used for incremental scanning and operation record tracking
+    - **Scanned File Index (files)**: Path, modification time, content hash, and network image ID list for each Markdown file. Used to determine if file needs re-scan during incremental scanning
+    - **System Metadata (metadata)**: Last scan time, total image count, cache hit rate, cleanup time and other statistics
+    - **Invalid URL Blacklist (blacklist)**: Failed link URLs, failure reasons (timeout, 404, 403, etc.), source location, detection time. Prevents repeated validation of failed links, displayed in broken links page
+  - **Cleanup Strategies**:
+    - **LRU Cleanup**: Remove least recently accessed image records to control cache size
+    - **TTL Cleanup**: Clean expired validation results and metadata (default 7 days)
+    - **Orphaned Record Cleanup**: Remove image records whose source files no longer exist
+  - **Clear Cache**: In "Settings → Network Images", one-click clear all cache data, next scan will rebuild
+
 #### Image Preview
 - Beautiful grid layout preview interface
 - Support lazy loading for smooth handling of large image sets
@@ -221,6 +228,37 @@ Batch convert image link formats, synced with Obsidian settings:
 - **Smart Recognition**: Auto-exclude code blocks and note links, only recognize image links
 - **Link Stats Pre-calculation**: Auto-count various link format stats during scan, display immediately when opening
 - Preserve original display text and size info
+
+### 📐 In-Note Drag Resize
+
+Add a draggable resize handle to the bottom-right corner of images in reading and editing views (live preview). Drag to adjust display size and automatically write back to the note, synced with the detail page display size:
+
+#### Core Features
+- **Dual View Support**:
+  - **Reading View**: Mounted via `registerMarkdownPostProcessor`, uses context for lifecycle management, auto-cleanup on re-render
+  - **Editing View**: Scans `.cm-editor` subtree to avoid mixing with right-side preview in split view; supports dynamic mounting on scroll (for long documents)
+- **Smart Image Matching**: Handles Obsidian's proxy/cache URL transformations via URL parsing and filename matching, supports network images
+- **Real-time Preview**: Instantly updates image size while dragging in editing view
+
+#### Write-back Formats
+Automatically selects appropriate output format based on original link type:
+- **Wiki Links**: `![[image.png|alt|100x200]]` - Keeps `|widthxheight` format
+- **HTML Tags**: `<img src="image.png" width="100" height="200">` - Updates width/height attributes
+- **Markdown Links**: Converts to HTML `<img>` tag with size (Markdown standard doesn't support inline size)
+
+#### Supported Image Types
+- **Local Images**: PNG, JPG, JPEG, GIF, BMP, WEBP, SVG
+- **Network Images**: HTTP/HTTPS links, auto-attempts proxy loading when direct loading fails
+
+#### How to Use
+1. **Enable Feature**: Go to "Settings → Image Operations" and enable "📐 In-Note Drag Resize"
+2. **Resize**: Hover over an image and drag the resize handle (📐 icon) in the bottom-right corner
+3. **Keep Aspect Ratio** (Optional): Enable "Keep Aspect Ratio" in settings to auto-calculate the other dimension
+4. **Write Back**: Automatically saves after drag ends, editing view updates the line in real-time
+
+#### Sync Mechanism
+- Automatically notifies detail page to refresh reference list after write-back, showing latest size
+- Display size changes in detail page also sync to corresponding images in notes
 
 ### 🔄 MD5 Deduplication
 
@@ -279,6 +317,69 @@ Complete operation tracking system:
 - Support drag select in image manager page and recycle bin page
 - Click blank area to deselect
 
+### ☁️ Image Hosting Upload
+
+Support batch upload of network images to cloud hosting services, automatically replace links in notes.
+
+#### Supported Hosting Services (Sorted by Ease of Use)
+
+| Hosting | Difficulty | Required Config | Features |
+|---------|------------|-----------------|----------|
+| **SM.MS** | ⭐ | API Token | Simplest, free/paid hosting, slow in China |
+| **Imgur** | ⭐⭐ | Client ID | Popular abroad, supports proxy config |
+| **GitHub** | ⭐⭐⭐ | Token + Repo config | Free, works with jsDelivr CDN |
+| **Qiniu** | ⭐⭐⭐⭐ | AccessKey + SecretKey + Bucket | Stable in China, requires domain config |
+| **Aliyun** | ⭐⭐⭐⭐ | AccessKey + SecretKey + Bucket | Enterprise service, reliable |
+| **Tencent** | ⭐⭐⭐⭐ | SecretId + SecretKey + Bucket | Major cloud provider in China |
+| **Upyun** | ⭐⭐⭐⭐ | Operator + Password | Professional cloud storage service |
+
+#### How to Use
+
+1. **Configure Hosting**: Go to "Settings → Network Images → Image Hosting Configuration"
+2. **Enable Hosting**: Toggle on the hosting services you want to use, fill in corresponding configs
+3. **Scan Network Images**: Select "Scan Network Images" from file menu
+4. **Select and Upload**: Select images in scan results, click upload button
+5. **Auto Replace**: Original links in notes are automatically replaced after successful upload
+
+#### Configuration Notes
+
+- Each hosting service has an **independent toggle**, enable as needed
+- Disabled hosting services don't show config fields, keeping interface clean
+- **Key Security**: All API keys are stored locally only, never uploaded to any server
+- **Config Backup**: Supports export/import of hosting configurations (optional sensitive data inclusion)
+
+### 💾 Config Backup
+
+Comprehensive settings import/export functionality, supports backing up and restoring all plugin configurations.
+
+#### Features
+
+- **Complete Backup**: Backup all plugin settings including hosting configurations
+- **Sensitive Data Protection**: Filter API keys and sensitive fields by default
+  - SM.MS: `apiToken`
+  - Imgur: `clientId`
+  - GitHub: `token`
+  - Qiniu: `accessKey`, `secretKey`
+  - Aliyun: `accessKeyId`, `accessKeySecret`
+  - Tencent: `secretId`, `secretKey`
+  - Upyun: `password`
+- **Selective Export**: Option to include/exclude sensitive information
+- **Pre-import Backup**: Auto-backup current configuration to prevent mistakes
+
+#### How to Use
+
+1. **Export Config**:
+   - Go to "Settings → Extension Features"
+   - Click "Export Config" button
+   - Choose whether to include sensitive data
+   - Config file automatically downloads to local
+
+2. **Import Config**:
+   - Click "Import Config" button
+   - Select previously exported JSON file
+   - Choose whether to overwrite existing settings
+   - Current config is auto-backed up before import
+
 ### 📱 Mobile Adaptation
 
 Complete mobile support, adapted for desktop, tablet, phone landscape, phone portrait, and more:
@@ -304,6 +405,10 @@ Complete mobile support, adapted for desktop, tablet, phone landscape, phone por
 
 #### Android Gallery Hide
 - Create `.nomedia` file to prevent Android gallery from scanning images
+
+## 🔄 Changelog
+
+Please refer to [CHANGELOG.md](./CHANGELOG.md) for detailed version history.
 
 ## 📋 Complete Feature List
 
@@ -334,6 +439,21 @@ Below is the complete feature list and implementation status of the plugin.
 - ✅ **Drag Select** - Drag mouse to batch select images like in file explorer
 - ✅ **Selection Sync** - Auto-update checkbox status when dragging
 - ✅ **Batch Selection** - Support drag select in image manager page and recycle bin page
+
+#### Image Hosting Upload
+- ✅ **7 Hosting Services** - Support SM.MS, Imgur, GitHub, Qiniu, Aliyun, Tencent, Upyun
+- ✅ **Ease of Use Ranking** - Sorted by configuration complexity (SM.MS easiest, Upyun most complex)
+- ✅ **Independent Toggle** - Each hosting service has independent enable switch
+- ✅ **Secure Storage** - API keys stored locally only, never uploaded
+- ✅ **Batch Upload** - Upload network images to hosting in batch
+- ✅ **Auto Replace** - Automatically replace links in notes after upload
+
+#### Config Backup
+- ✅ **Complete Backup** - Export all plugin settings including hosting configs
+- ✅ **Sensitive Data Filter** - Filter API keys and tokens by default (9 sensitive fields)
+- ✅ **Selective Export** - Option to include/exclude sensitive data
+- ✅ **Pre-import Backup** - Auto-backup current config before importing
+- ✅ **Easy Import/Export** - One-click export to JSON file, import from file
 
 ### Advanced Features
 
@@ -654,7 +774,20 @@ src/
     ├── path-validator.ts      # Path validation
     ├── keyboard-shortcut-manager.ts  # Keyboard shortcuts
     ├── drag-select-manager.ts # Drag selection management
-    └── resizable-modal.ts     # Resizable modal
+    ├── resizable-modal.ts     # Resizable modal
+    ├── note-image-resize.ts   # In-note drag-to-resize images
+    ├── settings-io-manager.ts # Settings import/export
+    └── uploader/              # Image hosting upload (supports 7 services)
+        ├── uploader-manager.ts    # Uploader manager
+        ├── types.ts               # Type definitions
+        ├── smms-uploader.ts       # SM.MS hosting
+        ├── imgur-uploader.ts      # Imgur hosting
+        ├── github-uploader.ts     # GitHub hosting
+        ├── qiniu-uploader.ts      # Qiniu Kodo
+        ├── aliyun-uploader.ts     # Aliyun OSS
+        ├── tencent-uploader.ts    # Tencent COS
+        ├── upyun-uploader.ts      # Upyun hosting
+        └── crypto-utils.ts        # Crypto utilities
 ```
 
 ### Tech Stack

@@ -371,8 +371,7 @@ export class SettingsValidator {
       'createNomediaFile', 'confirmBeforeDelete', 'moveToSystemTrash',
       'enablePluginTrash', 'searchCaseSensitive', 'searchInPath',
       'showBatchProgress', 'showStatistics', 'enableConsoleLog',
-      'enableDebugLog', 'scanRemoteImages', 'showRemoteImageBadge',
-      'autoRetryRemoteImage'
+      'enableDebugLog', 'scanRemoteImages', 'showRemoteImageBadge'
     ];
 
     booleanFields.forEach(field => {

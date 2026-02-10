@@ -37,7 +37,7 @@ export class NetworkImageModal extends Modal {
             }
         });
         // 确保配置存在
-        const config = this.plugin.settings.uploadConfig || { type: 'qiniu' };
+        const config = this.plugin.settings.uploadConfig || {};
         this.uploaderManager = new UploaderManager(config);
     }
 

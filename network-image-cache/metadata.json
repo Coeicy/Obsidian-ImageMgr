@@ -1,0 +1,14 @@
+[
+  {
+    "id": "system",
+    "value": {
+      "version": "1.0.0",
+      "lastFullScan": 1770410620465,
+      "totalFilesScanned": 2679,
+      "totalImagesFound": 2235,
+      "databaseSize": 0,
+      "cacheHitRate": 100
+    },
+    "updatedAt": 1770735624345
+  }
+]

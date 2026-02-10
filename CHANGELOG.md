@@ -4,7 +4,43 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)，并且本项目遵守 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
-## [Unreleased]
+## [0.4.0] - 2026-02-10
+
+### 🚀 新增功能
+
+#### 图床上传功能 (`src/utils/uploader/`)
+- **支持7种图床**：SM.MS、Imgur、GitHub、七牛云、阿里云、腾讯云、又拍云
+- **易用性排序**：按配置复杂度排序（SM.MS最简单，只需Token；又拍云需完整配置）
+- **独立配置**：每个图床有独立的启用开关，开启后才显示配置项
+- **敏感信息保护**：配置导出时自动过滤API密钥等敏感信息
+- **图床配置备份**：支持导出/导入图床配置（可选包含敏感信息）
+
+#### 配置备份增强 (`src/utils/settings-io-manager.ts`)
+- **完整图床配置备份**：所有7种图床的配置都会被备份
+- **敏感信息过滤**：默认过滤所有图床的API密钥、Token等敏感字段
+  - SM.MS: `apiToken`
+  - Imgur: `clientId`
+  - GitHub: `token`
+  - 七牛云: `accessKey`, `secretKey`
+  - 阿里云: `accessKeyId`, `accessKeySecret`
+  - 腾讯云: `secretId`, `secretKey`
+  - 又拍云: `password`
+- **选择性导出**：可选择是否包含敏感信息
+- **配置恢复**：导入时保留现有密钥（如果导入文件中没有）
+
+#### 笔记内拖拽调整图片尺寸 (`src/utils/note-image-resize.ts`)
+- **双视图支持**：阅读视图（post processor）和编辑视图即时预览（.cm-editor 子树扫描）
+- **智能图片匹配**：通过 URL 解析和文件名匹配处理 Obsidian 的代理/缓存 URL，支持网络图片
+- **实时预览**：编辑视图中拖拽时即时更新图片尺寸，拖拽结束后自动写回笔记
+- **写回格式**：
+  - Wiki 链接：保持 `|widthxheight` 格式
+  - HTML 标签：更新 width/height 属性
+  - Markdown 链接：转为带尺寸的 HTML `<img>` 标签
+- **设置选项**：
+  - 主开关：「设置 → 图片操作 → 📐 笔记内拖拽调整图片尺寸」
+  - 子选项：「保持宽高比」- 拖拽时自动保持图片原始宽高比
+- **同步机制**：写回成功后自动通知详情页刷新引用列表，显示最新尺寸
+- **视觉反馈**：拖拽时图片添加高亮边框，手柄支持悬停/点击效果
 
 ### 变更
 
@@ -16,19 +52,24 @@
 - **详情页哈希展示**：云端图片显示 **URL 哈希**（SHA-256），本地/回收站显示 **MD5 哈希**
 - 扫描时自动为云端图片填充 `urlHash`，详情页可直接显示
 
-#### 网络图片缓存
-- **设置页「清除缓存」**：在 设置 → 网络图片 中新增「清除缓存」按钮，可一键清空 images/files/metadata/blacklist，下次扫描重新建立
-- **NetworkImageModal 写入缓存**：从文件菜单打开「扫描网络图片」时改为调用插件缓存系统，会执行完整扫描并写入 `network-image-cache/`，不再仅用旧版内存扫描
+#### 网络图片缓存系统优化
+- **缓存数据说明完善**：
+  - 明确缓存存储在 IndexedDB 中，仅存储元数据（URL、来源、验证状态等），不存储图片二进制
+  - 四类数据存储：images（网络图片记录）、files（已扫描文件索引）、metadata（系统元数据）、blacklist（失效 URL 黑名单）
+  - 详细说明主键生成方式：SHA-256(文件名 + "|" + URL)，确保记录稳定性
+- **设置页「清除缓存」**：在「设置 → 网络图片」中新增「清除缓存」按钮，可一键清空所有 IndexedDB 缓存数据（images/files/metadata/blacklist），下次扫描重新建立
+- **清理策略说明**：补充 LRU、TTL、孤立记录清理的详细说明
+- **NetworkImageModal 写入缓存**：从文件菜单打开「扫描网络图片」时改为调用插件缓存系统，执行完整扫描并写入缓存，不再仅用旧版内存扫描
 
 #### 网络图片缓存实现
-- `FileCacheAdapter` 新增 `clearAll()`，用于完全清空缓存
+- `FileCacheAdapter` 新增 `clearAll()`，用于完全清空 IndexedDB 缓存
 - 插件主模块新增 `clearNetworkImageCache()`，供设置页与命令调用
 - CacheManager 新增 `getDb()`，API 层不再直接访问私有 db
 
 #### 设置页
 - 修复 `homeSection is not defined`：统一使用 `displaySection` 显示设置
 
-## [1.0.4] - 2026-02-05
+## [0.3.2] - 2026-02-05
 
 ### 🚀 新增功能
 
@@ -200,7 +241,7 @@
 
 ---
 
-## [1.0.2] - 2025-01-31
+## [0.3.1] - 2025-01-31
 
 ### 📚 文档完善
 - **新增详细API文档** - 完全重写 [API_DOCUMENTATION.md](./API_DOCUMENTATION.md)
@@ -236,7 +277,7 @@
 
 ---
 
-## [1.0.1] - 2025-01-25
+## [0.3.0] - 2025-01-25
 
 ### 🐛 修复
 - **修复 EventListener 内存泄漏** - 图片详情模态框关闭时正确清理事件监听器，防止内存持续增长

@@ -224,11 +224,29 @@ export function parseHtmlImageSize(htmlTag: string): { width?: number; height?: 
 }
 
 export class ReferenceManager {
+	/** Wiki 链接正则: ![[path|displayText|size]] 或 [[path|displayText|size]] */
+	static readonly WIKI_LINK_REGEX = /!?\[\[([^\]]+)\]\]/g;
+	/** 带感叹号的 Wiki 链接正则 */
+	static readonly WIKI_WITH_EXCLAM_REGEX = /!\[\[([^\]]+)\]\]/g;
+	/** 不带感叹号的 Wiki 链接正则 */
+	static readonly WIKI_NO_EXCLAM_REGEX = /(?:^|[^!])\[\[([^\]]+)\]\]/g;
+	/** Markdown 链接正则: ![alt](path) */
+	static readonly MARKDOWN_LINK_REGEX = /!\[([^\]]*)\]\(([^)]+)\)/g;
+	/** HTML img 标签正则: <img\s+[^>]+>/gi */
+	static readonly HTML_IMAGE_REGEX = /<img\s+[^>]+>/gi;
+	/** HTML src 属性正则 */
+	static readonly HTML_SRC_REGEX = /src\s*=\s*["']([^"']+)["']/i;
+	/** HTML alt 属性正则 */
+	static readonly HTML_ALT_REGEX = /alt\s*=\s*["']([^"']*)["']/i;
+	/** 匹配 HTML img 标签及其 src 属性的完整正则 */
+	static readonly HTML_IMG_SRC_PATTERN = /<img[^>]+src\s*=\s*["']([^"']*)["']/i;
+
+
 	private fileRenameListeners: Set<(oldPath: string, newPath: string) => Promise<void>> = new Set();
 	/** 用于防止重复处理同一个重命名事件（使用时间戳防止短时间内重复处理） */
 	private static recentRenames: Map<string, number> = new Map();
 	/** rename 事件处理函数引用，用于清理 */
-	private renameHandler: ((file: any, oldPath: string) => Promise<void>) | null = null;
+	private renameHandler: ((file: any, oldPath: string) => any) | null = null;
 
 	constructor(private app: App, private plugin?: ImageManagementPlugin) {
 		// 创建事件处理函数
@@ -237,9 +255,9 @@ export class ReferenceManager {
 				if (file && file instanceof TFile && file.extension && file.extension.match(/png|jpg|jpeg|gif|webp/i)) {
 					await this.handleFileRename(oldPath, file.path);
 				}
-			} catch (err) {
+			} catch (err: any) {
 				if (this.plugin?.logger) {
-					await this.plugin.logger.error(OperationType.UPDATE_REFERENCE, '文件重命名处理错误', {
+					this.plugin.logger.error(OperationType.UPDATE_REFERENCE, '文件重命名处理错误', {
 						error: err instanceof Error ? err : new Error(String(err)),
 						details: { oldPath, newPath: file?.path }
 					});
@@ -248,7 +266,7 @@ export class ReferenceManager {
 		};
 		
 		// 监听文件重命名事件
-		this.app.vault.on('rename', this.renameHandler);
+		this.app.vault.on('rename', this.renameHandler as any);
 	}
 	
 	/**
@@ -256,7 +274,7 @@ export class ReferenceManager {
 	 */
 	cleanup() {
 		if (this.renameHandler) {
-			this.app.vault.off('rename', this.renameHandler);
+			this.app.vault.off('rename', this.renameHandler as any);
 			this.renameHandler = null;
 		}
 	}
@@ -426,8 +444,6 @@ export class ReferenceManager {
 			if (this.plugin?.logger) {
 				this.plugin.logger.error(OperationType.PLUGIN_ERROR, '同步手动解析代码块失败', {
 					error: error as Error
-				}).catch(() => {
-					// 忽略日志记录错误
 				});
 			}
 			return false;
@@ -581,7 +597,7 @@ export class ReferenceManager {
 							// 更新各种格式的图片引用
 							// 1. Wiki 格式（带!）: ![[path]] 或 ![[path|text]] 或 ![[path|text|size]]
 							// 使用 parseWikiLink 和 buildWikiLink 正确保留显示文本和尺寸
-							const wikiWithExclamPattern = /!\[\[([^\]]+)\]\]/g;
+							const wikiWithExclamPattern = new RegExp(ReferenceManager.WIKI_WITH_EXCLAM_REGEX);
 							let wikiMatch;
 							while ((wikiMatch = wikiWithExclamPattern.exec(newLine)) !== null) {
 								const fullMatch = wikiMatch[0];
@@ -628,7 +644,7 @@ export class ReferenceManager {
 
 							// 2. Wiki 格式（不带!）: [[path]] 或 [[path|text]] 或 [[path|text|size]]
 							// 需要确保前面没有 !
-							const wikiNoExclamPattern = /(?:^|[^!])\[\[([^\]]+)\]\]/g;
+							const wikiNoExclamPattern = new RegExp(ReferenceManager.WIKI_NO_EXCLAM_REGEX);
 							while ((wikiMatch = wikiNoExclamPattern.exec(newLine)) !== null) {
 								// 提取实际的 [[...]] 部分
 								const fullMatchWithPrefix = wikiMatch[0];
@@ -672,7 +688,7 @@ export class ReferenceManager {
 							}
 
 							// 5. ![alt](oldPath) 或 ![alt](oldName) - Markdown格式
-							if (newLine.match(/!\[.*\]\(.*\)/)) {
+							if (newLine.match(ReferenceManager.MARKDOWN_LINK_REGEX)) {
 								// 匹配完整的Markdown图片格式，处理查询参数
 								newLine = newLine.replace(
 									new RegExp(
@@ -690,7 +706,7 @@ export class ReferenceManager {
 
 							// 6. <img src="oldPath"> 或 <img src="oldName"> - HTML格式（处理查询参数和属性）
 							// 同时处理双引号和单引号格式
-							if (newLine.match(/<img[^>]+src\s*=\s*["'][^"']*["']/i)) {
+							if (newLine.match(ReferenceManager.HTML_IMG_SRC_PATTERN)) {
 								// 匹配HTML img标签，处理各种属性格式和查询参数
 								// 双引号格式: <img ... src="path?query">
 								const imgPatternDouble = new RegExp(
@@ -703,6 +719,7 @@ export class ReferenceManager {
 									return `<img${beforeSrc}src=${quote}${newPath}${quote}${afterSrc}>`;
 								});
 							}
+
 
 							if (newLine !== line) {
 								// 调试日志（仅在DEBUG模式下记录）
@@ -886,11 +903,12 @@ export class ReferenceManager {
 								// ![[小图.png|小图.png]] - 仅显示文本
 								// ![[小图.png|显示文本|100x200]] - 显示文本和尺寸（如果支持）
 								let displayText = '';
-								const wikiMatch = fullLine.match(/!\[\[([^\]]+)\]\]/);
+								const wikiMatch = fullLine.match(ReferenceManager.WIKI_WITH_EXCLAM_REGEX);
 								if (wikiMatch) {
 									const parsed = parseWikiLink(wikiMatch[0]);
 									displayText = parsed.displayText || '';
 								} else {
+
 									// 如果正则匹配失败，使用 API 返回的值（但通常不应该发生）
 									displayText = embed.displayText || '';
 								}
@@ -950,11 +968,12 @@ export class ReferenceManager {
 									} else {
 										// 回退方案
 										// 检查是否是带!的格式
-										const wikiWithExclamMatch = fullLine.match(/!\[\[([^\]]+)\]\]/);
+										const wikiWithExclamMatch = fullLine.match(ReferenceManager.WIKI_WITH_EXCLAM_REGEX);
 										// 检查是否是不带!的格式
-										const wikiNoExclamMatch = fullLine.match(/(?:^|[^!])\[\[([^\]]+)\]\]/);
+										const wikiNoExclamMatch = fullLine.match(ReferenceManager.WIKI_NO_EXCLAM_REGEX);
 										
 										if (wikiWithExclamMatch) {
+
 											const parsed = parseWikiLink(wikiWithExclamMatch[0]);
 											displayText = parsed.displayText || '';
 										} else if (wikiNoExclamMatch) {
@@ -1007,7 +1026,7 @@ export class ReferenceManager {
 					}
 
 					// 检查 Markdown 格式: ![alt](path)
-					const markdownPattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
+					const markdownPattern = new RegExp(ReferenceManager.MARKDOWN_LINK_REGEX);
 					let markdownMatch;
 					let markdownFound = false;
 					while ((markdownMatch = markdownPattern.exec(line)) !== null) {
@@ -1044,7 +1063,7 @@ export class ReferenceManager {
 					// 检查 HTML 格式: <img src="path" alt="显示文本">
 					// 只有在没有找到 Markdown 格式引用时才检查 HTML 格式（避免重复）
 					if (!processedPositions.has(positionKey)) {
-						const htmlPattern = /<img[^>]+src\s*=\s*["']([^"']+)["'][^>]*>/gi;
+						const htmlPattern = new RegExp(ReferenceManager.HTML_IMG_SRC_PATTERN, 'gi');
 						let htmlMatch;
 						let htmlFound = false;
 						while ((htmlMatch = htmlPattern.exec(line)) !== null) {
@@ -1059,7 +1078,7 @@ export class ReferenceManager {
 									// 提取 alt 属性作为显示文本
 									// 注意：HTML 格式中，alt 属性即使等于文件名，也应该显示为文件名
 									// 只有 Wiki 格式在 | 后面没有内容时才留空
-									const altMatch = htmlMatch[0].match(/alt\s*=\s*["']([^"']*)["']/i);
+									const altMatch = htmlMatch[0].match(ReferenceManager.HTML_ALT_REGEX);
 									const displayText = altMatch ? altMatch[1].trim() : '';
 									
 									references.push({
@@ -1074,6 +1093,7 @@ export class ReferenceManager {
 								}
 							}
 						}
+
 						// 如果找到了 HTML 格式的引用，标记该行已处理
 						if (htmlFound) {
 							processedPositions.add(positionKey);
@@ -1219,7 +1239,7 @@ export class ReferenceManager {
 					const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'];
 					
 					// Wiki 格式: ![[path]] - 只匹配带!的图片嵌入
-					const wikiPattern = /!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
+					const wikiPattern = new RegExp(ReferenceManager.WIKI_WITH_EXCLAM_REGEX);
 					let match;
 					const lines = content.split('\n');
 					
@@ -1257,7 +1277,7 @@ export class ReferenceManager {
 						}
 						
 						// Markdown 格式: ![alt](path)
-						const markdownPattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
+						const markdownPattern = new RegExp(ReferenceManager.MARKDOWN_LINK_REGEX);
 						markdownPattern.lastIndex = 0;
 						while ((match = markdownPattern.exec(line)) !== null) {
 							// 检查是否在行内代码中
@@ -1275,7 +1295,7 @@ export class ReferenceManager {
 						}
 						
 						// HTML 格式: <img src="path">
-						const htmlPattern = /<img[^>]+src\s*=\s*["']([^"']+)["'][^>]*>/gi;
+						const htmlPattern = new RegExp(ReferenceManager.HTML_IMG_SRC_PATTERN, 'gi');
 						htmlPattern.lastIndex = 0;
 						while ((match = htmlPattern.exec(line)) !== null) {
 							// 检查是否在行内代码中
@@ -1292,6 +1312,7 @@ export class ReferenceManager {
 							}
 						}
 					}
+
 					
 					// 按行号排序，然后查找匹配的引用
 					allImageRefs.sort((a, b) => a.line - b.line);

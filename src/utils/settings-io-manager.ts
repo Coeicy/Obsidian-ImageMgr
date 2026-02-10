@@ -432,15 +432,43 @@ export class SettingsIOManager {
    * 过滤敏感信息（用于导出）
    */
   private filterSensitiveData(settings: any): void {
-    // 过滤API密钥等敏感信息
     if (settings.uploadConfig) {
+      // SM.MS - API Token
+      if (settings.uploadConfig.smms) {
+        settings.uploadConfig.smms.apiToken = '';
+      }
+      
+      // Imgur - Client ID
+      if (settings.uploadConfig.imgur) {
+        settings.uploadConfig.imgur.clientId = '';
+      }
+      
+      // GitHub - Token
+      if (settings.uploadConfig.github) {
+        settings.uploadConfig.github.token = '';
+      }
+      
+      // 七牛云 - AccessKey/SecretKey
       if (settings.uploadConfig.qiniu) {
         settings.uploadConfig.qiniu.accessKey = '';
         settings.uploadConfig.qiniu.secretKey = '';
       }
+      
+      // 阿里云 - AccessKeyId/AccessKeySecret
       if (settings.uploadConfig.aliyun) {
         settings.uploadConfig.aliyun.accessKeyId = '';
         settings.uploadConfig.aliyun.accessKeySecret = '';
+      }
+      
+      // 腾讯云 - SecretId/SecretKey
+      if (settings.uploadConfig.tencent) {
+        settings.uploadConfig.tencent.secretId = '';
+        settings.uploadConfig.tencent.secretKey = '';
+      }
+      
+      // 又拍云 - 操作员密码
+      if (settings.uploadConfig.upyun) {
+        settings.uploadConfig.upyun.password = '';
       }
     }
     
@@ -454,15 +482,43 @@ export class SettingsIOManager {
   private filterSensitiveDataFromImport(settings: any): any {
     const filteredSettings = { ...settings };
     
-    // 过滤API密钥等敏感信息
     if (filteredSettings.uploadConfig) {
+      // SM.MS - API Token
+      if (filteredSettings.uploadConfig.smms) {
+        delete filteredSettings.uploadConfig.smms.apiToken;
+      }
+      
+      // Imgur - Client ID
+      if (filteredSettings.uploadConfig.imgur) {
+        delete filteredSettings.uploadConfig.imgur.clientId;
+      }
+      
+      // GitHub - Token
+      if (filteredSettings.uploadConfig.github) {
+        delete filteredSettings.uploadConfig.github.token;
+      }
+      
+      // 七牛云 - AccessKey/SecretKey
       if (filteredSettings.uploadConfig.qiniu) {
         delete filteredSettings.uploadConfig.qiniu.accessKey;
         delete filteredSettings.uploadConfig.qiniu.secretKey;
       }
+      
+      // 阿里云 - AccessKeyId/AccessKeySecret
       if (filteredSettings.uploadConfig.aliyun) {
         delete filteredSettings.uploadConfig.aliyun.accessKeyId;
         delete filteredSettings.uploadConfig.aliyun.accessKeySecret;
+      }
+      
+      // 腾讯云 - SecretId/SecretKey
+      if (filteredSettings.uploadConfig.tencent) {
+        delete filteredSettings.uploadConfig.tencent.secretId;
+        delete filteredSettings.uploadConfig.tencent.secretKey;
+      }
+      
+      // 又拍云 - 操作员密码
+      if (filteredSettings.uploadConfig.upyun) {
+        delete filteredSettings.uploadConfig.upyun.password;
       }
     }
     

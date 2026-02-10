@@ -1,4 +1,4 @@
-import { Plugin, TFile, debounce, TFolder, Notice } from 'obsidian';
+import { Plugin, TFile, debounce, TFolder, Notice, MarkdownView } from 'obsidian';
 import { ImageManagementSettings, DEFAULT_SETTINGS } from './settings';
 import { ImageManagementSettingTab } from './ui/settings-tab';
 import { ImageManagerView, IMAGE_MANAGER_VIEW_TYPE } from './ui/image-manager-view';
@@ -10,6 +10,7 @@ import { ReferenceManager, parseWikiLink, parseHtmlImageSize } from './utils/ref
 import { TrashManager } from './utils/trash-manager';
 import { LockListManager } from './utils/lock-list-manager';
 import { HistoryManager } from './utils/history-manager';
+import { NestedCacheManager } from './utils/cache-manager';
 
 // ==================== 网络图片缓存系统导入 ====================
 import {
@@ -19,6 +20,7 @@ import {
     ScanErrorHandler
 } from './network-image';
 import { NetworkImageScanner } from './utils/network-image-scanner';
+import { processNoteImages } from './utils/note-image-resize';
 
 /**
  * ImageManagement 插件主类
@@ -249,38 +251,43 @@ export default class ImageManagementPlugin extends Plugin {
 	/** 锁定列表管理器 - 管理和监控锁定文件列表 */
 	lockListManager!: LockListManager;
 
-// ==================== 网络图片缓存系统 ====================
-/** 网络图片缓存适配器（插件文件夹存储） */
-networkImageCacheAdapter: FileCacheAdapter | null = null;
-/** 网络图片缓存 API */
-networkImageAPI!: NetworkImageScannerAPI;
-/** 网络图片缓存管理器 */
-networkImageCacheManager!: NetworkImageCacheManager;
-/** 网络图片错误处理器 */
-networkImageErrorHandler!: ScanErrorHandler;
-/** 网络图片扫描器 */
-networkImageScanner!: NetworkImageScanner;
+	// ==================== 网络图片缓存系统 ====================
+	/** 网络图片缓存适配器（插件文件夹存储） */
+	networkImageCacheAdapter: FileCacheAdapter | null = null;
+	/** 网络图片缓存 API */
+	networkImageAPI!: NetworkImageScannerAPI;
+	/** 网络图片缓存管理器 */
+	networkImageCacheManager!: NetworkImageCacheManager;
+	/** 网络图片错误处理器 */
+	networkImageErrorHandler!: ScanErrorHandler;
+	/** 网络图片扫描器 */
+	networkImageScanner!: NetworkImageScanner;
 
 	// ==================== 缓存机制 ====================
 	/** 显示文本缓存：filePath -> lineNumber -> displayText
 	 * 用于快速查询 Wiki 链接中的显示文本，避免重复解析
+	 * 使用 LRU 策略，最大 500 个文件，每个文件最多 1000 行
 	 */
-	private displayTextCache: Map<string, Map<number, string>> = new Map();
-	
+	private displayTextCache!: NestedCacheManager<string, number, string>;
+
 	/** 完整行内容缓存：filePath -> lineNumber -> fullLine
 	 * 缓存笔记中的完整行内容，用于快速定位引用
+	 * 使用 LRU 策略，最大 500 个文件，每个文件最多 1000 行
 	 */
-	private fullLineCache: Map<string, Map<number, string>> = new Map();
+	private fullLineCache!: NestedCacheManager<string, number, string>;
 	
 	/** 临时存储被删除的文件，用于撤销操作
 	 * imagePath -> { file: TFile, content: ArrayBuffer }
+	 * 最大缓存 100 个文件，10 分钟后过期
 	 */
-	private deletedFiles: Map<string, { file: TFile; content: ArrayBuffer }> = new Map();
+	private deletedFiles: Map<string, { file: TFile; content: ArrayBuffer; createdAt: number }> = new Map();
 	
 	/** 引用关系缓存：imagePath -> Set<referencingFilePaths>
 	 * 快速查询哪些笔记引用了某张图片
+	 * 最大缓存 2000 张图片
 	 */
 	private referenceCache: Map<string, Set<string>> = new Map();
+	private readonly MAX_REFERENCE_CACHE_SIZE = 2000;
 	
 	/** 引用缓存是否已初始化标志
 	 * 初始化后才能使用引用缓存功能
@@ -301,6 +308,37 @@ networkImageScanner!: NetworkImageScanner;
 	private debouncedSaveData = debounce(async () => {
 		await this.saveData(this.data);
 	}, 2000, true);
+
+	// ==================== 防抖函数引用（用于清理）====================
+	/** 显示文本变化检测的防抖函数 */
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	private debouncedDetectDisplayTextChanges: any = null;
+	/** 编辑器图片尺寸调整重新扫描的防抖函数 */
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	private debouncedScheduleEditorImageResize: any = null;
+	/** 文件修改触发编辑器重新扫描的防抖函数 */
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	private debouncedOnModifyRescanEditorResize: any = null;
+
+	/** 笔记内图片尺寸更新监听器（用于同步到图片详情页引用列表） */
+	private noteImageSizeUpdatedListeners = new Set<(imagePath: string, sourcePath: string, lineNumber: number, newWidth: number, newHeight: number) => void>();
+
+	/** 注册监听：笔记内拖拽改尺寸成功后调用 */
+	registerNoteImageSizeUpdated(cb: (imagePath: string, sourcePath: string, lineNumber: number, newWidth: number, newHeight: number) => void): void {
+		this.noteImageSizeUpdatedListeners.add(cb);
+	}
+
+	/** 注销监听 */
+	unregisterNoteImageSizeUpdated(cb: (imagePath: string, sourcePath: string, lineNumber: number, newWidth: number, newHeight: number) => void): void {
+		this.noteImageSizeUpdatedListeners.delete(cb);
+	}
+
+	/** 通知：某图片在笔记中的显示尺寸已更新（由 note-image-resize 在写回成功后调用） */
+	notifyNoteImageSizeUpdated(imagePath: string, sourcePath: string, lineNumber: number, newWidth: number, newHeight: number): void {
+		this.noteImageSizeUpdatedListeners.forEach(cb => {
+			try { cb(imagePath, sourcePath, lineNumber, newWidth, newHeight); } catch (_) { /* ignore */ }
+		});
+	}
 
 	/**
 	 * 插件加载生命周期方法 - 核心初始化流程
@@ -337,6 +375,19 @@ networkImageScanner!: NetworkImageScanner;
 	 */
 	async onload() {
 		try {
+			// 初始化带大小限制的缓存管理器（必须在开头初始化）
+			this.displayTextCache = new NestedCacheManager<string, number, string>('displayText', {
+				maxSize: 500,  // 最多 500 个文件
+				ttl: 30 * 60 * 1000,  // 30 分钟过期
+				debug: false
+			});
+			
+			this.fullLineCache = new NestedCacheManager<string, number, string>('fullLine', {
+				maxSize: 500,  // 最多 500 个文件
+				ttl: 30 * 60 * 1000,  // 30 分钟过期
+				debug: false
+			});
+
 			// 加载插件数据（包含设置和数据）
 			const loadedData = await this.loadData() || {};
 			await this.loadSettings(loadedData);
@@ -346,36 +397,36 @@ networkImageScanner!: NetworkImageScanner;
 			if ('settings' in this.data) {
 				delete (this.data as any).settings;
 			}
-			
+
 			// 初始化日志管理器 - 用于记录所有操作日志
 			this.logger = new Logger(this);
-			
+
 			// 初始化错误处理器 - 统一处理和记录错误
 			this.errorHandler = new ErrorHandler(this);
-			
+
 			// 初始化引用管理器 - 查找和管理图片的引用关系
 			this.referenceManager = new ReferenceManager(this.app, this);
 			
-			// 初始化回收站管理器 - 管理已删除的文件
+				// 初始化回收站管理器 - 管理已删除的文件
 			this.trashManager = new TrashManager(this.app, this);
 			
-		// 初始化回收站预加载（在设置加载后）- 提升回收站打开速度
-		this.trashManager.initializePreload();
-		
-	// 初始化锁定列表管理器 - 管理和监控锁定文件列表
-	this.lockListManager = new LockListManager(this);
-	await this.lockListManager.initialize();
-	
-	// 初始化网络图片缓存系统（仅在启用扫描网络图片时）
-	if (this.settings.scanRemoteImages) {
-		await this.initializeNetworkImageCache();
-	} else {
-		if (this.logger) {
-			await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image scanning is disabled, skipping cache system initialization');
-		}
-	}
-		
-		// 延迟初始化引用缓存，避免在启动时扫描所有文件
+			// 初始化回收站预加载（在设置加载后）- 提升回收站打开速度
+			this.trashManager.initializePreload();
+			
+			// 初始化锁定列表管理器 - 管理和监控锁定文件列表
+			this.lockListManager = new LockListManager(this);
+			await this.lockListManager.initialize();
+			
+			// 初始化网络图片缓存系统（仅在启用扫描网络图片时）
+			if (this.settings.scanRemoteImages) {
+				await this.initializeNetworkImageCache();
+			} else {
+				if (this.logger) {
+					this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image scanning is disabled, skipping cache system initialization');
+				}
+			}
+			
+			// 延迟初始化引用缓存，避免在启动时扫描所有文件
 			// 5秒后初始化，让插件先完成核心启动流程
 			setTimeout(() => {
 				this.initializeReferenceCache();
@@ -387,15 +438,15 @@ networkImageScanner!: NetworkImageScanner;
 			}, 3000);
 			
 			// 记录插件加载成功日志
-			await this.logger.info(OperationType.PLUGIN_LOAD, '插件加载成功', {
+			this.logger.info(OperationType.PLUGIN_LOAD, '插件加载成功', {
 				details: { version: this.manifest.version }
 			});
 
-		// 注册图片管理视图
-		this.registerView(
-			IMAGE_MANAGER_VIEW_TYPE,
-			(leaf) => new ImageManagerView(leaf, this)
-		);
+			// 注册图片管理视图
+			this.registerView(
+				IMAGE_MANAGER_VIEW_TYPE,
+				(leaf) => new ImageManagerView(leaf, this)
+			);
 
 		// 添加快捷命令打开图片管理视图
 		this.addCommand({
@@ -481,19 +532,96 @@ networkImageScanner!: NetworkImageScanner;
 			await this.activateView();
 		});
 
-			// 添加设置标签页
-			this.addSettingTab(new ImageManagementSettingTab(this.app, this));
-			
-			// 注册文件修改监听器，检测显示文本变化
-			// 使用防抖（debounce）避免频繁扫描文件，延迟 2 秒执行
-			this.registerEvent(
-				this.app.metadataCache.on('changed', debounce(async (file, data, cache) => {
-					// 确保 file 有效且有 name 属性
-					if (file && file.name) {
-						await this.detectDisplayTextChanges(file);
+		// 添加设置标签页
+		this.addSettingTab(new ImageManagementSettingTab(this.app, this));
+
+		/**
+		 * ========== 笔记内图片拖拽调整尺寸功能 ==========
+		 *
+		 * 功能概述：
+		 * 在阅读视图和编辑视图（即时预览）中为图片添加右下角拖拽手柄，
+		 * 拖拽调整尺寸后自动写回笔记，支持本地图片和网络图片。
+		 *
+		 * 阅读视图处理：
+		 * - 使用 registerMarkdownPostProcessor 在渲染时挂载手柄
+		 * - 传入 context 以便 addChild 在重渲染时清理监听，避免内存泄漏
+		 * - 支持所有标准图片格式（Wiki、Markdown、HTML）
+		 *
+		 * 编辑视图处理：
+		 * - 仅扫描 .cm-editor 避免分栏时混入右侧预览区图片
+		 * - 使用防抖（300ms）避免频繁扫描
+		 * - 写回后通过 editorLineUpdater 调用 setLine 实时更新该行
+		 * - 多次延迟扫描（500ms/1000ms/2000ms）确保图片加载后挂载
+		 * - 监听 editor-scroll 事件，长文档滚动时检查新出现的图片
+		 *
+		 * 同步机制：
+		 * - 写回成功后调用 notifyNoteImageSizeUpdated
+		 * - 详情页监听此事件刷新引用列表显示最新尺寸
+		 */
+
+		// 阅读视图：post processor 挂载手柄
+		this.registerMarkdownPostProcessor((element, context) => {
+			const sourcePath = context.sourcePath;
+			if (!sourcePath || !sourcePath.endsWith('.md')) return;
+			processNoteImages(element, sourcePath, this.app, this, { context });
+		});
+
+		// 编辑视图（即时预览）：扫描 .cm-editor 子树挂载拖拽手柄
+		this.debouncedScheduleEditorImageResize = debounce(() => {
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view || view.getMode() !== 'source' || !view.file?.path.endsWith('.md')) return;
+			const sourcePath = view.file.path;
+			const root = view.containerEl.querySelector('.cm-editor') ?? view.containerEl;
+			processNoteImages(root as HTMLElement, sourcePath, this.app, this, {
+				editorLineUpdater: (path, lineNumber, newLineContent) => {
+					const v = this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (v?.file?.path === path && v.editor) {
+						v.editor.setLine(lineNumber - 1, newLineContent);
 					}
-				}, 2000, false))
-			);
+				}
+			});
+		}, 300);
+
+		// 编辑器试图变化时触发（切换标签页、打开新笔记等）
+		this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
+			this.debouncedScheduleEditorImageResize?.();
+			// 即时预览下图片可能稍晚渲染，多次延迟扫描确保挂载
+			setTimeout(() => this.debouncedScheduleEditorImageResize?.(), 500);
+			setTimeout(() => this.debouncedScheduleEditorImageResize?.(), 1000);
+			setTimeout(() => this.debouncedScheduleEditorImageResize?.(), 2000);
+		}));
+		this.registerEvent(this.app.workspace.on('layout-change', () => this.debouncedScheduleEditorImageResize?.()));
+
+		// 当前笔记被修改后防抖再次扫描，使新插入或新渲染的图片挂上手柄
+		this.debouncedOnModifyRescanEditorResize = debounce((filePath: string) => {
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view || view.getMode() !== 'source' || view.file?.path !== filePath) return;
+			this.debouncedScheduleEditorImageResize?.();
+		}, 600);
+		
+		this.registerEvent(this.app.vault.on('modify', (file) => {
+			if (!(file instanceof TFile) || !file.path.endsWith('.md')) return;
+			const active = this.app.workspace.getActiveFile();
+			if (active?.path !== file.path) return;
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view || view.getMode() !== 'source') return;
+			this.debouncedOnModifyRescanEditorResize?.(file.path);
+		}));
+
+			// 注册文件修改监听器，检测显示文本变化
+		// 使用防抖（debounce）避免频繁扫描文件，延迟 2 秒执行
+		this.debouncedDetectDisplayTextChanges = debounce(async (file: TFile) => {
+			// 确保 file 有效且有 name 属性
+			if (file && file.name) {
+				await this.detectDisplayTextChanges(file);
+			}
+		}, 2000, false);
+		
+		this.registerEvent(
+			this.app.metadataCache.on('changed', (file, data, cache) => {
+				this.debouncedDetectDisplayTextChanges?.(file);
+			})
+		);
 
 			// 注册文件创建监听器，检测图片文件导入/添加
 			this.registerEvent(
@@ -515,10 +643,10 @@ networkImageScanner!: NetworkImageScanner;
 										quiet: true // 静默模式，不输出控制台日志
 									});
 								}, 1000);
-							} catch (error) {
+							} catch (error: any) {
 								// 静默失败，不影响主流程
 								if (this.logger) {
-									await this.logger.warn(OperationType.SCAN, `Failed to auto-scan network images for new file: ${file.path}`, { error });
+									this.logger.warn(OperationType.SCAN, `Failed to auto-scan network images for new file: ${file.path}`, { error });
 								}
 							}
 						}
@@ -538,10 +666,10 @@ networkImageScanner!: NetworkImageScanner;
 							try {
 								// 更新缓存中的文件路径
 								await this.updateNetworkImageCachePath(oldPath, file.path);
-							} catch (error) {
+							} catch (error: any) {
 								// 静默失败，不影响主流程
 								if (this.logger) {
-									await this.logger.warn(OperationType.SCAN, `Failed to update network image cache path: ${oldPath} -> ${file.path}`, { error });
+									this.logger.warn(OperationType.SCAN, `Failed to update network image cache path: ${oldPath} -> ${file.path}`, { error });
 								}
 							}
 						}
@@ -561,10 +689,10 @@ networkImageScanner!: NetworkImageScanner;
 							try {
 								// 标记该文件的网络图片为删除状态
 								await this.markNetworkImagesAsDeleted(file.path);
-							} catch (error) {
+			} catch (error: any) {
 								// 静默失败，不影响主流程
 								if (this.logger) {
-									await this.logger.warn(OperationType.SCAN, `Failed to mark network images as deleted: ${file.path}`, { error });
+									this.logger.warn(OperationType.SCAN, `Failed to mark network images as deleted: ${file.path}`, { error });
 								}
 							}
 						}
@@ -618,26 +746,26 @@ networkImageScanner!: NetworkImageScanner;
 										quiet: true // 静默模式，不输出控制台日志
 									});
 								}, 2000);
-							} catch (error) {
+							} catch (error: any) {
 								// 静默失败，不影响主流程
 								if (this.logger) {
-									await this.logger.warn(OperationType.SCAN, `Failed to auto-scan network images for changed file: ${file.path}`, { error });
+									this.logger.warn(OperationType.SCAN, `Failed to auto-scan network images for changed file: ${file.path}`, { error });
 								}
 							}
 						}
 					}
 				})
 			);
-		} catch (error) {
+		} catch (error: any) {
 			// 即使初始化失败，也尝试记录错误
 			if (this.errorHandler) {
-				await this.errorHandler.handle(
+				this.errorHandler.handle(
 					error as Error,
 					OperationType.PLUGIN_ERROR,
 					'插件加载失败'
 				);
 			} else if (this.logger) {
-				await this.logger.error(OperationType.PLUGIN_ERROR, '插件加载失败', {
+				this.logger.error(OperationType.PLUGIN_ERROR, '插件加载失败', {
 					error: error as Error
 				});
 			} else {
@@ -680,43 +808,43 @@ networkImageScanner!: NetworkImageScanner;
 				await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image database initialized successfully');
 			}
 		
-		// 3. 创建网络图片扫描器
-		this.networkImageScanner = new NetworkImageScanner(
-			this.app,
+			// 3. 创建网络图片扫描器
+			this.networkImageScanner = new NetworkImageScanner(
+				this.app,
 			async (msg, error) => {
 				if (this.logger) {
-					await this.logger.error(OperationType.SCAN, msg, { error });
+					await this.logger.error(OperationType.SCAN, msg, { error: error as Error });
 				}
 			}
-		);
-		
-		// 4. 创建错误处理器
-		this.networkImageErrorHandler = new ScanErrorHandler(200, true);
-		if (this.logger) {
-			// 仅记录到插件日志，不在控制台刷屏
-			await this.logger.info(
-				OperationType.PLUGIN_OPERATION,
-				`网络图片错误记录功能已启用（最多保留最近 ${this.networkImageErrorHandler.getMaxErrorLogSize()} 条错误记录用于排查）`
 			);
-		}
-		
-		// 5. 创建缓存管理器
-		this.networkImageCacheManager = new NetworkImageCacheManager(db);
-		
-		// 6. 创建 API 实例
-		this.networkImageAPI = new NetworkImageScannerAPI(
-			this.app,
-			db,
-			this.networkImageScanner,
-			this.networkImageErrorHandler
-		);
-		
-		if (this.logger) {
-			await this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image cache system initialized successfully');
-		}
+			
+			// 4. 创建错误处理器
+			this.networkImageErrorHandler = new ScanErrorHandler(200, true);
+			if (this.logger) {
+				// 仅记录到插件日志，不在控制台刷屏
+				await this.logger.info(
+					OperationType.PLUGIN_OPERATION,
+					`网络图片错误记录功能已启用（最多保留最近 ${this.networkImageErrorHandler.getMaxErrorLogSize()} 条错误记录用于排查）`
+				);
+			}
+			
+			// 5. 创建缓存管理器
+			this.networkImageCacheManager = new NetworkImageCacheManager(db);
+			
+			// 6. 创建 API 实例
+			this.networkImageAPI = new NetworkImageScannerAPI(
+				this.app,
+				db,
+				this.networkImageScanner,
+				this.networkImageErrorHandler
+			);
+			
+			if (this.logger) {
+				this.logger.info(OperationType.PLUGIN_OPERATION, 'Network image cache system initialized successfully');
+			}
 		} catch (error) {
 			if (this.logger) {
-				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to initialize network image cache system', { error });
+				this.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to initialize network image cache system', { error: error as Error });
 			}
 			
 			// 初始化失败时，回退到不使用缓存的模式
@@ -738,64 +866,64 @@ networkImageScanner!: NetworkImageScanner;
 		// 检查缓存系统是否可用
 		if (!this.networkImageAPI) {
 			if (this.logger) {
-				await this.logger.warn(OperationType.SCAN, 'Network image cache system not available, using legacy scanner');
+				this.logger.warn(OperationType.SCAN, 'Network image cache system not available, using legacy scanner');
 			}
 			return await this.scanNetworkImagesLegacy(path);
 		}
 
 			try {
-				// 显示进度提示（仅非静默模式）
-				const notice = new Notice('正在扫描网络图片...', 0);
+			// 显示进度提示（仅非静默模式）
+			const notice = new Notice('正在扫描网络图片...', 0);
+			
+			// 执行增量扫描（支持静默模式）
+			const quiet = options?.quiet || false;
+			const result = await this.networkImageAPI.scan({
+				path,
+				incremental: true,
+				validateImages: false,
+				quiet: quiet
+			});
+			
+			// 更新通知
+			notice.hide();
+			
+			// 仅非静默模式显示通知
+			if (!quiet) {
+				const message = `扫描完成！\n` +
+				              `共发现 ${result.totalImages} 张图片\n` +
+				              `新增: ${result.newImages} 张\n` +
+				              `更新: ${result.updatedImages} 张\n` +
+				              `缓存: ${result.cachedImages} 张\n` +
+				              `耗时: ${(result.duration / 1000).toFixed(2)} 秒\n` +
+				              `缓存命中率: ${result.cacheHitRate.toFixed(1)}%`;
 				
-				// 执行增量扫描（支持静默模式）
-				const quiet = options?.quiet || false;
-				const result = await this.networkImageAPI.scan({
-					path,
-					incremental: true,
-					validateImages: false,
-					quiet: quiet
-				});
-				
-				// 更新通知
-				notice.hide();
-				
-				// 仅非静默模式显示通知
-				if (!quiet) {
-					const message = `扫描完成！\n` +
-					              `共发现 ${result.totalImages} 张图片\n` +
-					              `新增: ${result.newImages} 张\n` +
-					              `更新: ${result.updatedImages} 张\n` +
-					              `缓存: ${result.cachedImages} 张\n` +
-					              `耗时: ${(result.duration / 1000).toFixed(2)} 秒\n` +
-					              `缓存命中率: ${result.cacheHitRate.toFixed(1)}%`;
-					
-					new Notice(message, 5000);
-				}
-				
-		// 记录性能指标（仅非静默模式）
-		if (this.logger && !quiet) {
-			await this.logger.info(OperationType.SCAN, `Network image scan completed: ${JSON.stringify(result)}`);
-		}
-		
-		// 获取扫描的图片数据
-		const images = await this.getNetworkImagesFromCache(path);
-		
-		return images;
-	} catch (error) {
-		if (this.logger) {
-			await this.logger.error(OperationType.SCAN, 'Network image scan failed', { error });
-		}
-		new Notice(`网络图片扫描失败: ${error.message}`, 5000);
-		
-		// 回退到旧版扫描器
-		return await this.scanNetworkImagesLegacy(path);
-	}
-}
+				new Notice(message, 5000);
+			}
+			
+			// 记录性能指标（仅非静默模式）
+			if (this.logger && !quiet) {
+				await this.logger.info(OperationType.SCAN, `Network image scan completed: ${JSON.stringify(result)}`);
+			}
+			
+			// 获取扫描的图片数据
+			const images = await this.getNetworkImagesFromCache(path);
+			
+				return images;
+		} catch (error) {
+			if (this.logger) {
+				await this.logger.error(OperationType.SCAN, 'Network image scan failed', { error: error as Error });
+			}
+			new Notice(`网络图片扫描失败: ${(error as Error).message}`, 5000);
 
-/**
- * 从缓存获取网络图片数据
- */
-private async getNetworkImagesFromCache(path?: string): Promise<any[]> {
+			// 回退到旧版扫描器
+			return await this.scanNetworkImagesLegacy(path);
+		}
+	}
+
+	/**
+	 * 从缓存获取网络图片数据
+	 */
+	private async getNetworkImagesFromCache(path?: string): Promise<any[]> {
 	try {
 		// 搜索活跃的网络图片
 		const searchResult = await this.networkImageAPI.searchImages({
@@ -815,23 +943,23 @@ private async getNetworkImagesFromCache(path?: string): Promise<any[]> {
 		}));
 	} catch (error) {
 		if (this.logger) {
-			await this.logger.error(OperationType.SCAN, 'Failed to get images from cache', { error });
+			await this.logger.error(OperationType.SCAN, 'Failed to get images from cache', { error: error as Error });
 		}
 		return [];
 	}
 }
 
-/**
- * 旧版网络图片扫描（不使用缓存）
- */
-private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
-	const scanner = new NetworkImageScanner(this.app, async (msg, error) => {
-		if (this.logger) {
-			await this.logger.error(OperationType.SCAN, msg, { error });
-		}
-	});
-	return await scanner.scanAll(path);
-}
+	/**
+	 * 旧版网络图片扫描（不使用缓存）
+	 */
+	private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
+		const scanner = new NetworkImageScanner(this.app, async (msg, error) => {
+			if (this.logger) {
+				this.logger.error(OperationType.SCAN, msg, { error: error as any });
+			}
+		});
+		return await scanner.scanAll(path);
+	}
 
 	/**
 	 * 执行完整扫描（用于定期维护）
@@ -858,7 +986,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 			}
 		} catch (error) {
 			if (this.logger) {
-				await this.logger.error(OperationType.SCAN, 'Full network image scan failed', { error });
+				await this.logger.error(OperationType.SCAN, 'Full network image scan failed', { error: error as Error });
 			}
 		}
 	}
@@ -885,7 +1013,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 			new Notice(`缓存清理完成！\n移除 ${result.imagesRemoved} 张图片\n释放 ${(result.spaceFreed / 1024 / 1024).toFixed(2)} MB 空间`, 3000);
 		} catch (error) {
 			if (this.logger) {
-				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Cache cleanup failed', { error });
+				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Cache cleanup failed', { error: error as Error });
 			}
 			new Notice('缓存清理失败', 3000);
 		}
@@ -907,7 +1035,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 			new Notice('✅ 网络图片缓存已清空，下次扫描将重新建立', 3000);
 		} catch (error) {
 			if (this.logger) {
-				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to clear network image cache', { error });
+				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to clear network image cache', { error: error as Error });
 			}
 			new Notice('清空缓存失败', 3000);
 		}
@@ -933,7 +1061,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 			};
 		} catch (error) {
 			if (this.logger) {
-				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to get cache stats', { error });
+				await this.logger.error(OperationType.PLUGIN_OPERATION, 'Failed to get cache stats', { error: error as Error });
 			}
 			return null;
 		}
@@ -1004,7 +1132,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 			}
 		} catch (error) {
 			if (this.logger) {
-				await this.logger.warn(OperationType.PLUGIN_OPERATION, `Failed to update network image cache path: ${oldPath} -> ${newPath}`, { error });
+				await this.logger.warn(OperationType.PLUGIN_OPERATION, `Failed to update network image cache path: ${oldPath} -> ${newPath}`, { error: error as Error });
 			}
 		}
 	}
@@ -1065,7 +1193,7 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 			}
 		} catch (error) {
 			if (this.logger) {
-				await this.logger.warn(OperationType.PLUGIN_OPERATION, `Failed to mark network images as deleted: ${filePath}`, { error });
+				await this.logger.warn(OperationType.PLUGIN_OPERATION, `Failed to mark network images as deleted: ${filePath}`, { error: error as Error });
 			}
 		}
 	}
@@ -1097,6 +1225,37 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 		// 清理 TrashManager 的缓存
 		if (this.trashManager) {
 			this.trashManager.invalidateCache();
+		}
+		
+		// 清理防抖函数（取消待执行的调用）
+		if (this.debouncedDetectDisplayTextChanges) {
+			// @ts-ignore - obsidian 的 debounce 返回的函数有 cancel 方法
+			this.debouncedDetectDisplayTextChanges.cancel?.();
+		}
+		if (this.debouncedScheduleEditorImageResize) {
+			// @ts-ignore
+			this.debouncedScheduleEditorImageResize.cancel?.();
+		}
+		if (this.debouncedOnModifyRescanEditorResize) {
+			// @ts-ignore
+			this.debouncedOnModifyRescanEditorResize.cancel?.();
+		}
+		
+		// 清理笔记内图片尺寸更新监听器
+		this.noteImageSizeUpdatedListeners.clear();
+		
+		// 清理缓存
+		this.displayTextCache.clear();
+		this.fullLineCache.clear();
+		this.referenceCache.clear();
+		
+		// 清理过期的已删除文件记录
+		const now = Date.now();
+		const EXPIRY_TIME = 10 * 60 * 1000; // 10 分钟
+		for (const [key, value] of this.deletedFiles.entries()) {
+			if (now - value.createdAt > EXPIRY_TIME) {
+				this.deletedFiles.delete(key);
+			}
 		}
 		
 		// 记录插件卸载日志
@@ -1143,23 +1302,8 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 			} else if (hasSettingsProps && hasDataProps) {
 				// 混合对象，提取设置部分
 				savedSettings = {};
-				// 提取所有设置属性（包括锁定列表相关属性）
-				const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
-					'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
-					'enableDuplicateDetection', 'enableBrokenLinksDetection', 'brokenLinksNewItemPosition',
-					'autoGenerateNames', 'keepModalOpen', 'pathNamingDepth',
-					'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
-					'defaultWheelMode', 'showImageName', 'showImageSize', 
-					'showImageDimensions', 'showLockIcon', 'imageNameWrap', 'adaptiveImageSize',
-					'lazyLoadDelay', 'maxCacheSize', 'cardBorderRadius',
-					'cardSpacing', 'fixedImageHeight', 'enableHoverEffect', 'showImageIndex',
-					'confirmBeforeDelete', 'moveToSystemTrash', 'enablePluginTrash', 'trashRestorePath',
-					'logLevel', 'enableConsoleLog', 'enableDebugLog', 'keyboardShortcuts',
-					'ignoredFiles', 'ignoredHashes', 'ignoredHashMetadata', 'showIgnoredFilePath',
-					'pureGallery', 'uniformCardHeight', 'searchCaseSensitive', 'liveSearchDelay',
-					'searchInPath', 'maxBatchOperations', 'batchConfirmThreshold', 'showBatchProgress',
-					'showStatistics', 'statisticsPosition',
-					'scanRemoteImages', 'remoteImageProxy', 'showRemoteImageBadge', 'remoteImageTimeout', 'autoRetryRemoteImage'];
+				// 动态提取所有设置属性（基于 DEFAULT_SETTINGS 的键）
+				const settingsKeys = Object.keys(DEFAULT_SETTINGS);
 				
 				for (const key of settingsKeys) {
 					if (key in loadedData) {
@@ -1238,22 +1382,8 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 		// 注意：ignoredFiles, ignoredHashes, ignoredHashMetadata 是锁定列表数据，需要通过 saveSettings 保存
 		let dataWithoutSettings: any = {};
 		if (data && typeof data === 'object') {
-			// 排除所有设置属性（不包括锁定列表，因为它们通过 saveSettings 单独管理）
-			const settingsKeys = ['imagesPerRow', 'autoScan', 'defaultImageFolder', 'includeSubfolders', 
-				'defaultSortBy', 'defaultSortOrder', 'defaultFilterType', 'enableDeduplication', 
-				'enableDuplicateDetection', 'enableBrokenLinksDetection', 'brokenLinksNewItemPosition',
-				'autoGenerateNames', 'keepModalOpen', 'pathNamingDepth',
-				'duplicateNameHandling', 'multipleReferencesHandling', 'saveBatchRenameLog', 
-				'defaultWheelMode', 'showImageName', 'showImageSize', 
-				'showImageDimensions', 'showLockIcon', 'imageNameWrap', 'adaptiveImageSize',
-				'lazyLoadDelay', 'maxCacheSize', 'cardBorderRadius',
-				'cardSpacing', 'fixedImageHeight', 'enableHoverEffect', 'showImageIndex',
-				'confirmBeforeDelete', 'moveToSystemTrash', 'enablePluginTrash', 'trashRestorePath',
-				'logLevel', 'enableConsoleLog', 'enableDebugLog', 'keyboardShortcuts',
-				'ignoredFiles', 'ignoredHashes', 'ignoredHashMetadata', 'showIgnoredFilePath',
-				'pureGallery', 'uniformCardHeight', 'searchCaseSensitive', 'liveSearchDelay',
-				'searchInPath', 'maxBatchOperations', 'batchConfirmThreshold', 'showBatchProgress',
-				'showStatistics', 'statisticsPosition'];
+			// 动态提取所有设置属性（基于 DEFAULT_SETTINGS 的键）
+			const settingsKeys = Object.keys(DEFAULT_SETTINGS);
 			
 			for (const key in data) {
 				if (!settingsKeys.includes(key)) {
@@ -1280,24 +1410,10 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 	 * 更新显示文本缓存（用于插件内部保存时同步缓存，避免文件监听器重复记录）
 	 */
 	updateDisplayTextCache(filePath: string, lineNumber: number, displayText: string, fullLine: string) {
-		// 获取该文件的缓存
-		let fileCache = this.displayTextCache.get(filePath);
-		if (!fileCache) {
-			fileCache = new Map();
-			this.displayTextCache.set(filePath, fileCache);
-		}
-
-		// 获取该文件的完整行内容缓存
-		let fileLineCache = this.fullLineCache.get(filePath);
-		if (!fileLineCache) {
-			fileLineCache = new Map();
-			this.fullLineCache.set(filePath, fileLineCache);
-		}
-
 		// 更新缓存（行号是 0-based，传入的是 1-based）
 		const lineIndex = lineNumber - 1;
-		fileCache.set(lineIndex, displayText);
-		fileLineCache.set(lineIndex, fullLine);
+		this.displayTextCache.set(filePath, lineIndex, displayText);
+		this.fullLineCache.set(filePath, lineIndex, fullLine);
 	}
 
 	/**
@@ -1322,20 +1438,6 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 
 			const content = await this.app.vault.read(file);
 			const lines = content.split('\n');
-
-			// 获取该文件的缓存
-			let fileCache = this.displayTextCache.get(file.path);
-			if (!fileCache) {
-				fileCache = new Map();
-				this.displayTextCache.set(file.path, fileCache);
-			}
-
-			// 获取该文件的完整行内容缓存
-			let fileLineCache = this.fullLineCache.get(file.path);
-			if (!fileLineCache) {
-				fileLineCache = new Map();
-				this.fullLineCache.set(file.path, fileLineCache);
-			}
 
 			// 检查 embeds（图片嵌入）
 			if (cache.embeds) {
@@ -1364,9 +1466,9 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 						displayText = htmlMatch[1] || '';
 					}
 
-					// 获取之前的显示文本和旧行内容
-					const oldDisplayText = fileCache.get(lineIndex);
-					const oldFullLine = fileLineCache.get(lineIndex) || fullLine; // 如果没有旧行，使用当前行
+					// 获取之前的显示文本和旧行内容（使用新的缓存管理器 API）
+					const oldDisplayText = this.displayTextCache.get(file.path, lineIndex);
+					const oldFullLine = this.fullLineCache.get(file.path, lineIndex) || fullLine; // 如果没有旧行，使用当前行
 
 					// 检测显示文本或尺寸变化（对于 Wiki 格式，检查整行内容是否变化）
 					const displayTextChanged = oldDisplayText !== undefined && oldDisplayText !== displayText && oldDisplayText !== '';
@@ -1421,8 +1523,8 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 					}
 
 					// 更新缓存
-					fileCache.set(lineIndex, displayText);
-					fileLineCache.set(lineIndex, fullLine); // 保存当前行内容
+					this.displayTextCache.set(file.path, lineIndex, displayText);
+					this.fullLineCache.set(file.path, lineIndex, fullLine); // 保存当前行内容
 				}
 			}
 
@@ -1463,9 +1565,9 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 							displayText = htmlMatch[1] || '';
 						}
 
-						// 获取之前的显示文本和旧行内容
-						const oldDisplayText = fileCache.get(lineIndex);
-						const oldFullLine = fileLineCache.get(lineIndex) || fullLine; // 如果没有旧行，使用当前行
+						// 获取之前的显示文本和旧行内容（使用新的缓存管理器 API）
+						const oldDisplayText = this.displayTextCache.get(file.path, lineIndex);
+						const oldFullLine = this.fullLineCache.get(file.path, lineIndex) || fullLine; // 如果没有旧行，使用当前行
 
 						// 检测显示文本或尺寸变化（对于 Wiki 格式，检查整行内容是否变化）
 						const displayTextChanged = oldDisplayText !== undefined && oldDisplayText !== displayText && oldDisplayText !== '';
@@ -1524,19 +1626,15 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 						}
 
 						// 更新缓存
-						fileCache.set(lineIndex, displayText);
-						fileLineCache.set(lineIndex, fullLine); // 保存当前行内容
+						this.displayTextCache.set(file.path, lineIndex, displayText);
+						this.fullLineCache.set(file.path, lineIndex, fullLine); // 保存当前行内容
 					}
 				}
 			}
 
-			// 清理不再存在的行的缓存
-			for (const [lineIndex] of fileCache) {
-				if (lineIndex >= lines.length) {
-					fileCache.delete(lineIndex);
-					fileLineCache.delete(lineIndex);
-				}
-			}
+			// 清理不再存在的行的缓存（使用新的缓存管理器 API）
+			// 注意：由于 NestedCacheManager 使用 LRU 策略，过期的条目会自动清理
+			// 这里不需要手动清理，缓存管理器会在达到大小限制时自动淘汰
 		} catch (error) {
 			if (this.logger) {
 				await this.logger.error(OperationType.PLUGIN_ERROR, '检测显示文本变化失败', {
@@ -2173,6 +2271,14 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 								const imagePath = resolvedPath.path;
 								let refSet = this.referenceCache.get(imagePath);
 								if (!refSet) {
+									// 检查缓存大小限制
+									if (this.referenceCache.size >= this.MAX_REFERENCE_CACHE_SIZE) {
+										// 删除最旧的条目（Map 的第一个条目）
+										const firstKey = this.referenceCache.keys().next().value;
+										if (firstKey) {
+											this.referenceCache.delete(firstKey);
+										}
+									}
 									refSet = new Set();
 									this.referenceCache.set(imagePath, refSet);
 								}
@@ -2266,6 +2372,13 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 							// 更新缓存但不记录日志（这是重命名导致的引用更新）
 							let refSet = this.referenceCache.get(imagePath);
 							if (!refSet) {
+								// 检查缓存大小限制
+								if (this.referenceCache.size >= this.MAX_REFERENCE_CACHE_SIZE) {
+									const firstKey = this.referenceCache.keys().next().value;
+									if (firstKey) {
+										this.referenceCache.delete(firstKey);
+									}
+								}
 								refSet = new Set();
 								this.referenceCache.set(imagePath, refSet);
 							}
@@ -2330,6 +2443,13 @@ private async scanNetworkImagesLegacy(path?: string): Promise<any[]> {
 						// 更新缓存
 						let refSet = this.referenceCache.get(imagePath);
 						if (!refSet) {
+							// 检查缓存大小限制
+							if (this.referenceCache.size >= this.MAX_REFERENCE_CACHE_SIZE) {
+								const firstKey = this.referenceCache.keys().next().value;
+								if (firstKey) {
+									this.referenceCache.delete(firstKey);
+								}
+							}
 							refSet = new Set();
 							this.referenceCache.set(imagePath, refSet);
 						}

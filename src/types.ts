@@ -272,6 +272,28 @@ export interface PluginData {
 	
 	/** 链接格式统计最后更新时间戳 */
 	linkFormatStatsUpdatedAt?: number;
+	
+	/** 视图状态：搜索查询字符串 */
+	viewSearchQuery?: string;
+	
+	/** 视图状态：排序选项 */
+	viewSortOptions?: {
+		rules: Array<{
+			sortBy: 'name' | 'size' | 'date' | 'dimensions' | 'locked';
+			sortOrder: 'asc' | 'desc';
+		}>;
+	};
+	
+	/** 视图状态：筛选选项 */
+	viewFilterOptions?: {
+		filterType: 'all' | 'png' | 'jpg' | 'gif' | 'webp' | 'svg' | 'bmp';
+		lockFilter?: 'locked' | 'unlocked';
+		referenceFilter?: 'referenced' | 'unreferenced';
+		locationFilter?: 'local' | 'remote';
+		sizeFilter?: { min?: number; max?: number };
+		nameFilter?: string;
+		folderFilter?: string;
+	};
 }
 
 /**
@@ -350,6 +372,10 @@ export interface ImageManagerSettings {
 	// ==================== 引用与预览设置 ====================
 	/** 前往笔记时是否保持详情页打开 */
 	keepModalOpen: boolean;
+	/** 是否在笔记内启用拖拽调整图片显示尺寸（阅读视图 + 编辑视图即时预览）；写回支持 Wiki/HTML/Markdown（Markdown 转 HTML） */
+	enableDragResizeImageInNote?: boolean;
+	/** 拖拽调整大小时是否保持宽高比 */
+	dragResizeKeepAspectRatio?: boolean;
 	/** 鼠标滚轮默认模式：scroll-切换图片、zoom-缩放图片 */
 	defaultWheelMode: 'scroll' | 'zoom';
 	
@@ -456,20 +482,60 @@ export interface ImageManagerSettings {
 	showRemoteImageBadge?: boolean;
 	/** 云端图片加载超时时间（毫秒） */
 	remoteImageTimeout?: number;
-	/** 是否自动尝试代理加载失败的云端图片 */
-	autoRetryRemoteImage?: boolean;
 	// ==================== 图床上传设置 ====================
 	/** 图床配置 */
 	uploadConfig?: {
-		type: 'qiniu' | 'aliyun' | 'custom';
+		/** Imgur 图床配置 */
+		imgur?: {
+			enabled: boolean;
+			clientId: string;
+			useProxy?: boolean;
+			proxyUrl?: string;
+		};
+		/** SM.MS 图床配置 */
+		smms?: {
+			enabled: boolean;
+			apiToken: string;
+		};
+		/** 七牛云图床配置 */
 		qiniu?: {
+			enabled: boolean;
 			accessKey: string;
 			secretKey: string;
 			bucket: string;
 			domain: string;
 			region: string;
 		};
+		/** 腾讯云 COS 图床配置 */
+		tencent?: {
+			enabled: boolean;
+			secretId: string;
+			secretKey: string;
+			bucket: string;
+			region: string;
+			domain?: string;
+		};
+		/** 又拍云图床配置 */
+		upyun?: {
+			enabled: boolean;
+			bucket: string;
+			operator: string;
+			password: string;
+			domain?: string;
+		};
+		/** GitHub 图床配置 */
+		github?: {
+			enabled: boolean;
+			token: string;
+			owner: string;
+			repo: string;
+			branch: string;
+			path: string;
+			customDomain?: string;
+		};
+		/** 阿里云 OSS 图床配置 */
 		aliyun?: {
+			enabled: boolean;
 			accessKeyId: string;
 			accessKeySecret: string;
 			bucket: string;

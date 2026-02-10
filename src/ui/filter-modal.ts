@@ -96,9 +96,9 @@ export class FilterModal extends Modal {
 				.addOption('svg', 'SVG')
 				.addOption('bmp', 'BMP')
 				.setValue(this.options.filterType)
-				.onChange((value: FilterType) => {
-					this.options.filterType = value;
-				}));
+			.onChange((value: string) => {
+				this.options.filterType = value as FilterType;
+			}));
 
 		new Setting(contentEl)
 			.setName('🔒 锁定状态')
@@ -108,9 +108,9 @@ export class FilterModal extends Modal {
 				.addOption('locked', '🔒 已锁定')
 				.addOption('unlocked', '🔓 未锁定')
 				.setValue(this.options.lockFilter || 'all')
-				.onChange((value: LockFilter) => {
-					this.options.lockFilter = value;
-				}));
+			.onChange((value: string) => {
+				this.options.lockFilter = value as LockFilter;
+			}));
 
 		new Setting(contentEl)
 			.setName('🔗 引用状态')

@@ -178,6 +178,8 @@ export class ImageDetailModal extends Modal {
 	private htmlInput?: HTMLInputElement; // HTML链接输入框
 	private linkTitle?: HTMLElement; // 链接标题
 	private refListContainer?: HTMLElement; // 引用列表容器
+	/** 笔记内拖拽改尺寸监听注销函数 */
+	private noteImageSizeUpdatedUnregister: (() => void) | null = null;
 	
 	// 组件引用
 	private previewPanel?: ImagePreviewPanel;
@@ -1974,6 +1976,21 @@ export class ImageDetailModal extends Modal {
 			this.plugin,
 			true // 显示标题
 		);
+
+		// 监听笔记内拖拽改尺寸，刷新引用列表以同步显示尺寸
+		if (this.plugin && typeof this.plugin.registerNoteImageSizeUpdated === 'function') {
+			const cb = (imagePath: string) => {
+				if (this.image && imagePath === this.image.path && this.refListContainer) {
+					this.refreshReferencesForNoteSizeUpdate();
+				}
+			};
+			this.plugin.registerNoteImageSizeUpdated(cb);
+			this.noteImageSizeUpdatedUnregister = () => {
+				if (this.plugin && typeof this.plugin.unregisterNoteImageSizeUpdated === 'function') {
+					this.plugin.unregisterNoteImageSizeUpdated(cb);
+				}
+			};
+		}
 	}
 
 	zoomIn() {
@@ -3614,6 +3631,18 @@ export class ImageDetailModal extends Modal {
 	}
 
 
+	/** 笔记内拖拽改尺寸后刷新引用列表，使详情页显示最新显示尺寸 */
+	async refreshReferencesForNoteSizeUpdate(): Promise<void> {
+		if (!this.refListContainer || !this.referenceManager) return;
+		this.image.references = undefined;
+		this.refListContainer.empty();
+		const references = await this.referenceManager.findImageReferences(this.image.path, this.image.name);
+		this.image.references = references;
+		this.image.referenceCount = references.length;
+		this.image.referencesUpdatedAt = Date.now();
+		await this.renderImageReferences(this.refListContainer);
+	}
+
 	// 渲染图片引用
 	async renderImageReferences(container: HTMLElement) {
 		// 优先使用缓存的引用信息
@@ -4037,7 +4066,8 @@ export class ImageDetailModal extends Modal {
 				return { valid: true };
 			};
 			
-			if (isWikiFormat || isHtmlFormat) {
+			// Wiki/HTML 显示尺寸；Markdown 引用也显示尺寸（保存时转为 HTML 以生效）
+			if (isWikiFormat || isHtmlFormat || ref.matchType === 'markdown') {
 				const sizeRow = displayDiv.createDiv('size-row');
 				sizeRow.style.cssText = `
 					display: flex;
@@ -5595,12 +5625,21 @@ export class ImageDetailModal extends Modal {
 				const path = markdownMatch[2]; // 保留查询参数（如果有）
 				oldDisplayText = oldAlt;
 				
-				// 如果新显示文本为空，使用文件名作为 alt（保持 Markdown 格式）
-				// 如果新显示文本不为空，使用新显示文本作为 alt
-				const newAlt = (newDisplayText && newDisplayText.trim() !== '') ? newDisplayText : this.image.name;
-				// 转义 alt 文本中的特殊字符
-				const escapedAlt = newAlt.replace(/\]/g, '\\]').replace(/\(/g, '\\(');
-				newLine = oldLine.replace(/!\[([^\]]*)\]\(([^)]+)\)/, `![${escapedAlt}](${path})`);
+				// 设置了尺寸：转为 HTML <img> 以便在 Obsidian 中生效（Markdown 不支持链接内尺寸）
+				if (newWidth !== undefined || newHeight !== undefined) {
+					const newAlt = (newDisplayText && newDisplayText.trim() !== '') ? newDisplayText : this.image.name;
+					const escapedAlt = newAlt.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+					const parts = [`src="${path}"`, `alt="${escapedAlt}"`];
+					if (newWidth !== undefined) parts.push(`width="${newWidth}"`);
+					if (newHeight !== undefined) parts.push(`height="${newHeight}"`);
+					const newImg = `<img ${parts.join(' ')}>`;
+					newLine = oldLine.replace(/!\[([^\]]*)\]\(([^)]+)\)/, newImg);
+				} else {
+					// 无尺寸：保持 Markdown 格式
+					const newAlt = (newDisplayText && newDisplayText.trim() !== '') ? newDisplayText : this.image.name;
+					const escapedAlt = newAlt.replace(/\]/g, '\\]').replace(/\(/g, '\\(');
+					newLine = oldLine.replace(/!\[([^\]]*)\]\(([^)]+)\)/, `![${escapedAlt}](${path})`);
+				}
 			} else if (htmlMatch) {
 				// HTML 格式: <img src="path" alt="显示文本" width="100" height="200" ...>
 				const attributes = htmlMatch[1];
@@ -5859,8 +5898,8 @@ export class ImageDetailModal extends Modal {
 						logMessage = displayTextPart;
 					}
 					
-					// 2. 尺寸修改部分（Wiki 和 HTML 格式）
-					if (sizeChanged && (matchType.startsWith('wiki') || matchType === 'html')) {
+					// 2. 尺寸修改部分（Wiki、HTML，或云端图片 Markdown 转 HTML）
+					if (sizeChanged && (matchType.startsWith('wiki') || matchType === 'html' || matchType === 'markdown')) {
 						const formatSize = (w?: number, h?: number) => {
 							if (!w) return '(无)';
 							return h ? `${w}x${h}` : `${w}`;
@@ -5983,6 +6022,12 @@ export class ImageDetailModal extends Modal {
 	}
 
 	onClose() {
+		// 注销笔记内图片尺寸更新监听
+		if (this.noteImageSizeUpdatedUnregister) {
+			this.noteImageSizeUpdatedUnregister();
+			this.noteImageSizeUpdatedUnregister = null;
+		}
+
 		// 清理组件
 		if (this.previewPanel) {
 			this.previewPanel.cleanup();

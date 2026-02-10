@@ -30,7 +30,7 @@ export async function hashString(str: string): Promise<string> {
         return hashHex;
     } catch (error) {
         console.error('Failed to hash string:', error);
-        throw new Error(`Hash calculation failed: ${error.message}`);
+        throw new Error(`Hash calculation failed: ${(error as Error).message}`);
     }
 }
 

@@ -2,6 +2,8 @@
 import { App, TFile } from 'obsidian';
 import { NetworkImageReference } from '../network-image/types';
 import { WindowWithImageMgrPlugin } from '../types';
+import { ReferenceManager } from './reference-manager';
+
 
 // 保持向后兼容的接口
 export interface LegacyNetworkImageReference {
@@ -106,7 +108,7 @@ export class NetworkImageScanner {
                 }
                 
                 // 1. Markdown 格式: ![alt](http://...)
-                const mdRegex = /!\[(.*?)\]\(\s*(https?:\/\/[^)]+)\s*\)/g;
+                const mdRegex = new RegExp(ReferenceManager.MARKDOWN_LINK_REGEX);
                 let match: RegExpExecArray | null;
                 while ((match = mdRegex.exec(line)) !== null) {
                     // 检查是否在内联代码块内
@@ -117,6 +119,9 @@ export class NetworkImageScanner {
                     if (isInInlineCode) continue;
                     
                     let url = match[2];
+                    // 只处理网络图片（http/https）
+                    if (!url.match(/^https?:\/\//i)) continue;
+
                     if (url.includes(' ')) {
                         url = url.split(/\s+/)[0];
                     }
@@ -137,7 +142,7 @@ export class NetworkImageScanner {
                 }
 
                 // 2. HTML 格式: <img src="http://...">
-                const htmlRegex = /<img[^>]+src=["'](https?:\/\/[^"']+)["'][^>]*>/g;
+                const htmlRegex = new RegExp(ReferenceManager.HTML_IMG_SRC_PATTERN, 'gi');
                 while ((match = htmlRegex.exec(line)) !== null) {
                     // 检查是否在内联代码块内
                     const isInInlineCode = inlineCodeSpans.some(([start, end]) =>
@@ -146,20 +151,25 @@ export class NetworkImageScanner {
                     
                     if (isInInlineCode) continue;
                     
+                    let url = match[1];
+                    // 只处理网络图片（http/https）
+                    if (!url.match(/^https?:\/\//i)) continue;
+
                     // 检查是否在忽略的域名列表中（包括从空链接页面获取的失效链接）
-                    if (await this.isIgnoredDomain(match[1])) {
+                    if (await this.isIgnoredDomain(url)) {
                         continue;
                     }
                     
-                    if (!match[1].includes('localhost') && !match[1].includes('127.0.0.1')) {
+                    if (!url.includes('localhost') && !url.includes('127.0.0.1')) {
                         results.push({
-                            url: match[1],
+                            url: url,
                             line: i,
                             index: match.index,
                             originalText: match[0]
                         });
                     }
                 }
+
             }
             
             return results;

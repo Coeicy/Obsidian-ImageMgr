@@ -19,8 +19,8 @@ import { ImageInfo } from '../../types';
  */
 export class ImageControlsPanel {
 	private container: HTMLElement;
-	private controlsContainer: HTMLElement;
-	private row: HTMLElement;
+	private controlsContainer!: HTMLElement;
+	private row!: HTMLElement;
 	private deleteBtn?: HTMLElement;
 
 	constructor(

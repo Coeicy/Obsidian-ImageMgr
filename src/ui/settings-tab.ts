@@ -789,8 +789,30 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 		imageOperationsTitle.style.marginBottom = '20px';
 		imageOperationsTitle.style.fontSize = '1.6em';
 
-	// 重命名设置部分
-	const renameSectionTitle = imageOperationsSection.contentEl.createEl('h3', { text: '🔄 重命名设置' });
+		new Setting(imageOperationsSection.contentEl)
+			.setName('📐 笔记内拖拽调整图片尺寸')
+			.setDesc('在阅读视图与编辑视图（即时预览）中为图片显示右下角拖拽手柄，拖拽可调整显示尺寸并写回笔记；编辑视图中会实时更新该行。网络图片（http/https）同样支持；Markdown 引用在详情页保存尺寸时会转为 HTML')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.enableDragResizeImageInNote !== false)
+				.onChange(async (value) => {
+					this.plugin.settings.enableDragResizeImageInNote = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// 拖拽调整大小的高级设置（子选项，做一点缩进）
+		const dragResizeKeepRatioSetting = new Setting(imageOperationsSection.contentEl)
+			.setName('保持宽高比')
+			.setDesc('拖拽调整大小时，是否自动保持图片的原始宽高比。开启后调整时会自动计算另一边的大小')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.dragResizeKeepAspectRatio ?? false)
+				.onChange(async (value) => {
+					this.plugin.settings.dragResizeKeepAspectRatio = value;
+					await this.plugin.saveSettings();
+				}));
+		dragResizeKeepRatioSetting.settingEl.style.marginLeft = '24px';
+
+		// 重命名设置部分
+		const renameSectionTitle = imageOperationsSection.contentEl.createEl('h3', { text: '🔄 重命名设置' });
 	renameSectionTitle.style.marginTop = '32px';
 	renameSectionTitle.style.marginBottom = '16px';
 	renameSectionTitle.style.fontSize = '1.4em';
@@ -1931,21 +1953,27 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	remoteImageIntro.style.fontSize = '0.9em';
 	remoteImageIntro.style.borderLeft = '3px solid var(--interactive-accent)';
 	remoteImageIntro.innerHTML = `
-		<p style="margin: 0 0 8px 0; font-weight: 600;">🌩️ 云端图片功能说明</p>
+		<p style="margin: 0 0 8px 0; font-weight: 600;">🌩️ 云端图片功能</p>
 		<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
-			<li><strong>网络图片扫描</strong>：自动扫描 Markdown 文件中的网络图片链接（http://、https://）</li>
-			<li><strong>代理加载</strong>：当直接加载失败时，自动尝试通过代理服务加载图片</li>
-			<li><strong>云端标识</strong>：在图片列表中显示云端图片标识，便于区分本地和云端图片</li>
+			<li><strong>自动扫描</strong>：发现笔记中的 http/https 图片链接并建立索引</li>
+			<li><strong>增量加速</strong>：通过缓存实现 10-20 倍扫描速度提升，仅扫描变更文件</li>
+			<li><strong>空链接检测</strong>：自动验证链接有效性，标记失效图片便于清理</li>
+			<li><strong>代理加载</strong>：绕过防盗链限制（微信、知乎等），提高图片加载成功率</li>
 		</ul>
-		<p style="margin: 8px 0 0 0; font-weight: 600;">📁 缓存说明</p>
-		<p style="margin: 4px 0 0 0;">缓存保存在插件目录 <code>.obsidian/plugins/imagemgr/network-image-cache/</code>，包含：图片 URL 与来源位置、已扫描文件索引、失效链接黑名单、扫描统计等元数据（不保存图片文件本身）。便于增量扫描和空链接检测，可随仓库一起备份。</p>
-		<p style="margin: 8px 0 0 0; font-size: 0.9em;">💡 提示：云端图片无法进行重命名、移动、删除等文件操作，但可以查看和复制链接。</p>
+		<p style="margin: 8px 0 0 0; font-weight: 600;">📁 缓存结构（不存储图片文件，仅元数据）</p>
+		<ul style="margin: 4px 0 0 0; padding-left: 20px; line-height: 1.6;">
+			<li><strong>图片记录</strong>：URL、来源文件路径、行号、验证状态（以 SHA-256 为稳定 ID）</li>
+			<li><strong>文件索引</strong>：已扫描文件列表、修改时间、内容哈希，用于判断是否需要重新扫描</li>
+			<li><strong>黑名单</strong>：失效链接记录（超时/404/403 等），避免重复验证已知失效链接</li>
+			<li><strong>存储位置</strong>：<code>.obsidian/plugins/imagemgr/network-image-cache/</code>（可随仓库备份）</li>
+		</ul>
+		<p style="margin: 8px 0 0 0; font-size: 0.9em;">💡 提示：云端图片无法重命名/移动/删除，但可查看和复制链接。关闭「扫描网络图片」将停止新扫描，已缓存数据仍保留。</p>
 	`;
 
 	// 扫描网络图片开关 - 移动到第一个位置
 	new Setting(uploadSection.contentEl)
 		.setName('扫描网络图片')
-		.setDesc('自动扫描笔记中的网络图片链接（http://、https://），缓存到本地并显示在图片列表中。关闭后停止扫描，但已缓存的图片仍可正常显示')
+		.setDesc('启用后发现并缓存笔记中的网络图片链接（http/https）。关闭后停止新扫描，已缓存数据仍保留')
 		.addToggle(toggle => toggle
 			.setValue(this.plugin.settings.scanRemoteImages ?? false)
 			.onChange(async (value) => {
@@ -1969,7 +1997,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 网络图片代理服务
 	new Setting(uploadSection.contentEl)
 		.setName('网络图片代理服务')
-		.setDesc('某些网站（如微信、知乎）有防盗链机制，直接加载会失败。通过代理服务可绕过限制。建议：优先 Obsidian 代理，失败后再尝试公共代理')
+		.setDesc('某些网站（如微信、知乎、掘金）有防盗链机制，直接加载会返回 403 错误。代理服务可绕过此限制：「Obsidian 代理」使用软件内置代理，「公共代理」通过第三方服务加载。建议选「两者都尝试」以获得最高成功率')
 		.addDropdown(dropdown => dropdown
 			.addOption('none', '不使用代理')
 			.addOption('obsidian', '仅 Obsidian 代理')
@@ -1984,7 +2012,7 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	// 云端图片加载超时
 		const timeoutSetting = new Setting(uploadSection.contentEl)
 			.setName('云端图片加载超时')
-			.setDesc('网络图片加载的最大等待时间。网络较慢或图片较大时可适当增加。超时后视为加载失败并记录到黑名单，下次扫描时跳过');
+			.setDesc('单张网络图片加载的最大等待时间（毫秒）。网络较慢、图片较大或代理服务响应慢时可适当增加。超时后将该 URL 记录到黑名单，下次扫描跳过以避免重复等待');
 		
 		let remoteImageTimeoutText: any;
 		let remoteImageTimeoutSlider: any;
@@ -2035,21 +2063,10 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 			});
 		});
 
-	// 自动重试代理加载
-	new Setting(uploadSection.contentEl)
-		.setName('自动重试代理加载')
-		.setDesc('直接加载网络图片失败后，自动尝试通过上方设置的代理服务重新加载。开启可提高加载成功率，但会增加加载时间')
-		.addToggle(toggle => toggle
-			.setValue(this.plugin.settings.autoRetryRemoteImage ?? true)
-			.onChange(async (value) => {
-				this.plugin.settings.autoRetryRemoteImage = value;
-				await this.plugin.saveSettings();
-			}));
-
 	// 清除网络图片缓存
 	new Setting(uploadSection.contentEl)
 		.setName('清除缓存')
-		.setDesc('清空所有网络图片缓存数据（图片记录、文件索引、黑名单等），下次扫描将重新建立。适用于缓存异常或需要重新开始的情况')
+		.setDesc('清空所有网络图片缓存数据，包含图片记录、文件索引、黑名单等。清除后下次扫描将重新建立，此操作不可恢复')
 		.addButton(btn => btn
 			.setButtonText('清除缓存')
 			.setWarning()
@@ -2075,141 +2092,459 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 	const uploadSubTitle = uploadDivider.createEl('h4', { text: '☁️ 图床上传配置' });
 	uploadSubTitle.style.cssText = 'margin: 0 0 8px 0; font-size: 0.95em; font-weight: 600; color: var(--text-normal);';
 
+	// 确保 uploadConfig 存在
+	if (!this.plugin.settings.uploadConfig) {
+		this.plugin.settings.uploadConfig = {
+			smms: { enabled: false, apiToken: '' },
+			imgur: { enabled: false, clientId: '', useProxy: true, proxyUrl: '' },
+			github: { enabled: false, token: '', owner: '', repo: '', branch: 'main', path: 'images', customDomain: '' },
+			qiniu: { enabled: false, accessKey: '', secretKey: '', bucket: '', domain: '', region: 'z0' },
+			aliyun: { enabled: false, accessKeyId: '', accessKeySecret: '', bucket: '', region: 'oss-cn-hangzhou' },
+			tencent: { enabled: false, secretId: '', secretKey: '', bucket: '', region: 'ap-guangzhou', domain: '' },
+			upyun: { enabled: false, bucket: '', operator: '', password: '', domain: '' }
+		};
+	}
+
+	// ==================== SM.MS 图床配置（最简单，只需Token）====================
+	const smmsConfig = this.plugin.settings.uploadConfig.smms || { enabled: false, apiToken: '' };
+	this.plugin.settings.uploadConfig.smms = smmsConfig;
+
 	new Setting(uploadSection.contentEl)
-			.setName('图床类型')
-			.setDesc('选择要使用的图床服务')
-			.addDropdown(dropdown => dropdown
-				.addOption('qiniu', '七牛云')
-				.addOption('aliyun', '阿里云 OSS')
-				.setValue(this.plugin.settings.uploadConfig?.type || 'qiniu')
+		.setName('SM.MS')
+		.setDesc('启用 SM.MS 作为图床（免费/付费图床，国内访问较慢）')
+		.addToggle(toggle => toggle
+			.setValue(smmsConfig.enabled)
+			.onChange(async (value) => {
+				smmsConfig.enabled = value;
+				await this.plugin.saveSettings();
+				this.display();
+			}));
+
+	if (smmsConfig.enabled) {
+		new Setting(uploadSection.contentEl)
+			.setName('API Token')
+			.setDesc('SM.MS API Token（从 sm.ms 登录后获取）')
+			.addText(text => text
+				.setValue(smmsConfig.apiToken)
+				.setPlaceholder('your-api-token')
 				.onChange(async (value) => {
-					if (!this.plugin.settings.uploadConfig) {
-						this.plugin.settings.uploadConfig = { type: 'qiniu' };
-					}
-					this.plugin.settings.uploadConfig.type = value as any;
+					smmsConfig.apiToken = value;
 					await this.plugin.saveSettings();
-					this.display(); // 刷新以显示对应配置
+				}));
+	}
+
+	// ==================== Imgur 图床配置（只需Client ID）====================
+	const imgurConfig = this.plugin.settings.uploadConfig.imgur || { enabled: false, clientId: '', useProxy: true, proxyUrl: '' };
+	this.plugin.settings.uploadConfig.imgur = imgurConfig;
+
+	new Setting(uploadSection.contentEl)
+		.setName('Imgur')
+		.setDesc('启用 Imgur 作为图床（国外图床，国内访问可能需要代理）')
+		.addToggle(toggle => toggle
+			.setValue(imgurConfig.enabled)
+			.onChange(async (value) => {
+				imgurConfig.enabled = value;
+				await this.plugin.saveSettings();
+				this.display();
+			}));
+
+	if (imgurConfig.enabled) {
+		new Setting(uploadSection.contentEl)
+			.setName('Client ID')
+			.setDesc('Imgur API Client ID（从 imgur.com 申请）')
+			.addText(text => text
+				.setValue(imgurConfig.clientId)
+				.setPlaceholder('your-client-id')
+				.onChange(async (value) => {
+					imgurConfig.clientId = value;
+					await this.plugin.saveSettings();
 				}));
 
-		if (this.plugin.settings.uploadConfig?.type === 'qiniu') {
-			const qiniu = this.plugin.settings.uploadConfig.qiniu || { accessKey: '', secretKey: '', bucket: '', domain: '', region: 'z0' };
-			this.plugin.settings.uploadConfig.qiniu = qiniu;
+		new Setting(uploadSection.contentEl)
+			.setName('使用代理')
+			.setDesc('国内访问 Imgur 需要代理（开启后通过代理服务器上传）')
+			.addToggle(toggle => toggle
+				.setValue(imgurConfig.useProxy ?? true)
+				.onChange(async (value) => {
+					imgurConfig.useProxy = value;
+					await this.plugin.saveSettings();
+					this.display();
+				}));
 
+		if (imgurConfig.useProxy) {
 			new Setting(uploadSection.contentEl)
-				.setName('Access Key')
-				.setDesc('七牛云 Access Key')
+				.setName('代理地址（可选）')
+				.setDesc('自定义代理服务器地址（留空使用默认代理）')
 				.addText(text => text
-					.setValue(qiniu.accessKey)
+					.setValue(imgurConfig.proxyUrl || '')
+					.setPlaceholder('https://your-proxy.com/')
 					.onChange(async (value) => {
-						qiniu.accessKey = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(uploadSection.contentEl)
-				.setName('Secret Key')
-				.setDesc('七牛云 Secret Key')
-				.addText(text => text
-					.setValue(qiniu.secretKey)
-					.setPlaceholder('不会明文显示')
-					.onChange(async (value) => {
-						qiniu.secretKey = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(uploadSection.contentEl)
-				.setName('存储空间 (Bucket)')
-				.setDesc('七牛云存储空间名称')
-				.addText(text => text
-					.setValue(qiniu.bucket)
-					.onChange(async (value) => {
-						qiniu.bucket = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(uploadSection.contentEl)
-				.setName('访问域名')
-				.setDesc('七牛云存储空间绑定的域名 (包含 http/https)')
-				.addText(text => text
-					.setValue(qiniu.domain)
-					.setPlaceholder('http://your-domain.com')
-					.onChange(async (value) => {
-						qiniu.domain = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(uploadSection.contentEl)
-				.setName('区域')
-				.setDesc('存储区域 (z0: 华东, z1: 华北, z2: 华南, na0: 北美, as0: 东南亚)')
-				.addDropdown(dropdown => dropdown
-					.addOption('z0', '华东')
-					.addOption('z1', '华北')
-					.addOption('z2', '华南')
-					.addOption('na0', '北美')
-					.addOption('as0', '东南亚')
-					.setValue(qiniu.region)
-					.onChange(async (value) => {
-						qiniu.region = value;
-						await this.plugin.saveSettings();
-					}));
-		} else if (this.plugin.settings.uploadConfig?.type === 'aliyun') {
-			const aliyun = this.plugin.settings.uploadConfig.aliyun || { accessKeyId: '', accessKeySecret: '', bucket: '', region: 'oss-cn-hangzhou' };
-			this.plugin.settings.uploadConfig.aliyun = aliyun;
-
-			new Setting(uploadSection.contentEl)
-				.setName('Access Key ID')
-				.setDesc('阿里云 Access Key ID')
-				.addText(text => text
-					.setValue(aliyun.accessKeyId)
-					.onChange(async (value) => {
-						aliyun.accessKeyId = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(uploadSection.contentEl)
-				.setName('Access Key Secret')
-				.setDesc('阿里云 Access Key Secret')
-				.addText(text => text
-					.setValue(aliyun.accessKeySecret)
-					.setPlaceholder('不会明文显示')
-					.onChange(async (value) => {
-						aliyun.accessKeySecret = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(uploadSection.contentEl)
-				.setName('存储空间 (Bucket)')
-				.setDesc('阿里云 OSS Bucket 名称')
-				.addText(text => text
-					.setValue(aliyun.bucket)
-					.onChange(async (value) => {
-						aliyun.bucket = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(uploadSection.contentEl)
-				.setName('区域 (Region)')
-				.setDesc('OSS 区域 (例如 oss-cn-hangzhou)')
-				.addText(text => text
-					.setValue(aliyun.region)
-					.setPlaceholder('oss-cn-hangzhou')
-					.onChange(async (value) => {
-						aliyun.region = value;
-						await this.plugin.saveSettings();
-					}));
-
-			new Setting(uploadSection.contentEl)
-				.setName('自定义域名 (可选)')
-				.setDesc('如果绑定了自定义域名')
-				.addText(text => text
-					.setValue(aliyun.customDomain || '')
-					.setPlaceholder('http://oss.example.com')
-					.onChange(async (value) => {
-						aliyun.customDomain = value;
+						imgurConfig.proxyUrl = value;
 						await this.plugin.saveSettings();
 					}));
 		}
+	}
 
-		// 13. 操作日志
+	// ==================== GitHub 图床配置（需配置仓库）====================
+	const githubConfig = this.plugin.settings.uploadConfig.github || { enabled: false, token: '', owner: '', repo: '', branch: 'main', path: 'images', customDomain: '' };
+	this.plugin.settings.uploadConfig.github = githubConfig;
+
+	new Setting(uploadSection.contentEl)
+		.setName('GitHub')
+		.setDesc('启用 GitHub 仓库作为图床（免费但国内访问较慢，建议配合 jsDelivr）')
+		.addToggle(toggle => toggle
+			.setValue(githubConfig.enabled)
+			.onChange(async (value) => {
+				githubConfig.enabled = value;
+				await this.plugin.saveSettings();
+				this.display();
+			}));
+
+	if (githubConfig.enabled) {
+		new Setting(uploadSection.contentEl)
+			.setName('GitHub Token')
+			.setDesc('Personal Access Token（需有 repo 权限）')
+			.addText(text => text
+				.setValue(githubConfig.token)
+				.setPlaceholder('ghp_xxxxxxxxxxxx')
+				.onChange(async (value) => {
+					githubConfig.token = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('用户名/组织')
+			.setDesc('GitHub 用户名或组织名')
+			.addText(text => text
+				.setValue(githubConfig.owner)
+				.setPlaceholder('your-username')
+				.onChange(async (value) => {
+					githubConfig.owner = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('仓库名')
+			.setDesc('用于存储图片的仓库名称')
+			.addText(text => text
+				.setValue(githubConfig.repo)
+				.setPlaceholder('your-image-repo')
+				.onChange(async (value) => {
+					githubConfig.repo = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('分支')
+			.setDesc('仓库分支名称')
+			.addText(text => text
+				.setValue(githubConfig.branch)
+				.setPlaceholder('main')
+				.onChange(async (value) => {
+					githubConfig.branch = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('存储路径')
+			.setDesc('图片在仓库中的存储路径')
+			.addText(text => text
+				.setValue(githubConfig.path)
+				.setPlaceholder('images')
+				.onChange(async (value) => {
+					githubConfig.path = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('自定义域名（可选）')
+			.setDesc('CDN 域名（如 https://cdn.jsdelivr.net/gh/owner/repo@branch/）')
+			.addText(text => text
+				.setValue(githubConfig.customDomain || '')
+				.setPlaceholder('https://cdn.jsdelivr.net/gh/user/repo@main/')
+				.onChange(async (value) => {
+					githubConfig.customDomain = value;
+					await this.plugin.saveSettings();
+				}));
+	}
+
+	// ==================== 七牛云图床配置（需完整云存储配置）====================
+	const qiniuConfig = this.plugin.settings.uploadConfig.qiniu || { enabled: false, accessKey: '', secretKey: '', bucket: '', domain: '', region: 'z0' };
+	this.plugin.settings.uploadConfig.qiniu = qiniuConfig;
+
+	new Setting(uploadSection.contentEl)
+		.setName('七牛云 Kodo')
+		.setDesc('启用七牛云对象存储作为图床')
+		.addToggle(toggle => toggle
+			.setValue(qiniuConfig.enabled)
+			.onChange(async (value) => {
+				qiniuConfig.enabled = value;
+				await this.plugin.saveSettings();
+				this.display();
+			}));
+
+	if (qiniuConfig.enabled) {
+		new Setting(uploadSection.contentEl)
+			.setName('Access Key')
+			.setDesc('七牛云 Access Key')
+			.addText(text => text
+				.setValue(qiniuConfig.accessKey)
+				.onChange(async (value) => {
+					qiniuConfig.accessKey = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('Secret Key')
+			.setDesc('七牛云 Secret Key')
+			.addText(text => text
+				.setValue(qiniuConfig.secretKey)
+				.setPlaceholder('不会明文显示')
+				.onChange(async (value) => {
+					qiniuConfig.secretKey = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('存储空间 (Bucket)')
+			.setDesc('七牛云存储空间名称')
+			.addText(text => text
+				.setValue(qiniuConfig.bucket)
+				.onChange(async (value) => {
+					qiniuConfig.bucket = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('访问域名')
+			.setDesc('七牛云存储空间绑定的域名 (包含 http/https)')
+			.addText(text => text
+				.setValue(qiniuConfig.domain)
+				.setPlaceholder('http://your-domain.com')
+				.onChange(async (value) => {
+					qiniuConfig.domain = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('存储区域')
+			.setDesc('选择存储空间所在区域')
+			.addDropdown(dropdown => dropdown
+				.addOption('z0', '华东 (z0)')
+				.addOption('z1', '华北 (z1)')
+				.addOption('z2', '华南 (z2)')
+				.addOption('na0', '北美 (na0)')
+				.addOption('as0', '东南亚 (as0)')
+				.setValue(qiniuConfig.region)
+				.onChange(async (value) => {
+					qiniuConfig.region = value;
+					await this.plugin.saveSettings();
+				}));
+	}
+
+	// ==================== 阿里云 OSS 图床配置 ====================
+	const aliyunConfig = this.plugin.settings.uploadConfig.aliyun || { enabled: false, accessKeyId: '', accessKeySecret: '', bucket: '', region: 'oss-cn-hangzhou' };
+	this.plugin.settings.uploadConfig.aliyun = aliyunConfig;
+
+	new Setting(uploadSection.contentEl)
+		.setName('阿里云 OSS')
+		.setDesc('启用阿里云对象存储作为图床')
+		.addToggle(toggle => toggle
+			.setValue(aliyunConfig.enabled)
+			.onChange(async (value) => {
+				aliyunConfig.enabled = value;
+				await this.plugin.saveSettings();
+				this.display();
+			}));
+
+	if (aliyunConfig.enabled) {
+		new Setting(uploadSection.contentEl)
+			.setName('Access Key ID')
+			.setDesc('阿里云 Access Key ID')
+			.addText(text => text
+				.setValue(aliyunConfig.accessKeyId)
+				.onChange(async (value) => {
+					aliyunConfig.accessKeyId = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('Access Key Secret')
+			.setDesc('阿里云 Access Key Secret')
+			.addText(text => text
+				.setValue(aliyunConfig.accessKeySecret)
+				.setPlaceholder('不会明文显示')
+				.onChange(async (value) => {
+					aliyunConfig.accessKeySecret = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('存储空间 (Bucket)')
+			.setDesc('阿里云 OSS Bucket 名称')
+			.addText(text => text
+				.setValue(aliyunConfig.bucket)
+				.onChange(async (value) => {
+					aliyunConfig.bucket = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('Endpoint (Region)')
+			.setDesc('OSS 区域 Endpoint (例如 oss-cn-hangzhou)')
+			.addText(text => text
+				.setValue(aliyunConfig.region)
+				.setPlaceholder('oss-cn-hangzhou')
+				.onChange(async (value) => {
+					aliyunConfig.region = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('自定义域名 (可选)')
+			.setDesc('如果绑定了自定义 CDN 域名，可在此填写')
+			.addText(text => text
+				.setValue(aliyunConfig.customDomain || '')
+				.setPlaceholder('https://oss.example.com')
+				.onChange(async (value) => {
+					aliyunConfig.customDomain = value;
+					await this.plugin.saveSettings();
+				}));
+	}
+
+	// ==================== 腾讯云 COS 图床配置 ====================
+	const tencentConfig = this.plugin.settings.uploadConfig.tencent || { enabled: false, secretId: '', secretKey: '', bucket: '', region: 'ap-guangzhou', domain: '' };
+	this.plugin.settings.uploadConfig.tencent = tencentConfig;
+
+	new Setting(uploadSection.contentEl)
+		.setName('腾讯云 COS')
+		.setDesc('启用腾讯云对象存储作为图床')
+		.addToggle(toggle => toggle
+			.setValue(tencentConfig.enabled)
+			.onChange(async (value) => {
+				tencentConfig.enabled = value;
+				await this.plugin.saveSettings();
+				this.display();
+			}));
+
+	if (tencentConfig.enabled) {
+		new Setting(uploadSection.contentEl)
+			.setName('SecretId')
+			.setDesc('腾讯云 API SecretId')
+			.addText(text => text
+				.setValue(tencentConfig.secretId)
+				.onChange(async (value) => {
+					tencentConfig.secretId = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('SecretKey')
+			.setDesc('腾讯云 API SecretKey')
+			.addText(text => text
+				.setValue(tencentConfig.secretKey)
+				.setPlaceholder('不会明文显示')
+				.onChange(async (value) => {
+					tencentConfig.secretKey = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('存储桶 (Bucket)')
+			.setDesc('COS 存储桶名称')
+			.addText(text => text
+				.setValue(tencentConfig.bucket)
+				.setPlaceholder('your-bucket-name')
+				.onChange(async (value) => {
+					tencentConfig.bucket = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('地域 (Region)')
+			.setDesc('存储桶所在地域（如 ap-guangzhou, ap-beijing）')
+			.addText(text => text
+				.setValue(tencentConfig.region)
+				.setPlaceholder('ap-guangzhou')
+				.onChange(async (value) => {
+					tencentConfig.region = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('自定义域名（可选）')
+			.setDesc('CDN 加速域名（不填使用默认 COS 域名）')
+			.addText(text => text
+				.setValue(tencentConfig.domain || '')
+				.setPlaceholder('https://cdn.example.com')
+				.onChange(async (value) => {
+					tencentConfig.domain = value;
+					await this.plugin.saveSettings();
+				}));
+	}
+
+	// ==================== 又拍云图床配置 ====================
+	const upyunConfig = this.plugin.settings.uploadConfig.upyun || { enabled: false, bucket: '', operator: '', password: '', domain: '' };
+	this.plugin.settings.uploadConfig.upyun = upyunConfig;
+
+	new Setting(uploadSection.contentEl)
+		.setName('又拍云 Upyun')
+		.setDesc('启用又拍云对象存储作为图床')
+		.addToggle(toggle => toggle
+			.setValue(upyunConfig.enabled)
+			.onChange(async (value) => {
+				upyunConfig.enabled = value;
+				await this.plugin.saveSettings();
+				this.display();
+			}));
+
+	if (upyunConfig.enabled) {
+		new Setting(uploadSection.contentEl)
+			.setName('服务名称 (Bucket)')
+			.setDesc('又拍云服务名称，即存储空间名')
+			.addText(text => text
+				.setValue(upyunConfig.bucket)
+				.setPlaceholder('your-service-name')
+				.onChange(async (value) => {
+					upyunConfig.bucket = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('操作员账号')
+			.setDesc('又拍云操作员账号（非登录邮箱）')
+			.addText(text => text
+				.setValue(upyunConfig.operator)
+				.setPlaceholder('operator-name')
+				.onChange(async (value) => {
+					upyunConfig.operator = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('操作员密码')
+			.setDesc('又拍云操作员密码')
+			.addText(text => text
+				.setValue(upyunConfig.password)
+				.setPlaceholder('不会明文显示')
+				.onChange(async (value) => {
+					upyunConfig.password = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(uploadSection.contentEl)
+			.setName('自定义域名 (可选)')
+			.setDesc('如果绑定了自定义域名，可在此填写（不填使用默认域名）')
+			.addText(text => text
+				.setValue(upyunConfig.domain || '')
+				.setPlaceholder('https://img.example.com')
+				.onChange(async (value) => {
+					upyunConfig.domain = value;
+					await this.plugin.saveSettings();
+				}));
+	}
+
+	// 13. 操作日志
 		const logsSection = { contentEl: this.tabPanels.get('logs')! };
 		
 		// 添加一级标题
@@ -2581,7 +2916,15 @@ export class ImageManagementSettingTab extends PluginSettingTab {
 						
 						// 确保关键字段存在
 						if (!this.plugin.settings.uploadConfig) {
-							this.plugin.settings.uploadConfig = currentSettings.uploadConfig || { type: 'qiniu' };
+							this.plugin.settings.uploadConfig = currentSettings.uploadConfig || {
+								smms: { enabled: false, apiToken: '' },
+								imgur: { enabled: false, clientId: '', useProxy: true, proxyUrl: '' },
+								github: { enabled: false, token: '', owner: '', repo: '', branch: 'main', path: 'images', customDomain: '' },
+								qiniu: { enabled: false, accessKey: '', secretKey: '', bucket: '', domain: '', region: 'z0' },
+								aliyun: { enabled: false, accessKeyId: '', accessKeySecret: '', bucket: '', region: 'oss-cn-hangzhou' },
+								tencent: { enabled: false, secretId: '', secretKey: '', bucket: '', region: 'ap-guangzhou', domain: '' },
+								upyun: { enabled: false, bucket: '', operator: '', password: '', domain: '' }
+							};
 						}
 						
 						await this.plugin.saveSettings();

@@ -44,6 +44,10 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	autoGenerateNames: true,
 	/** 前往笔记时是否保持详情页打开 - 点击引用时的行为 */
 	keepModalOpen: false,
+	/** 在笔记阅读视图中拖拽调整图片显示尺寸（右下角手柄），并写回笔记 */
+	enableDragResizeImageInNote: true,
+	/** 拖拽调整大小时是否保持宽高比（默认false，自由调整） */
+	dragResizeKeepAspectRatio: false,
 
 	// ==================== 重命名设置 ====================
 	/** 路径命名深度 - 自动命名时包含的路径级数（1-5） */
@@ -183,23 +187,64 @@ export const DEFAULT_SETTINGS: ImageManagementSettings = {
 	showRemoteImageBadge: true,
 	/** 云端图片加载超时时间（毫秒） */
 	remoteImageTimeout: 10000,
-	/** 是否自动尝试代理加载失败的云端图片 */
-	autoRetryRemoteImage: true,
 	// ==================== 图床上传设置 ====================
 	uploadConfig: {
-		type: 'qiniu',
+		// Imgur 图床
+		imgur: {
+			enabled: false,
+			clientId: '',
+			useProxy: true,
+			proxyUrl: ''
+		},
+		// SM.MS 图床
+		smms: {
+			enabled: false,
+			apiToken: ''
+		},
+		// 七牛云
 		qiniu: {
+			enabled: false,
 			accessKey: '',
 			secretKey: '',
 			bucket: '',
 			domain: '',
 			region: 'z0'
 		},
+		// 腾讯云 COS
+		tencent: {
+			enabled: false,
+			secretId: '',
+			secretKey: '',
+			bucket: '',
+			region: 'ap-guangzhou',
+			domain: ''
+		},
+		// 又拍云
+		upyun: {
+			enabled: false,
+			bucket: '',
+			operator: '',
+			password: '',
+			domain: ''
+		},
+		// GitHub 图床
+		github: {
+			enabled: false,
+			token: '',
+			owner: '',
+			repo: '',
+			branch: 'main',
+			path: 'images',
+			customDomain: ''
+		},
+		// 阿里云 OSS
 		aliyun: {
+			enabled: false,
 			accessKeyId: '',
 			accessKeySecret: '',
 			bucket: '',
-			region: 'oss-cn-hangzhou'
+			region: 'oss-cn-hangzhou',
+			customDomain: ''
 		}
 	}
 }

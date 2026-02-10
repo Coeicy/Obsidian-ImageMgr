@@ -170,31 +170,35 @@ export class IncrementalNetworkImageScanner {
             
             result.cachedImages = skippedImageCount;
             
-            // 4. 并行扫描需要处理的文件
+            // 4. 并行扫描需要处理的文件（引入简单的并发控制）
             if (filesToScan.length > 0) {
-                const scanResults = await Promise.allSettled(
-                    filesToScan.map(file => this.scanFile(file))
-                );
-                
-                for (const [index, scanResult] of scanResults.entries()) {
-                    if (scanResult.status === 'fulfilled') {
-                        const { newImages, updatedImages } = scanResult.value;
-                        result.newImages += newImages;
-                        result.updatedImages += updatedImages;
-                    } else {
-                        // 记录扫描错误
-                        const error = scanResult.reason;
-                        const filePath = filesToScan[index]?.path || 'unknown';
-                        
-                        result.errors.push({
-                            file: filePath,
-                            error: error
-                        });
-                        
-                        this.errorHandler.handleError(
-                            error instanceof Error ? error : new Error(String(error)),
-                            { file: filePath }
-                        );
+                const MAX_CONCURRENT_SCANS = 10;
+                for (let i = 0; i < filesToScan.length; i += MAX_CONCURRENT_SCANS) {
+                    const batch = filesToScan.slice(i, i + MAX_CONCURRENT_SCANS);
+                    const scanResults = await Promise.allSettled(
+                        batch.map(file => this.scanFile(file))
+                    );
+                    
+                    for (const [index, scanResult] of scanResults.entries()) {
+                        if (scanResult.status === 'fulfilled') {
+                            const { newImages, updatedImages } = scanResult.value;
+                            result.newImages += newImages;
+                            result.updatedImages += updatedImages;
+                        } else {
+                            // 记录扫描错误
+                            const error = scanResult.reason;
+                            const filePath = batch[index]?.path || 'unknown';
+                            
+                            result.errors.push({
+                                file: filePath,
+                                error: error
+                            });
+                            
+                            this.errorHandler.handleError(
+                                error instanceof Error ? error : new Error(String(error)),
+                                { file: filePath }
+                            );
+                        }
                     }
                 }
             }
@@ -375,7 +379,7 @@ export class IncrementalNetworkImageScanner {
             );
             
             // 记录错误但不中断整个扫描过程
-            await this.updateFileCache(file, '', [], Date.now() - startTime, error.message);
+            await this.updateFileCache(file, '', [], Date.now() - startTime, (error as Error).message);
         }
         
         return { newImages, updatedImages };
@@ -734,6 +738,7 @@ export class IncrementalNetworkImageScanner {
     /**
      * 清理孤立的图片记录
      * 孤立图片：来源文件已不存在或已删除的图片
+     * 使用 IDBCursor 优化大库性能
      */
     private async cleanupOrphanedImages(): Promise<void> {
         try {
@@ -741,41 +746,227 @@ export class IncrementalNetworkImageScanner {
             const imageStore = tx.objectStore(ObjectStore.IMAGES);
             const fileStore = tx.objectStore(ObjectStore.FILES);
             
-            // 获取所有图片和文件
-            const images = await this.getAllFromStore(imageStore);
-            const files = await this.getAllFromStore(fileStore);
-            
-            // 构建文件路径集合
-            const filePaths = new Set(files.map(f => f.id));
-            const orphaned: string[] = [];
-            
-            // 检查每个图片的来源文件是否存在
-            for (const image of images) {
-                // 如果来源文件不在文件列表中，且文件确实不存在
-                if (!filePaths.has(image.sourceFilePath)) {
-                    const exists = await this.app.vault.adapter.exists(image.sourceFilePath);
-                    if (!exists) {
-                        orphaned.push(image.id);
+            // 1. 获取所有存在的文件路径 ID（仅存储 ID 以节省内存）
+            const filePaths = new Set<string>();
+            await new Promise<void>((resolve) => {
+                try {
+                    // 检查 getAll() 方法是否存在
+                    if (typeof fileStore.getAll === 'function') {
+                        // 尝试使用 getAll() 作为最兼容的方案
+                        const getAllRequest = fileStore.getAll();
+                        getAllRequest.onsuccess = (event) => {
+                            // Handle both real IDBRequest events and mock events from file-cache-adapter
+                            const result = event && event.target ? (event.target as IDBRequest<any[]>).result : getAllRequest.result;
+                            const files = result || [];
+                            files.forEach(file => {
+                                filePaths.add(file.id as string);
+                            });
+                            resolve();
+                        };
+                        getAllRequest.onerror = () => {
+                            // 如果 getAll() 失败，检查 openCursor() 方法是否存在
+                            if (typeof fileStore.openCursor === 'function') {
+                                try {
+                                    const cursorRequest = fileStore.openCursor();
+                                    cursorRequest.onsuccess = (event) => {
+                                        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+                                        if (cursor) {
+                                            filePaths.add(cursor.key as string);
+                                            cursor.continue();
+                                        } else {
+                                            resolve();
+                                        }
+                                    };
+                                    cursorRequest.onerror = () => {
+                                        console.warn('Cursor request failed:', cursorRequest.error);
+                                        resolve();
+                                    };
+                                } catch (cursorError) {
+                                    // 如果所有方法都失败，使用空集合继续执行
+                                    console.warn('Failed to get file paths:', cursorError);
+                                    resolve();
+                                }
+                            } else {
+                                // 如果 openCursor() 也不存在，使用空集合继续执行
+                                console.warn('Neither getAll() nor openCursor() is available for fileStore');
+                                resolve();
+                            }
+                        };
+                    } else {
+                        // 如果 getAll() 不存在，检查 openCursor() 方法是否存在
+                        if (typeof fileStore.openCursor === 'function') {
+                            try {
+                                const cursorRequest = fileStore.openCursor();
+                                cursorRequest.onsuccess = (event) => {
+                                    const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+                                    if (cursor) {
+                                        filePaths.add(cursor.key as string);
+                                        cursor.continue();
+                                    } else {
+                                        resolve();
+                                    }
+                                };
+                                cursorRequest.onerror = () => {
+                                    console.warn('Cursor request failed:', cursorRequest.error);
+                                    resolve();
+                                };
+                            } catch (cursorError) {
+                                // 如果所有方法都失败，使用空集合继续执行
+                                console.warn('Failed to get file paths:', cursorError);
+                                resolve();
+                            }
+                        } else {
+                            // 如果所有方法都失败，使用空集合继续执行
+                            console.warn('Neither getAll() nor openCursor() is available for fileStore');
+                            resolve();
+                        }
                     }
+                } catch (error) {
+                    // 如果所有方法都失败，使用空集合继续执行
+                    console.warn('Failed to access file store:', error);
+                    resolve();
                 }
-            }
+            });
             
-            // 标记孤立图片为删除状态
-            if (orphaned.length > 0) {
-                for (const imageId of orphaned) {
-                    const image = await this.getCachedImage(imageId);
-                    if (image) {
-                        image.status = 'deleted';
-                        image.updatedAt = Date.now();
-                        await imageStore.put(image);
+            // 2. 遍历图片并标记孤立记录
+            await new Promise<void>((resolve) => {
+                try {
+                    // 检查 getAll() 方法是否存在
+                    if (typeof imageStore.getAll === 'function') {
+                        // 尝试使用 getAll() 作为最兼容的方案
+                        const getAllRequest = imageStore.getAll();
+                        getAllRequest.onsuccess = async (event) => {
+                            // Handle both real IDBRequest events and mock events from file-cache-adapter
+                            const result = event && event.target ? (event.target as IDBRequest<any[]>).result : getAllRequest.result;
+                            const images = result || [];
+                            for (const image of images) {
+                                // 如果来源文件不在文件记录列表中，检查磁盘上是否存在
+                                if (!filePaths.has(image.sourceFilePath)) {
+                                    try {
+                                        const exists = await this.app.vault.adapter.exists(image.sourceFilePath);
+                                        if (!exists) {
+                                            image.status = 'deleted';
+                                            image.updatedAt = Date.now();
+                                            // 尝试更新记录
+                                            try {
+                                                imageStore.put(image);
+                                            } catch (updateError) {
+                                                console.warn('Failed to update image status:', updateError);
+                                            }
+                                        }
+                                    } catch (existsError) {
+                                        console.warn('Failed to check if file exists:', existsError);
+                                    }
+                                }
+                            }
+                            resolve();
+                        };
+                        getAllRequest.onerror = () => {
+                            // 如果 getAll() 失败，检查 openCursor() 方法是否存在
+                            if (typeof imageStore.openCursor === 'function') {
+                                try {
+                                    const cursorRequest = imageStore.openCursor();
+                                    cursorRequest.onsuccess = async (event) => {
+                                        try {
+                                            const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+                                            if (cursor) {
+                                                const image = cursor.value;
+                                                // 如果来源文件不在文件记录列表中，检查磁盘上是否存在
+                                                if (!filePaths.has(image.sourceFilePath)) {
+                                                    try {
+                                                        const exists = await this.app.vault.adapter.exists(image.sourceFilePath);
+                                                        if (!exists) {
+                                                            image.status = 'deleted';
+                                                            image.updatedAt = Date.now();
+                                                            cursor.update(image);
+                                                        }
+                                                    } catch (existsError) {
+                                                        console.warn('Failed to check if file exists:', existsError);
+                                                    }
+                                                }
+                                                cursor.continue();
+                                            } else {
+                                                resolve();
+                                            }
+                                        } catch (cursorError) {
+                                            console.warn('Failed to process cursor:', cursorError);
+                                            resolve();
+                                        }
+                                    };
+                                    cursorRequest.onerror = () => {
+                                        console.warn('Cursor request failed:', cursorRequest.error);
+                                        resolve();
+                                    };
+                                } catch (cursorError) {
+                                    // 如果所有方法都失败，跳过此步骤
+                                    console.warn('Failed to open cursor:', cursorError);
+                                    resolve();
+                                }
+                            } else {
+                                // 如果 openCursor() 也不存在，跳过此步骤
+                                console.warn('Neither getAll() nor openCursor() is available for imageStore');
+                                resolve();
+                            }
+                        };
+                    } else {
+                        // 如果 getAll() 不存在，检查 openCursor() 方法是否存在
+                        if (typeof imageStore.openCursor === 'function') {
+                            try {
+                                const cursorRequest = imageStore.openCursor();
+                                cursorRequest.onsuccess = async (event) => {
+                                    try {
+                                        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+                                        if (cursor) {
+                                            const image = cursor.value;
+                                            // 如果来源文件不在文件记录列表中，检查磁盘上是否存在
+                                            if (!filePaths.has(image.sourceFilePath)) {
+                                                try {
+                                                    const exists = await this.app.vault.adapter.exists(image.sourceFilePath);
+                                                    if (!exists) {
+                                                        image.status = 'deleted';
+                                                        image.updatedAt = Date.now();
+                                                        cursor.update(image);
+                                                    }
+                                                } catch (existsError) {
+                                                    console.warn('Failed to check if file exists:', existsError);
+                                                }
+                                            }
+                                            cursor.continue();
+                                        } else {
+                                            resolve();
+                                        }
+                                    } catch (cursorError) {
+                                        console.warn('Failed to process cursor:', cursorError);
+                                        resolve();
+                                    }
+                                };
+                                cursorRequest.onerror = () => {
+                                    console.warn('Cursor request failed:', cursorRequest.error);
+                                    resolve();
+                                };
+                            } catch (cursorError) {
+                                // 如果所有方法都失败，跳过此步骤
+                                console.warn('Failed to open cursor:', cursorError);
+                                resolve();
+                            }
+                        } else {
+                            // 如果所有方法都失败，跳过此步骤
+                            console.warn('Neither getAll() nor openCursor() is available for imageStore');
+                            resolve();
+                        }
                     }
+                } catch (error) {
+                    // 如果所有方法都失败，跳过此步骤
+                    console.warn('Failed to access image store:', error);
+                    resolve();
                 }
-            }
+            });
         } catch (error) {
             console.warn('Failed to cleanup orphaned images:', error);
             // 不抛出错误，避免影响主流程
         }
     }
+
     
     /**
      * 从存储获取所有记录
@@ -877,14 +1068,14 @@ export class IncrementalNetworkImageScanner {
             return; // 已经加载过，直接返回
         }
         
-        try {
-            const blacklist = await this.getBlacklistFromDB();
-            this.blacklistCache = new Set(blacklist.map((item: any) => item.id));
-            console.log(`[IncrementalScanner] Loaded ${this.blacklistCache.size} blacklist entries to cache`);
-        } catch (error) {
-            console.warn('Failed to load blacklist to cache:', error);
-            this.blacklistCache = new Set();
-        }
+		try {
+			const blacklist = await this.getBlacklistFromDB();
+			this.blacklistCache = new Set(blacklist.map((item: any) => item.id));
+			// 黑名单缓存加载成功（静默处理，不输出日志）
+		} catch (error) {
+			console.warn('Failed to load blacklist to cache:', error);
+			this.blacklistCache = new Set();
+		}
     }
     
     /**
@@ -919,13 +1110,13 @@ export class IncrementalNetworkImageScanner {
         return this.blacklistCache?.has(urlId) || false;
     }
     
-    /**
-     * 清除黑名单缓存（当黑名单发生变化时调用）
-     */
-    public clearBlacklistCache(): void {
-        this.blacklistCache = null;
-        console.log('[IncrementalScanner] Blacklist cache cleared');
-    }
+	/**
+	 * 清除黑名单缓存（当黑名单发生变化时调用）
+	 */
+	public clearBlacklistCache(): void {
+		this.blacklistCache = null;
+		// 黑名单缓存已清除（静默处理，不输出日志）
+	}
 }
 
 export default IncrementalNetworkImageScanner;

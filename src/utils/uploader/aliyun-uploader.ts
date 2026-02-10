@@ -1,8 +1,12 @@
 
-import { IImageUploader, UploadConfig, UploadResult } from './types';
+import { IImageUploader, UploadConfig, UploadResult, UploaderType } from './types';
 import { hmacSha1Base64 } from './crypto-utils';
 
 export class AliyunUploader implements IImageUploader {
+    configId: string = 'aliyun';
+    configName: string = '阿里云 OSS';
+    type: UploaderType = 'aliyun';
+    
     constructor(private config: UploadConfig['aliyun']) {}
 
     async validateConfig(): Promise<boolean> {

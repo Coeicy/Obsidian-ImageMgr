@@ -23,6 +23,7 @@
 
 import { ScanError, ScanErrorType, ErrorContext, RetryOptions } from './types';
 import { retryOperation as genericRetryOperation, GenericErrorHandler } from '../utils/retry-utils';
+import { isRetryableError } from './utils';
 
 /**
  * 扫描错误处理器

@@ -1,8 +1,12 @@
 
-import { IImageUploader, UploadConfig, UploadResult } from './types';
+import { IImageUploader, UploadConfig, UploadResult, UploaderType } from './types';
 import { base64EncodeUrlSafe, hmacSha1 } from './crypto-utils';
 
 export class QiniuUploader implements IImageUploader {
+    configId: string = 'qiniu';
+    configName: string = '七牛云';
+    type: UploaderType = 'qiniu';
+    
     constructor(private config: UploadConfig['qiniu']) {}
 
     async validateConfig(): Promise<boolean> {

@@ -455,7 +455,10 @@ export enum ScanErrorType {
     VALIDATION_ERROR = 'validation_error',
     DATABASE_ERROR = 'database_error',
     FILE_READ_ERROR = 'file_read_error',
-    UNKNOWN_ERROR = 'unknown_error'
+    UNKNOWN_ERROR = 'unknown_error',
+    EMPTY_NOTE_LINK = 'empty_note_link',
+    INVALID_NOTE_LINK = 'invalid_note_link',
+    DELETED_NOTE_LINK = 'deleted_note_link'
 }
 
 /**

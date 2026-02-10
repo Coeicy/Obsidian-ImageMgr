@@ -20,6 +20,7 @@ import { App, Modal, Notice, TFile } from 'obsidian';
 import ImageManagementPlugin from '../main';
 import { OperationType, LogEntry } from '../utils/logger';
 import { makeModalResizable } from '../utils/resizable-modal';
+import { parseWikiLink, WikiLinkParts, buildWikiLink } from '../utils/reference-manager';
 
 /**
  * 恢复操作类型
@@ -2064,13 +2065,6 @@ export class BrokenLinksModal extends Modal {
 
 		// 刷新模态框
 		this.close();
-	}
-
-	/**
-	 * 转义正则表达式特殊字符
-	 */
-	private escapeRegex(str: string): string {
-		return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 	}
 
 	onClose() {

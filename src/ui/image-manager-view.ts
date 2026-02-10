@@ -170,6 +170,45 @@ export class ImageManagerView extends ItemView {
 		this.filterOptions = {
 			filterType: plugin.settings.defaultFilterType
 		};
+		
+		// 从插件数据中恢复视图状态（搜索、排序、筛选）
+		this.restoreViewState();
+	}
+	
+	/**
+	 * 从插件数据中恢复视图状态
+	 * 包括搜索查询、排序选项、筛选选项
+	 */
+	private restoreViewState() {
+		const data = this.plugin.data;
+		
+		// 恢复搜索查询
+		if (data.viewSearchQuery !== undefined) {
+			this.searchQuery = data.viewSearchQuery;
+		}
+		
+		// 恢复排序选项
+		if (data.viewSortOptions && data.viewSortOptions.rules && Array.isArray(data.viewSortOptions.rules)) {
+			this.sortOptions = data.viewSortOptions;
+		}
+		
+		// 恢复筛选选项
+		if (data.viewFilterOptions) {
+			this.filterOptions = {
+				...this.filterOptions,
+				...data.viewFilterOptions
+			};
+		}
+	}
+	
+	/**
+	 * 保存视图状态到插件数据
+	 */
+	private async saveViewState() {
+		this.plugin.data.viewSearchQuery = this.searchQuery;
+		this.plugin.data.viewSortOptions = this.sortOptions;
+		this.plugin.data.viewFilterOptions = this.filterOptions;
+		await this.plugin.saveData(this.plugin.data);
 	}
 
 	getViewType(): string {
@@ -924,6 +963,42 @@ export class ImageManagerView extends ItemView {
 			// 应用完整的分组逻辑（包括排除回收站、处理锁定分组等）
 			this.applyGroupsToImages();
 
+			// 检查是否存在分组、搜索、排序、筛选，如果有且操作历史中没有，添加到操作历史
+			// 这样重新加载插件后清除按钮仍能正确显示
+			// 检查分组
+			const hasCustomGroups = !!(this.plugin.data && this.plugin.data.imageGroups && Object.keys(this.plugin.data.imageGroups).length > 0);
+			const hasLockGroup = !!(this.plugin.data?.groupMeta?.['_lock_group']?.type === 'lock');
+			const hasLocationGroup = !!(this.plugin.data?.groupMeta?.['_location_group']?.type === 'location');
+			if ((hasCustomGroups || hasLockGroup || hasLocationGroup) && !this.operationHistory.includes('group')) {
+				this.addToOperationHistory('group');
+			}
+			// 检查搜索
+			const hasSearch = this.searchQuery.trim() !== '';
+			if (hasSearch && !this.operationHistory.includes('search')) {
+				this.addToOperationHistory('search');
+			}
+			// 检查排序（非默认排序）
+			const hasSort = this.sortOptions.rules.length > 1 ||
+							this.sortOptions.rules[0].sortBy !== this.plugin.settings.defaultSortBy ||
+							this.sortOptions.rules[0].sortOrder !== this.plugin.settings.defaultSortOrder;
+			if (hasSort && !this.operationHistory.includes('sort')) {
+				this.addToOperationHistory('sort');
+			}
+			// 检查筛选（非默认筛选或有额外条件）
+			const hasSizeFilter = this.filterOptions.sizeFilter &&
+								(this.filterOptions.sizeFilter.min !== undefined ||
+								 this.filterOptions.sizeFilter.max !== undefined);
+			const hasFilter = this.filterOptions.filterType !== this.plugin.settings.defaultFilterType ||
+							  this.filterOptions.lockFilter !== undefined ||
+							  this.filterOptions.referenceFilter !== undefined ||
+							  this.filterOptions.locationFilter !== undefined ||
+							  hasSizeFilter ||
+							  (this.filterOptions.nameFilter !== undefined && this.filterOptions.nameFilter.trim() !== '') ||
+							  (this.filterOptions.folderFilter !== undefined && this.filterOptions.folderFilter.trim() !== '');
+			if (hasFilter && !this.operationHistory.includes('filter')) {
+				this.addToOperationHistory('filter');
+			}
+
 			// 使用新日志系统记录扫描结果
 			if (this.plugin?.logger) {
 				await this.plugin.logger.info(
@@ -948,6 +1023,9 @@ export class ImageManagerView extends ItemView {
 
 			progressContainer.remove();
 			this.applySortAndFilter();
+
+			// 更新清除按钮状态（确保搜索/排序/筛选/分组状态下清除按钮正确显示）
+			this.updateClearButtonState();
 		} catch (error) {
 			statusText.textContent = '扫描失败';
 			progressText.textContent = String(error);

@@ -60,6 +60,7 @@
 
 .settings-tab-content {
 	/* 标签页内容容器 */
+	padding: 8px 0;
 }
 
 .settings-tab-panel {
@@ -2348,4 +2349,133 @@
 	font-size: 1em !important;
 	font-weight: normal;
 	color: var(--text-normal);
+}
+
+/* ========== 笔记内图片拖拽调整尺寸 ========== */
+.imagemgr-resize-wrapper {
+	display: inline-block;
+	position: relative;
+	vertical-align: middle;
+}
+
+.imagemgr-resize-wrapper img {
+	transition: box-shadow 0.15s ease;
+}
+
+.imagemgr-resize-wrapper:hover img {
+	box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.3);
+}
+
+.imagemgr-resize-handle {
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	width: 16px;
+	height: 16px;
+	cursor: nwse-resize;
+	background: linear-gradient(135deg, var(--interactive-accent) 0%, var(--interactive-accent-hover) 100%);
+	opacity: 0.75;
+	border-radius: 4px 0 4px 0;
+	border: 2px solid var(--background-primary);
+	box-sizing: border-box;
+	box-shadow: -2px -2px 6px rgba(0, 0, 0, 0.15);
+	transition: all 0.15s ease;
+	z-index: 10;
+}
+
+.imagemgr-resize-handle::before {
+	content: '';
+	position: absolute;
+	right: 3px;
+	bottom: 3px;
+	width: 6px;
+	height: 6px;
+	border-right: 2px solid var(--text-on-accent);
+	border-bottom: 2px solid var(--text-on-accent);
+	border-radius: 0 0 2px 0;
+	opacity: 0.9;
+}
+
+.imagemgr-resize-handle:hover {
+	opacity: 1;
+	transform: scale(1.1);
+	box-shadow: -3px -3px 8px rgba(0, 0, 0, 0.2);
+}
+
+.imagemgr-resize-handle:active {
+	transform: scale(0.95);
+	opacity: 0.9;
+}
+
+/* 拖拽时的图片样式 */
+.imagemgr-resize-wrapper.resizing img {
+	box-shadow: 0 0 0 3px rgba(var(--interactive-accent-rgb), 0.5);
+	user-select: none;
+}
+
+/* ========== 编辑视图适配 ========== */
+/* 确保在编辑视图中拖拽手柄始终可见 */
+.cm-editor .imagemgr-resize-handle,
+.markdown-source-view .imagemgr-resize-handle {
+	opacity: 0.85;
+	pointer-events: auto;
+}
+
+/* 编辑视图中悬停时更明显 */
+.cm-editor .imagemgr-resize-wrapper:hover .imagemgr-resize-handle,
+.markdown-source-view .imagemgr-resize-wrapper:hover .imagemgr-resize-handle {
+	opacity: 1;
+	transform: scale(1.15);
+}
+
+/* 确保编辑视图中图片容器正确显示 */
+.cm-editor .imagemgr-resize-wrapper,
+.markdown-source-view .imagemgr-resize-wrapper {
+	display: inline-block !important;
+	position: relative !important;
+}
+
+/* 编辑视图中图片样式优化 */
+.cm-editor .imagemgr-resize-wrapper img,
+.markdown-source-view .imagemgr-resize-wrapper img {
+	cursor: default;
+}
+
+/* ========== 编辑视图 Fixed 手柄样式 ========== */
+/* 编辑视图中使用 fixed 定位的手柄，避免创建 wrapper 干扰 DOM */
+.imagemgr-resize-handle.imagemgr-fixed-handle {
+	position: fixed !important;
+	z-index: 9999;
+	pointer-events: auto;
+	opacity: 0.7;
+}
+
+.imagemgr-resize-handle.imagemgr-fixed-handle:hover {
+	opacity: 1;
+	transform: scale(1.1);
+}
+
+/* 编辑视图中图片拖拽时的样式 */
+.cm-editor img.imagemgr-resizing,
+.markdown-source-view img.imagemgr-resizing {
+	box-shadow: 0 0 0 3px rgba(var(--interactive-accent-rgb), 0.5);
+	user-select: none;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+	.imagemgr-resize-handle {
+		width: 20px;
+		height: 20px;
+		border-radius: 6px 0 6px 0;
+	}
+	
+	.imagemgr-resize-handle::before {
+		right: 4px;
+		bottom: 4px;
+		width: 8px;
+		height: 8px;
+		border-right-width: 2.5px;
+		border-bottom-width: 2.5px;
+	}
 }

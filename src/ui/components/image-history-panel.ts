@@ -21,7 +21,7 @@ import { LogLevel, OperationTypeLabels, OperationType } from '../../utils/logger
  */
 export class ImageHistoryPanel {
 	private container: HTMLElement;
-	private historyList: HTMLElement;
+	private historyList!: HTMLElement;
 	private refreshInterval?: number;
 	private showTitle: boolean; // 是否显示标题
 	private eventListeners: Array<{element: HTMLElement, event: string, handler: EventListener}> = []; // 事件监听器引用

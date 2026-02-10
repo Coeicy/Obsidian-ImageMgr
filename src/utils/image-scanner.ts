@@ -112,6 +112,7 @@ import { calculateFileHash } from './image-hash';
 import { HashCacheManager } from './hash-cache-manager';
 import ImageManagementPlugin from '../main';
 import { OperationType } from './logger';
+import { ReferenceManager, parseWikiLink } from './reference-manager';
 
 /**
  * 扫描进度信息接口
@@ -556,9 +557,9 @@ export class ImageScanner {
 					let matchType = 'wiki'; // 默认类型
 					
 					// 检测 Wiki 格式 ![[...]]
-					const wikiMatch = fullLine.match(/!\[\[([^\]]+)\]\]/);
-					if (wikiMatch) {
-						const parts = wikiMatch[1].split('|');
+					const wikiMatch = fullLine.match(ReferenceManager.WIKI_LINK_REGEX);
+					if (wikiMatch && fullLine.includes('!')) {
+						const parts = wikiMatch[0].replace(/!|\[|\]/g, '').split('|');
 						if (parts.length > 1) {
 							// 最后一个非数字部分可能是显示文本
 							for (let j = parts.length - 1; j > 0; j--) {
@@ -572,10 +573,10 @@ export class ImageScanner {
 						}
 					} else {
 						// 检测无感叹号的 Wiki 格式 [[...]]
-						const wikiNoExclamMatch = fullLine.match(/\[\[([^\]]+)\]\]/);
+						const wikiNoExclamMatch = fullLine.match(ReferenceManager.WIKI_LINK_REGEX);
 						if (wikiNoExclamMatch) {
 							matchType = 'wiki-no-exclam';
-							const parts = wikiNoExclamMatch[1].split('|');
+							const parts = wikiNoExclamMatch[0].replace(/\[|\]/g, '').split('|');
 							if (parts.length > 1) {
 								for (let j = parts.length - 1; j > 0; j--) {
 									const part = parts[j].trim();
@@ -588,17 +589,21 @@ export class ImageScanner {
 							}
 						} else {
 							// 检测 Markdown 格式 ![...](...)
-							const mdMatch = fullLine.match(/!\[([^\]]*)\]\([^)]+\)/);
+							const mdMatch = fullLine.match(ReferenceManager.MARKDOWN_LINK_REGEX);
 							if (mdMatch) {
 								matchType = 'markdown';
-								displayText = mdMatch[1] || '';
+								const m = ReferenceManager.MARKDOWN_LINK_REGEX.exec(fullLine);
+								if (m) {
+									displayText = m[1] || '';
+								}
+								ReferenceManager.MARKDOWN_LINK_REGEX.lastIndex = 0; // 重置
 							} else {
 								// 检测 HTML 格式 <img ...>
-								const htmlMatch = fullLine.match(/<img[^>]+>/i);
+								const htmlMatch = fullLine.match(ReferenceManager.HTML_IMAGE_REGEX);
 								if (htmlMatch) {
 									matchType = 'html';
 									// 尝试提取 alt 属性
-									const altMatch = htmlMatch[0].match(/alt=["']([^"']*)["']/i);
+									const altMatch = htmlMatch[0].match(ReferenceManager.HTML_ALT_REGEX);
 									if (altMatch) {
 										displayText = altMatch[1];
 									}
