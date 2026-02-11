@@ -377,7 +377,7 @@ export class SettingsValidator {
     booleanFields.forEach(field => {
       if (settings[field] !== undefined) {
         if (typeof settings[field] === 'boolean') {
-          validated[field] = settings[field];
+          (validated as any)[field] = settings[field];
         } else {
           errors.push(this.createTypeError(field, 'boolean', typeof settings[field]));
         }
@@ -410,7 +410,7 @@ export class SettingsValidator {
     Object.entries(numericRanges).forEach(([field, range]) => {
       if (settings[field] !== undefined) {
         if (typeof settings[field] === 'number' && settings[field] >= range.min && settings[field] <= range.max) {
-          validated[field] = settings[field];
+          (validated as any)[field] = settings[field];
         } else {
           errors.push(this.createError(
             SettingsIOErrorType.TYPE_MISMATCH,

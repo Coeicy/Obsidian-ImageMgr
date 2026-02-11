@@ -543,7 +543,7 @@ export class NetworkImageScannerAPI implements INetworkImageScannerAPI {
      * 添加 URL 到黑名单
      * @param records - 黑名单记录数组
      */
-    private async addToBlacklist(records: BlacklistRecord[]): Promise<void> {
+    public async addToBlacklist(records: BlacklistRecord[]): Promise<void> {
         // 检查数据库连接是否可用
         if (!this.cacheManager || !this.cacheManager.getDb()) {
             // 避免重复显示相同的数据库连接错误

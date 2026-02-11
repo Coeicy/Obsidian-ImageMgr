@@ -26,7 +26,7 @@ export interface ErrorDetail {
   expectedType?: string;
   actualType?: string;
   value?: any;
-  message: string;
+  message?: string;
 }
 
 /**

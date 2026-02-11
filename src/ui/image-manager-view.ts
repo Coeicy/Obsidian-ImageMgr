@@ -732,12 +732,12 @@ export class ImageManagerView extends ItemView {
 	setupFileWatcher() {
 		// 确保清理旧的监听器（如果存在）
 		if (this.fileEventListener) {
-			this.app.vault.off('create', this.fileEventListener);
-			this.app.vault.off('modify', this.fileEventListener);
-			this.app.vault.off('delete', this.fileEventListener);
+			this.app.vault.off('create', this.fileEventListener as (...data: unknown[]) => unknown);
+			this.app.vault.off('modify', this.fileEventListener as (...data: unknown[]) => unknown);
+			this.app.vault.off('delete', this.fileEventListener as (...data: unknown[]) => unknown);
 		}
 		if (this.renameEventListener) {
-			this.app.vault.off('rename', this.renameEventListener);
+			this.app.vault.off('rename', this.renameEventListener as (...data: unknown[]) => unknown);
 		}
 		
 		// 注册 vault 文件变化事件（create, modify, delete）
@@ -761,11 +761,11 @@ export class ImageManagerView extends ItemView {
 		};
 		
 		// 监听文件创建、修改、删除
-		this.app.vault.on('create', this.fileEventListener);
-		this.app.vault.on('modify', this.fileEventListener);
-		this.app.vault.on('delete', this.fileEventListener);
+		this.app.vault.on('create', this.fileEventListener as (...data: unknown[]) => unknown);
+		this.app.vault.on('modify', this.fileEventListener as (...data: unknown[]) => unknown);
+		this.app.vault.on('delete', this.fileEventListener as (...data: unknown[]) => unknown);
 		// 监听文件重命名/移动（使用单独的监听器，延迟更长）
-		this.app.vault.on('rename', this.renameEventListener);
+		this.app.vault.on('rename', this.renameEventListener as (...data: unknown[]) => unknown);
 	}
 
 	// 更新按钮提示
@@ -919,7 +919,7 @@ export class ImageManagerView extends ItemView {
 			const scanner = new ImageScanner(this.app, this.app.vault, this.plugin);
 
 			// 更新进度显示
-			const updateProgress = (progress: { current: number; total: number; currentFile?: string; phase: 'scanning' | 'hashing' | 'complete' }) => {
+			const updateProgress = (progress: { current: number; total: number; currentFile?: string; phase: string }) => {
 				const percentage = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 				progressBar.style.width = `${percentage}%`;
 				
@@ -3357,7 +3357,8 @@ export class ImageManagerView extends ItemView {
 					
 					// 只检查状态码：< 400 表示链接有效
 					if (response.status >= 400) {
-						return { valid: false, error: `HTTP ${response.status}: ${response.statusText}` };
+						const statusText = (response as any).statusText || '未知错误';
+						return { valid: false, error: `HTTP ${response.status}: ${statusText}` };
 					}
 					
 					// 状态码 < 400，链接有效
@@ -3616,7 +3617,7 @@ export class ImageManagerView extends ItemView {
 			const cached = cachedResults.get(item.url);
 			if (cached && !cached.valid) {
 				// 缓存显示链接无效，直接添加到错误列表
-				const isTimeout = cached.isTimeout || (cached.error && cached.error.includes('ERR_TIMED_OUT'));
+				const isTimeout = (cached as any).isTimeout || (cached.error && cached.error.includes('ERR_TIMED_OUT'));
 				brokenLinks.push({
 					filePath: item.filePath,
 					lineNumber: item.lineNumber,
@@ -3673,7 +3674,7 @@ export class ImageManagerView extends ItemView {
 							});
 							
 							// 只有明确的 DNS 错误才添加到黑名单，超时的情况不添加（可能是网络慢）
-							if (isDnsError) {
+							if (isDnsError && validation.error) {
 								await this.addToBlacklist(url, validation.error);
 							}
 						}
@@ -3736,7 +3737,10 @@ export class ImageManagerView extends ItemView {
 					id: imageId,
 					url: url,
 					reason: 'network_error',
-					errorMessage: errorMessage
+					errorMessage: errorMessage,
+					detectedAt: Date.now(),
+					retryCount: 0,
+					autoRemove: false
 				}]);
 			}
 		} catch (error) {
@@ -4538,13 +4542,13 @@ export class ImageManagerView extends ItemView {
 		
 		// 移除文件监听器
 		if (this.fileEventListener) {
-			this.app.vault.off('create', this.fileEventListener);
-			this.app.vault.off('modify', this.fileEventListener);
-			this.app.vault.off('delete', this.fileEventListener);
+			this.app.vault.off('create', this.fileEventListener as (...data: unknown[]) => unknown);
+			this.app.vault.off('modify', this.fileEventListener as (...data: unknown[]) => unknown);
+			this.app.vault.off('delete', this.fileEventListener as (...data: unknown[]) => unknown);
 			this.fileEventListener = null;
 		}
 		if (this.renameEventListener) {
-			this.app.vault.off('rename', this.renameEventListener);
+			this.app.vault.off('rename', this.renameEventListener as (...data: unknown[]) => unknown);
 			this.renameEventListener = null;
 		}
 		
@@ -4725,7 +4729,7 @@ export class ImageManagerView extends ItemView {
 					await this.deleteSelectedImages(selectedImages);
 				} else {
 					// 没有选中的图片，触发清除按钮功能
-					this.handleClearButtonClick();
+					this.handleClearButtonSingleClick();
 				}
 				return;
 			}
@@ -4833,7 +4837,7 @@ export class ImageManagerView extends ItemView {
 	 * 切换侧边栏显示状态
 	 */
 	private toggleSidebar(): void {
-		const sidebar = this.containerEl.querySelector('.image-manager-sidebar');
+		const sidebar = this.containerEl.querySelector('.image-manager-sidebar') as HTMLElement | null;
 		if (sidebar) {
 			const isVisible = sidebar.style.display !== 'none';
 			sidebar.style.display = isVisible ? 'none' : 'block';
@@ -4848,21 +4852,18 @@ export class ImageManagerView extends ItemView {
 	/**
 	 * 刷新图片列表
 	 */
-	private refreshImages(): void {
-		this.plugin.scanAllImages()
-			.then(() => {
-				this.images = this.plugin.images;
-				this.filterImages();
-				new Notice('🔄 图片列表已刷新');
-			})
-			.catch(async error => {
-				if (this.plugin?.logger) {
-					await this.plugin.logger.error(OperationType.SCAN, '刷新图片列表失败', {
-						error: error instanceof Error ? error : new Error(String(error))
-					});
-				}
-				new Notice('❌ 刷新失败，请检查控制台');
-			});
+	private async refreshImages(): Promise<void> {
+		try {
+			await this.scanImages(true);
+			new Notice('🔄 图片列表已刷新');
+		} catch (error: any) {
+			if (this.plugin?.logger) {
+				await this.plugin.logger.error(OperationType.SCAN, '刷新图片列表失败', {
+					error: error instanceof Error ? error : new Error(String(error))
+				});
+			}
+			new Notice('❌ 刷新失败，请检查控制台');
+		}
 	}
 
 	/**

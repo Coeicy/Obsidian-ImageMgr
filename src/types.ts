@@ -287,9 +287,9 @@ export interface PluginData {
 	/** 视图状态：筛选选项 */
 	viewFilterOptions?: {
 		filterType: 'all' | 'png' | 'jpg' | 'gif' | 'webp' | 'svg' | 'bmp';
-		lockFilter?: 'locked' | 'unlocked';
-		referenceFilter?: 'referenced' | 'unreferenced';
-		locationFilter?: 'local' | 'remote';
+		lockFilter?: 'all' | 'locked' | 'unlocked';
+		referenceFilter?: 'all' | 'referenced' | 'unreferenced';
+		locationFilter?: 'all' | 'local' | 'remote';
 		sizeFilter?: { min?: number; max?: number };
 		nameFilter?: string;
 		folderFilter?: string;

@@ -23,8 +23,8 @@ export class NetworkImageModal extends Modal {
     private uploaderManager: UploaderManager;
     private images: LegacyNetworkImageReference[] = [];
     private selectedImages: Set<number> = new Set(); // index in this.images
-    private listContainer: HTMLElement;
-    private uploadBtnComponent: ButtonComponent;
+    private listContainer!: HTMLElement;
+    private uploadBtnComponent!: ButtonComponent;
 
     constructor(app: App, private plugin: ImageManagementPlugin) {
         super(app);
@@ -401,16 +401,10 @@ export class NetworkImageModal extends Modal {
                 } else {
                     failCount++;
                     if (this.plugin?.logger) {
-                        const error = uploadResult.error;
-                        let errorObj: Error;
-                        if (error instanceof (Error as any)) {
-                            errorObj = error as Error;
-                        } else {
-                            errorObj = new Error(String(error));
-                        }
+                        const errorMsg = uploadResult.error || '未知错误';
                         await this.plugin.logger.error(OperationType.CREATE, `上传失败: ${img.url}`, {
                             imagePath: img.url,
-                            error: errorObj
+                            error: new Error(errorMsg)
                         });
                     }
                 }

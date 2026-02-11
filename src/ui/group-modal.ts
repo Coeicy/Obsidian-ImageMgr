@@ -80,8 +80,8 @@ export class GroupModal extends Modal {
                     .addOption('location', '按位置类型（云端/本地）')
                     .addOption('custom', '自定义名称')
                     .setValue(groupMode)
-                    .onChange(value => {
-                        groupMode = value;
+                    .onChange((value: string) => {
+                        groupMode = value as typeof groupMode;
                         nameInput.settingEl.style.display = groupMode === 'custom' ? '' : 'none';
                     });
             });

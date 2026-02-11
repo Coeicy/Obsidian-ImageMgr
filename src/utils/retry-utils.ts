@@ -75,7 +75,7 @@ export async function retryOperation<T>(
 ): Promise<T> {
     const { maxRetries, initialDelay, maxDelay, backoffMultiplier } = options;
     
-    let lastError: Error;
+    let lastError: Error | undefined;
     let delay = initialDelay;
     let totalRetryTime = 0;
     const startTime = Date.now();
@@ -122,8 +122,11 @@ export async function retryOperation<T>(
     
     // 所有重试都失败，抛出最后一次错误
     const elapsedTime = Date.now() - startTime;
-    console.error(`RetryOperation: 所有重试均失败，总耗时: ${elapsedTime}ms，错误: ${lastError?.message}`);
-    throw lastError!;
+    console.error(`RetryOperation: 所有重试均失败，总耗时: ${elapsedTime}ms，错误: ${lastError?.message || '未知错误'}`);
+    if (lastError) {
+        throw lastError;
+    }
+    throw new Error('RetryOperation: 所有重试均失败');
 }
 
 /**

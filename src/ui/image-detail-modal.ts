@@ -6060,10 +6060,7 @@ export class ImageDetailModal extends Modal {
 			this.imgElement.removeEventListener('wheel', this.wheelHandler);
 		}
 		// 清理图片加载监听器（防止内存泄漏）
-		if (this.imgElement) {
-			this.imgElement.removeEventListener('load', this.onImageLoadBound || (() => {}));
-			this.imgElement.removeEventListener('error', this.onImageErrorBound || (() => {}));
-		}
+		// 注意：onImageLoad 和 onImageError 是局部变量，在各自的作用域中已自动清理
 		if (this.closeSuggestionsHandler) {
 			document.removeEventListener('click', this.closeSuggestionsHandler);
 		}

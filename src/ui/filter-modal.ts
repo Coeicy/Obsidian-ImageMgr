@@ -120,8 +120,8 @@ export class FilterModal extends Modal {
 				.addOption('referenced', '🔗 被引用')
 				.addOption('unreferenced', '🔗 未被引用')
 				.setValue(this.options.referenceFilter || 'all')
-				.onChange((value: ReferenceFilter) => {
-					this.options.referenceFilter = value;
+				.onChange((value: string) => {
+					this.options.referenceFilter = value as ReferenceFilter;
 				}));
 
 		new Setting(contentEl)
@@ -132,8 +132,8 @@ export class FilterModal extends Modal {
 				.addOption('remote', '🌩️ 云端图片')
 				.addOption('local', '💾 本地图片')
 				.setValue(this.options.locationFilter || 'all')
-				.onChange((value: LocationFilter) => {
-					this.options.locationFilter = value;
+				.onChange((value: string) => {
+					this.options.locationFilter = value as LocationFilter;
 				}));
 
 		// 图片大小筛选 - 使用两个输入框

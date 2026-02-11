@@ -1,3 +1,14 @@
+import { App } from 'obsidian';
+
+/**
+ * 扫描错误对象（本地定义）
+ */
+interface ScanError {
+    url: string;
+    file?: string;
+    type: string;
+}
+
 /**
  * 缓存链接数据结构
  * 
@@ -99,7 +110,7 @@ export class LinkCacheManager {
             // 添加新记录
             this.cache[key].push({
                 url: error.url,
-                sourceFile: error.file,
+                sourceFile: error.file || '',
                 errorType: error.type,
                 lastChecked: now,
                 ttl: this.defaultTTL
